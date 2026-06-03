@@ -647,12 +647,14 @@ body.dev-mode #touch-debug {
   }
 
   #hud .hud-time,
-  #hud .hud-area {
+  #hud .hud-area,
+  #hud .hud-multiplayer {
     flex: 1 1 100%;
   }
 
   #hud .hud-time span,
-  #hud .hud-area span {
+  #hud .hud-area span,
+  #hud .hud-multiplayer span {
     overflow: hidden;
     text-overflow: ellipsis;
   }

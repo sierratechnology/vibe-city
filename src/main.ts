@@ -21,7 +21,7 @@ import {
   seedCitizenKnowledge,
   shareKnowledge
 } from "./knowledgeSystem";
-import { PlayerPresence, createPresenceAdapter } from "./multiplayerPresence";
+import { PlayerPresence, PresenceDebugState, createPresenceAdapter } from "./multiplayer/presence";
 import {
   PlayerProfile,
   addContact,
@@ -97,6 +97,7 @@ const ZOOM_LEVELS = [24, 30, 38];
 
 const app = document.querySelector<HTMLDivElement>("#app")!;
 const currentArea = document.querySelector<HTMLSpanElement>("#current-area")!;
+const multiplayerStatusLabel = document.querySelector<HTMLSpanElement>("#multiplayer-status")!;
 const playerNameLabel = document.querySelector<HTMLSpanElement>("#player-name")!;
 const playerWalletLabel = document.querySelector<HTMLSpanElement>("#player-wallet")!;
 const playerReputationLabel = document.querySelector<HTMLSpanElement>("#player-reputation")!;
@@ -179,6 +180,10 @@ declare global {
       businessesOperating: number;
       remotePlayers: number;
       multiplayerStatus: string;
+      multiplayerEnvConfigured: boolean;
+      multiplayerPresenceCount: number;
+      multiplayerLastBroadcastAt: number | null;
+      multiplayerLastPresenceSyncAt: number | null;
       openBusinessesWithoutWorkers: number;
       time: string;
       triangles: number;
@@ -246,7 +251,8 @@ let playerProfile: PlayerProfile = loadPlayerProfile() ?? createDefaultPlayerPro
 if (loadPlayerProfile()) characterModal.hidden = true;
 const presenceAdapter = createPresenceAdapter();
 const remotePlayerRuntimes = new Map<string, RemotePlayerRuntime>();
-let multiplayerStatus = "Multiplayer offline / local mode";
+let multiplayerHudStatus = "Offline / Missing Env";
+let multiplayerDebug: PresenceDebugState | null = null;
 const socialTopics = ["work", "sports", "music", "casino", "books", "food", "nightlife", "gossip", "commute"];
 let worldTime: WorldTimeState = getWorldTime();
 initializeCitizenSimulationForCurrentTime();
@@ -272,6 +278,8 @@ let lastSocialPersistAt = 0;
 let activeJoystickPointerId: number | null = null;
 const citizenTransitionLog: string[] = [];
 let lastPresencePublishAt = 0;
+let lastPresencePosition = new THREE.Vector3();
+let lastPresenceFacing = 0;
 
 updateCameraProjection();
 
@@ -639,35 +647,40 @@ function createRemotePlayerRuntime(presence: PlayerPresence): RemotePlayerRuntim
   label.scale.set(3.3, 1, 1);
   label.renderOrder = 12;
   group.add(body, ring, label);
-  group.position.set(presence.position.x, 0, presence.position.z);
-  group.rotation.y = presence.facingDirection;
+  group.position.set(presence.x, presence.y, presence.z);
+  group.rotation.y = presence.facing;
   scene.add(group);
   return {
     presence,
     group,
-    targetPosition: new THREE.Vector3(presence.position.x, 0, presence.position.z),
-    targetRotation: presence.facingDirection
+    targetPosition: new THREE.Vector3(presence.x, presence.y, presence.z),
+    targetRotation: presence.facing
   };
 }
 
 function updateRemotePlayers(delta: number): void {
   const now = Date.now();
-  if (now - lastPresencePublishAt > 220) {
+  const moved = player.position.distanceToSquared(lastPresencePosition) > 0.01 || Math.abs(player.rotation.y - lastPresenceFacing) > 0.02;
+  const broadcastInterval = moved || playerVelocity.lengthSq() > 0.05 ? 250 : 2000;
+  if (now - lastPresencePublishAt > broadcastInterval) {
     presenceAdapter.publish({
-      playerId: playerProfile.playerId,
       displayName: playerProfile.displayName,
       districtId: DISTRICT_ID,
+      x: player.position.x,
+      y: player.position.y,
+      z: player.position.z,
+      facing: player.rotation.y,
       currentScene: sceneState.activeScene,
-      position: { x: player.position.x, z: player.position.z },
-      facingDirection: player.rotation.y,
-      currentArea: currentArea.textContent ?? DISTRICT_NAME,
-      lastSeen: now
+      currentArea: currentArea.textContent ?? DISTRICT_NAME
     });
+    lastPresencePosition.copy(player.position);
+    lastPresenceFacing = player.rotation.y;
     lastPresencePublishAt = now;
   }
 
   const snapshot = presenceAdapter.getSnapshot(now);
-  multiplayerStatus = snapshot.status;
+  multiplayerHudStatus = snapshot.hudStatus;
+  multiplayerDebug = snapshot.debug;
   const visibleRemoteIds = new Set<string>();
   for (const presence of snapshot.remotePlayers) {
     if (presence.districtId !== DISTRICT_ID) continue;
@@ -678,8 +691,8 @@ function updateRemotePlayers(delta: number): void {
       remotePlayerRuntimes.set(presence.playerId, runtime);
     }
     runtime.presence = presence;
-    runtime.targetPosition.set(presence.position.x, 0, presence.position.z);
-    runtime.targetRotation = presence.facingDirection;
+    runtime.targetPosition.set(presence.x, presence.y, presence.z);
+    runtime.targetRotation = presence.facing;
     runtime.group.visible = presence.currentScene === sceneState.activeScene;
     runtime.group.position.lerp(runtime.targetPosition, 1 - Math.pow(0.001, delta));
     runtime.group.rotation.y += (runtime.targetRotation - runtime.group.rotation.y) * (1 - Math.pow(0.01, delta));
@@ -1761,6 +1774,7 @@ function updateHud(): void {
   playerReputationLabel.textContent = playerProfile.reputationStars.toFixed(1);
   playerInfluenceLabel.textContent = `${Math.round(playerProfile.influence)}`;
   currentArea.textContent = areaLabels[sceneState.activeScene];
+  multiplayerStatusLabel.textContent = multiplayerHudStatus;
   debugState.textContent = `Occlusion ${occlusionEnabled ? "On" : "Off"} / Grid ${gridVisible ? "On" : "Off"} / Assets ${assetDebugVisible ? "On" : "Off"} / Zoom ${zoomLevelIndex + 1} / Seed ${CITY_SEED}`;
   const grid = outsideGroup.getObjectByName("debug-grid");
   if (grid) grid.visible = gridVisible;
@@ -1792,9 +1806,21 @@ function updateOpsPanel(): void {
   const openBusinessesWithoutWorkers = businessEntities.filter(
     (business) => business.operationalStatus !== "Closed" && business.employeesPresentCitizenIds.length === 0 && business.workersEnRouteCitizenIds.length === 0
   );
+  const remotePlayerList = multiplayerDebug?.remotePlayers.length
+    ? multiplayerDebug.remotePlayers.map((presence) => `${presence.displayName} / ${presence.currentScene} / ${presence.currentArea}`).join("<br>")
+    : "None";
   opsSummary.innerHTML = `
     <p>Active District: ${DISTRICT_ID}</p>
-    <p>Multiplayer: ${multiplayerStatus} / Remote Players: ${remotePlayerRuntimes.size}</p>
+    <h2>Multiplayer Debug</h2>
+    <p>Env Configured: ${multiplayerDebug?.envConfigured ? "true" : "false"}</p>
+    <p>Channel Status: ${multiplayerDebug?.channelStatus ?? "unknown"}</p>
+    <p>Local Player ID: ${multiplayerDebug?.localPlayerId ?? "unknown"}</p>
+    <p>Local Display Name: ${multiplayerDebug?.localDisplayName || playerProfile.displayName}</p>
+    <p>Presence Count: ${multiplayerDebug?.presenceCount ?? 1}</p>
+    <p>Remote Players Count: ${multiplayerDebug?.remotePlayersCount ?? remotePlayerRuntimes.size}</p>
+    <p>Last Broadcast: ${multiplayerDebug?.lastBroadcastAt ? new Date(multiplayerDebug.lastBroadcastAt).toLocaleTimeString() : "None"}</p>
+    <p>Last Presence Sync: ${multiplayerDebug?.lastPresenceSyncAt ? new Date(multiplayerDebug.lastPresenceSyncAt).toLocaleTimeString() : "None"}</p>
+    <p>Remote Players: ${remotePlayerList}</p>
     <p>Citizens: ${citizens.length} total / ${visible} visible</p>
     <p>Home: ${home} / Off District: ${offDistrict}</p>
     <p>Working: ${working} / Commuting: ${commuting}</p>
@@ -1948,7 +1974,11 @@ function animate(): void {
     businessesTotal: businessHealth.length,
     businessesOperating: businessHealth.filter((business) => business.operationalStatus === "Operating").length,
     remotePlayers: remotePlayerRuntimes.size,
-    multiplayerStatus,
+    multiplayerStatus: multiplayerHudStatus,
+    multiplayerEnvConfigured: multiplayerDebug?.envConfigured ?? false,
+    multiplayerPresenceCount: multiplayerDebug?.presenceCount ?? 1,
+    multiplayerLastBroadcastAt: multiplayerDebug?.lastBroadcastAt ?? null,
+    multiplayerLastPresenceSyncAt: multiplayerDebug?.lastPresenceSyncAt ?? null,
     openBusinessesWithoutWorkers: businessHealth.filter(
       (business) => business.operationalStatus !== "Closed" && business.employeesPresentCitizenIds.length === 0 && business.workersEnRouteCitizenIds.length === 0
     ).length,
@@ -1978,6 +2008,10 @@ function animate(): void {
   app.dataset.businessesOperating = `${window.__vibeCity3DHealth.businessesOperating}`;
   app.dataset.remotePlayers = `${window.__vibeCity3DHealth.remotePlayers}`;
   app.dataset.multiplayerStatus = window.__vibeCity3DHealth.multiplayerStatus;
+  app.dataset.multiplayerEnvConfigured = `${window.__vibeCity3DHealth.multiplayerEnvConfigured}`;
+  app.dataset.multiplayerPresenceCount = `${window.__vibeCity3DHealth.multiplayerPresenceCount}`;
+  app.dataset.multiplayerLastBroadcastAt = `${window.__vibeCity3DHealth.multiplayerLastBroadcastAt ?? ""}`;
+  app.dataset.multiplayerLastPresenceSyncAt = `${window.__vibeCity3DHealth.multiplayerLastPresenceSyncAt ?? ""}`;
   app.dataset.openBusinessesWithoutWorkers = `${window.__vibeCity3DHealth.openBusinessesWithoutWorkers}`;
   cameraModeLabel.textContent = "Isometric";
 }
