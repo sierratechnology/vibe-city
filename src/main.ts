@@ -138,6 +138,12 @@ const characterNameInput = document.querySelector<HTMLInputElement>("#character-
 const resetProfileButton = document.querySelector<HTMLButtonElement>("#reset-profile")!;
 const resetCitizensButton = document.querySelector<HTMLButtonElement>("#reset-citizens")!;
 const resetWorldTimeButton = document.querySelector<HTMLButtonElement>("#reset-world-time")!;
+const touchControls = document.querySelector<HTMLElement>("#touch-controls")!;
+const touchJoystick = document.querySelector<HTMLElement>("#touch-joystick")!;
+const touchJoystickKnob = document.querySelector<HTMLElement>("#touch-joystick-knob")!;
+const touchActionButton = document.querySelector<HTMLButtonElement>("#touch-action")!;
+const touchPhoneButton = document.querySelector<HTMLButtonElement>("#touch-phone")!;
+const touchDebugButton = document.querySelector<HTMLButtonElement>("#touch-debug")!;
 
 declare global {
   interface Window {
@@ -219,6 +225,7 @@ const citizenRuntimes: CitizenRuntime[] = [];
 const keys = new Set<string>();
 const playerVelocity = new THREE.Vector3();
 const cameraLookTarget = new THREE.Vector3();
+const touchMoveInput = new THREE.Vector2();
 const raycaster = new THREE.Raycaster();
 const citizens = createCitizens();
 seedCitizenKnowledge(citizens);
@@ -245,6 +252,7 @@ let selectedBusinessId: string | null = null;
 let lastFrameAt = performance.now();
 let lastSocialCheckAt = 0;
 let lastSocialPersistAt = 0;
+let activeJoystickPointerId: number | null = null;
 
 updateCameraProjection();
 
@@ -830,6 +838,39 @@ function showToast(message: string): void {
   }, 2600);
 }
 
+function shouldShowTouchControls(): boolean {
+  return window.matchMedia("(pointer: coarse)").matches || window.matchMedia("(hover: none)").matches || window.innerWidth <= 1024;
+}
+
+function updateTouchControlVisibility(): void {
+  touchControls.classList.toggle("visible", shouldShowTouchControls());
+}
+
+function updateJoystickFromPointer(event: PointerEvent): void {
+  const rect = touchJoystick.getBoundingClientRect();
+  const centerX = rect.left + rect.width / 2;
+  const centerY = rect.top + rect.height / 2;
+  const radius = rect.width / 2;
+  const dx = event.clientX - centerX;
+  const dy = event.clientY - centerY;
+  const distance = Math.hypot(dx, dy);
+  const clampedDistance = Math.min(distance, radius);
+  const angle = Math.atan2(dy, dx);
+  const knobX = Math.cos(angle) * clampedDistance;
+  const knobY = Math.sin(angle) * clampedDistance;
+  const deadZone = 0.14;
+  const strength = clampedDistance / radius;
+  touchJoystickKnob.style.transform = `translate(calc(-50% + ${knobX}px), calc(-50% + ${knobY}px))`;
+  touchMoveInput.x = strength > deadZone ? knobX / radius : 0;
+  touchMoveInput.y = strength > deadZone ? -knobY / radius : 0;
+}
+
+function resetJoystick(): void {
+  activeJoystickPointerId = null;
+  touchMoveInput.set(0, 0);
+  touchJoystickKnob.style.transform = "translate(-50%, -50%)";
+}
+
 function renderHomeProfile(): void {
   homeTitle.textContent = "Your Apartment";
   homeContent.innerHTML = `
@@ -1116,6 +1157,8 @@ function movePlayer(delta: number): void {
   if (keys.has("keys") || keys.has("arrowdown")) input.z -= 1;
   if (keys.has("keya") || keys.has("arrowleft")) input.x -= 1;
   if (keys.has("keyd") || keys.has("arrowright")) input.x += 1;
+  input.x += touchMoveInput.x;
+  input.z += touchMoveInput.y;
 
   if (input.lengthSq() > 0) {
     const desiredDirection = ISO_FORWARD
@@ -1403,6 +1446,31 @@ resetCitizensButton.addEventListener("click", () => {
 resetWorldTimeButton.addEventListener("click", () => {
   resetWorldTimePersistence();
   window.location.reload();
+});
+
+touchJoystick.addEventListener("pointerdown", (event) => {
+  activeJoystickPointerId = event.pointerId;
+  touchJoystick.setPointerCapture(event.pointerId);
+  updateJoystickFromPointer(event);
+});
+
+touchJoystick.addEventListener("pointermove", (event) => {
+  if (event.pointerId !== activeJoystickPointerId) return;
+  updateJoystickFromPointer(event);
+});
+
+touchJoystick.addEventListener("pointerup", (event) => {
+  if (event.pointerId === activeJoystickPointerId) resetJoystick();
+});
+
+touchJoystick.addEventListener("pointercancel", (event) => {
+  if (event.pointerId === activeJoystickPointerId) resetJoystick();
+});
+
+touchActionButton.addEventListener("click", () => handleInteractionKey());
+touchPhoneButton.addEventListener("click", () => openPhone("contacts"));
+touchDebugButton.addEventListener("click", () => {
+  assetDebugVisible = !assetDebugVisible;
 });
 
 async function switchToScene(nextScene: ActiveSceneName, playerPosition: { x: number; z: number }): Promise<void> {
@@ -1733,5 +1801,8 @@ document.addEventListener("keyup", handleKeyUp);
 
 window.addEventListener("resize", () => {
   updateCameraProjection();
+  updateTouchControlVisibility();
   renderer.setSize(window.innerWidth, window.innerHeight);
 });
+
+updateTouchControlVisibility();
