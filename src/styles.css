@@ -8,7 +8,7 @@ body {
   color: #f5f1e8;
   font-family:
     Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  touch-action: none;
+  touch-action: manipulation;
   -webkit-tap-highlight-color: transparent;
 }
 
@@ -117,6 +117,11 @@ canvas {
 #hud p {
   margin: 6px 0;
   font-size: 15px;
+}
+
+.hud-chip span,
+.hud-extra span {
+  font-weight: 800;
 }
 
 #journal-open {
@@ -539,8 +544,9 @@ canvas {
   position: fixed;
   right: max(18px, env(safe-area-inset-right));
   bottom: max(20px, env(safe-area-inset-bottom));
-  display: grid;
-  grid-template-columns: 84px 84px;
+  display: flex;
+  width: 90px;
+  flex-direction: column;
   gap: 10px;
   pointer-events: auto;
 }
@@ -559,7 +565,6 @@ canvas {
 }
 
 #touch-action {
-  grid-column: 1 / span 2;
   min-height: 66px;
   background: #80d8ff;
 }
@@ -597,29 +602,69 @@ body.dev-mode #touch-debug {
 
 @media (max-width: 1024px), (pointer: coarse) {
   #hud {
-    top: max(10px, env(safe-area-inset-top));
-    left: max(10px, env(safe-area-inset-left));
-    width: min(300px, calc(100vw - 20px));
+    top: calc(max(8px, env(safe-area-inset-top)) + 2px);
+    left: max(8px, env(safe-area-inset-left));
+    display: flex;
+    width: min(380px, calc(100vw - 16px - env(safe-area-inset-left) - env(safe-area-inset-right)));
     min-width: 0;
-    max-height: 38vh;
-    overflow: auto;
-    padding: 10px 12px;
+    max-height: none;
+    flex-wrap: wrap;
+    gap: 6px;
+    overflow: visible;
+    padding: 8px;
+    border-radius: 12px;
+    background: rgba(15, 18, 24, 0.48);
   }
 
   #hud h1 {
-    margin-bottom: 7px;
-    font-size: 20px;
+    flex: 0 0 100%;
+    margin: 0 0 2px;
+    font-size: clamp(15px, 4vw, 18px);
+    line-height: 1.1;
   }
 
   #hud p {
-    margin: 4px 0;
-    font-size: 13px;
-    line-height: 1.25;
+    margin: 0;
+    font-size: clamp(11px, 3.1vw, 13px);
+    line-height: 1.15;
+  }
+
+  #hud .hud-extra {
+    display: none;
+  }
+
+  #hud .hud-chip {
+    display: inline-flex;
+    align-items: center;
+    max-width: 100%;
+    min-height: 28px;
+    padding: 4px 8px;
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    border-radius: 999px;
+    background: rgba(15, 18, 24, 0.7);
+    box-sizing: border-box;
+    white-space: nowrap;
+  }
+
+  #hud .hud-time,
+  #hud .hud-area {
+    flex: 1 1 100%;
+  }
+
+  #hud .hud-time span,
+  #hud .hud-area span {
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   #journal-open {
+    width: auto;
+    min-width: 84px;
     min-height: 44px;
-    font-size: 15px;
+    margin: 0;
+    padding: 0 12px;
+    border-radius: 999px;
+    font-size: clamp(13px, 3.4vw, 15px);
   }
 
   #ops-panel {
@@ -630,15 +675,40 @@ body.dev-mode #touch-debug {
   #knowledge-journal,
   #home-panel,
   #interaction-popup {
-    width: calc(100vw - 24px);
-    max-height: calc(100vh - 28px);
+    box-sizing: border-box;
     padding: 14px;
+    border-radius: 12px;
+    background: rgba(18, 22, 29, 0.88);
+    backdrop-filter: blur(12px);
   }
 
   #phone-panel {
-    left: 12px;
-    right: 12px;
+    right: auto;
+    left: 50%;
+    bottom: max(14px, env(safe-area-inset-bottom));
+    width: min(88vw, 430px);
+    max-height: min(70vh, 640px);
+    transform: translateX(-50%);
+  }
+
+  #knowledge-journal,
+  #home-panel {
+    top: auto;
+    left: 50%;
+    bottom: max(14px, env(safe-area-inset-bottom));
+    width: min(88vw, 500px);
+    max-height: min(70vh, 620px);
+    transform: translateX(-50%);
+  }
+
+  #interaction-popup {
+    right: max(12px, env(safe-area-inset-right));
+    left: max(12px, env(safe-area-inset-left));
     bottom: max(12px, env(safe-area-inset-bottom));
+    width: auto;
+    max-height: 45vh;
+    overflow: auto;
+    transform: none;
   }
 
   #phone-tabs,
@@ -654,13 +724,13 @@ body.dev-mode #touch-debug {
   #journal-close,
   #phone-close {
     min-height: 44px;
-    font-size: 15px;
+    font-size: clamp(13px, 3.4vw, 15px);
   }
 
   #action-prompt {
-    bottom: 164px;
+    bottom: calc(146px + env(safe-area-inset-bottom));
     max-width: calc(100vw - 32px);
-    font-size: 15px;
+    font-size: clamp(13px, 3.4vw, 15px);
   }
 
   #dev-tools {
@@ -670,8 +740,7 @@ body.dev-mode #touch-debug {
 
 @media (max-width: 520px) {
   #hud {
-    width: min(245px, calc(100vw - 20px));
-    max-height: 34vh;
+    width: calc(100vw - 16px - env(safe-area-inset-left) - env(safe-area-inset-right));
   }
 
   #touch-joystick {
@@ -685,7 +754,10 @@ body.dev-mode #touch-debug {
   }
 
   #touch-actions {
-    grid-template-columns: 76px 76px;
+    right: max(14px, env(safe-area-inset-right));
+    bottom: max(18px, env(safe-area-inset-bottom));
+    width: 78px;
+    gap: 8px;
   }
 
   #touch-actions button {

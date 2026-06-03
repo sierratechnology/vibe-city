@@ -10,16 +10,16 @@
     <div id="app"></div>
     <section id="hud" aria-label="Vibe City status">
       <h1>Vibe City</h1>
-      <p><span id="time-display">World Time: Day 1 - Monday - 8:45 AM</span></p>
-      <p>Player: <span id="player-name">Player</span></p>
-      <p>Wallet: $<span id="player-wallet">2000</span></p>
-      <p>Reputation: <span id="player-reputation">0.0</span></p>
-      <p>Influence: <span id="player-influence">0</span></p>
-      <p>Current Area: <span id="current-area">Outside</span></p>
-      <p>Camera: <span id="camera-mode">Isometric</span></p>
-      <p>Controls: WASD / Arrow Keys</p>
-      <p>Time Debug: T +1 hour / Y next day</p>
-      <p>Debug: <span id="debug-state">Occlusion On / Grid Off / Assets Off / Zoom 2</span></p>
+      <p class="hud-chip hud-time"><span id="time-display">World Time: Day 1 - Monday - 8:45 AM</span></p>
+      <p class="hud-chip hud-player">Player: <span id="player-name">Player</span></p>
+      <p class="hud-chip hud-wallet">Wallet: $<span id="player-wallet">2000</span></p>
+      <p class="hud-extra">Reputation: <span id="player-reputation">0.0</span></p>
+      <p class="hud-extra">Influence: <span id="player-influence">0</span></p>
+      <p class="hud-chip hud-area">Current Area: <span id="current-area">Outside</span></p>
+      <p class="hud-extra">Camera: <span id="camera-mode">Isometric</span></p>
+      <p class="hud-extra">Controls: WASD / Arrow Keys</p>
+      <p class="hud-extra">Time Debug: T +1 hour / Y next day</p>
+      <p class="hud-extra">Debug: <span id="debug-state">Occlusion On / Grid Off / Assets Off / Zoom 2</span></p>
       <button id="journal-open" type="button">Phone (P)</button>
     </section>
     <aside id="ops-panel" aria-label="City operations debug">

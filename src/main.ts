@@ -757,6 +757,7 @@ function openJournal(tab: typeof activeJournalTab = activeJournalTab): void {
   activeJournalTab = tab;
   renderJournal();
   journalModal.hidden = false;
+  updateTouchControlVisibility();
 }
 
 function renderPhone(): void {
@@ -827,6 +828,7 @@ function openPhone(appName: typeof activePhoneApp = activePhoneApp): void {
   activePhoneApp = appName;
   renderPhone();
   phonePanel.hidden = false;
+  updateTouchControlVisibility();
 }
 
 function showToast(message: string): void {
@@ -843,7 +845,15 @@ function shouldShowTouchControls(): boolean {
 }
 
 function updateTouchControlVisibility(): void {
-  touchControls.classList.toggle("visible", shouldShowTouchControls());
+  const focusedElement = document.activeElement;
+  const typing =
+    focusedElement instanceof HTMLInputElement ||
+    focusedElement instanceof HTMLTextAreaElement ||
+    focusedElement instanceof HTMLSelectElement;
+  const blockingPanelOpen = !phonePanel.hidden || !journalModal.hidden || !homePanel.hidden || !popup.hidden || !characterModal.hidden;
+  const shouldShow = shouldShowTouchControls() && !typing && !blockingPanelOpen;
+  touchControls.classList.toggle("visible", shouldShow);
+  if (!shouldShow) resetJoystick();
 }
 
 function updateJoystickFromPointer(event: PointerEvent): void {
@@ -894,6 +904,7 @@ async function restAtHome(): Promise<void> {
 
 function closeHomePanel(): void {
   homePanel.hidden = true;
+  updateTouchControlVisibility();
 }
 
 function moveCitizenToward(citizen: Citizen, target: { x: number; z: number }, delta: number): boolean {
@@ -1369,12 +1380,14 @@ function openInteraction(citizen: Citizen): void {
   }
   popup.hidden = false;
   actionPrompt.hidden = true;
+  updateTouchControlVisibility();
 }
 
 function closeInteraction(): void {
   popup.hidden = true;
   activeInteractionCitizen = null;
   activeSharedKnowledge = null;
+  updateTouchControlVisibility();
 }
 
 popupClose.addEventListener("click", closeInteraction);
@@ -1393,6 +1406,7 @@ rememberKnowledgeButton.addEventListener("click", () => {
 journalButton.addEventListener("click", () => openPhone("contacts"));
 phoneClose.addEventListener("click", () => {
   phonePanel.hidden = true;
+  updateTouchControlVisibility();
 });
 for (const tab of phoneTabs) {
   tab.addEventListener("click", () => {
@@ -1402,6 +1416,7 @@ for (const tab of phoneTabs) {
 }
 journalClose.addEventListener("click", () => {
   journalModal.hidden = true;
+  updateTouchControlVisibility();
 });
 for (const tab of journalTabs) {
   tab.addEventListener("click", () => {
@@ -1427,6 +1442,7 @@ characterForm.addEventListener("submit", (event) => {
   characterModal.hidden = true;
   updateHud();
   renderJournal();
+  updateTouchControlVisibility();
 });
 
 resetProfileButton.addEventListener("click", () => {
@@ -1436,6 +1452,7 @@ resetProfileButton.addEventListener("click", () => {
   characterModal.hidden = false;
   renderJournal();
   updateHud();
+  updateTouchControlVisibility();
 });
 
 resetCitizensButton.addEventListener("click", () => {
@@ -1798,6 +1815,10 @@ document.addEventListener("keydown", (event) => {
   if (event.target === document.body) handleKeyDown(event);
 });
 document.addEventListener("keyup", handleKeyUp);
+document.addEventListener("focusin", updateTouchControlVisibility);
+document.addEventListener("focusout", () => {
+  window.setTimeout(updateTouchControlVisibility, 0);
+});
 
 window.addEventListener("resize", () => {
   updateCameraProjection();
