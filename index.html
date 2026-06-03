@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Vibe City is an isometric 3D district simulation prototype built with Vite, TypeScript, and Three.js." />
+    <title>Vibe City</title>
+  </head>
+  <body>
+    <div id="app"></div>
+    <section id="hud" aria-label="Vibe City status">
+      <h1>Vibe City</h1>
+      <p><span id="time-display">World Time: Day 1 - Monday - 8:45 AM</span></p>
+      <p>Player: <span id="player-name">Player</span></p>
+      <p>Wallet: $<span id="player-wallet">2000</span></p>
+      <p>Reputation: <span id="player-reputation">0.0</span></p>
+      <p>Influence: <span id="player-influence">0</span></p>
+      <p>Current Area: <span id="current-area">Outside</span></p>
+      <p>Camera: <span id="camera-mode">Isometric</span></p>
+      <p>Controls: WASD / Arrow Keys</p>
+      <p>Time Debug: T +1 hour / Y next day</p>
+      <p>Debug: <span id="debug-state">Occlusion On / Grid Off / Assets Off / Zoom 2</span></p>
+      <button id="journal-open" type="button">Phone (P)</button>
+    </section>
+    <aside id="ops-panel" aria-label="City operations debug">
+      <h1>City Operations</h1>
+      <div id="ops-summary"></div>
+      <div id="citizen-details"></div>
+    </aside>
+    <div id="action-prompt" hidden>[E] Interact</div>
+    <div id="fade-overlay"></div>
+    <section id="interaction-popup" hidden aria-label="NPC interaction">
+      <button id="interaction-close" type="button" aria-label="Close">X</button>
+      <h2 id="interaction-name">NPC Name</h2>
+      <p id="interaction-role">Role</p>
+      <p id="interaction-mood">Mood</p>
+      <p id="interaction-state">State</p>
+      <p id="interaction-wallet">Wallet</p>
+      <p id="interaction-relationship">Relationship</p>
+      <p id="interaction-known">Known Citizens</p>
+      <p id="interaction-late">Late: No</p>
+      <p id="interaction-greeting">Hey.</p>
+      <p id="interaction-knowledge" hidden></p>
+      <button id="interaction-remember" type="button" hidden>Remember</button>
+      <button id="interaction-leave" type="button">Leave</button>
+    </section>
+    <section id="knowledge-journal" hidden aria-label="Knowledge Journal">
+      <button id="journal-close" type="button" aria-label="Close">X</button>
+      <h2>Knowledge Journal</h2>
+      <div id="journal-tabs" role="tablist">
+        <button type="button" data-journal-tab="contacts">Contacts</button>
+        <button type="button" data-journal-tab="citizen">People</button>
+        <button type="button" data-journal-tab="place">Places</button>
+        <button type="button" data-journal-tab="business">Businesses</button>
+        <button type="button" data-journal-tab="rumor">Rumors</button>
+      </div>
+      <div id="journal-list"></div>
+    </section>
+    <section id="phone-panel" hidden aria-label="Player phone">
+      <button id="phone-close" type="button" aria-label="Close">X</button>
+      <h2>Phone</h2>
+      <nav id="phone-tabs" aria-label="Phone apps">
+        <button type="button" data-phone-app="contacts">Contacts</button>
+        <button type="button" data-phone-app="messages">Messages</button>
+        <button type="button" data-phone-app="knowledge">Knowledge</button>
+        <button type="button" data-phone-app="profile">Profile</button>
+        <button type="button" data-phone-app="map">Map</button>
+        <button type="button" data-phone-app="debug">Debug</button>
+      </nav>
+      <div id="phone-content"></div>
+    </section>
+    <section id="home-panel" hidden aria-label="Apartment profile panel">
+      <button id="home-close" type="button" aria-label="Close">X</button>
+      <h2 id="home-title">Your Apartment</h2>
+      <div id="home-content"></div>
+      <div id="home-actions">
+        <button id="home-open-contacts" type="button">Open Contacts</button>
+        <button id="home-open-journal" type="button">Open Knowledge Journal</button>
+        <button id="home-close-secondary" type="button">Close</button>
+      </div>
+    </section>
+    <div id="toast-message" hidden></div>
+    <section id="character-modal" aria-label="Create Character">
+      <form id="character-form">
+        <h2>Create Character</h2>
+        <label for="character-name">Display Name</label>
+        <input id="character-name" name="displayName" type="text" value="Player" autocomplete="off" />
+        <button type="submit">Start Season</button>
+      </form>
+    </section>
+    <section id="dev-tools" aria-label="Dev reset tools">
+      <h2>DEV ONLY</h2>
+      <button id="reset-profile" type="button">Reset Player Profile</button>
+      <button id="reset-citizens" type="button">Reset Citizen Persistence</button>
+      <button id="reset-world-time" type="button">Reset World Time</button>
+    </section>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
