@@ -1,7 +1,18 @@
 import { DAY_NAMES, dayIndexForName } from "./worldTime";
 
 export type CitizenMood = "friendly" | "neutral" | "rushed" | "tired" | "annoyed" | "distracted" | "lonely" | "stressed";
-export type CitizenState = "home" | "off_district" | "walking_to_work" | "working" | "on_break" | "walking_home" | "walking_to_destination" | "socializing" | "idle";
+export type CitizenState =
+  | "home"
+  | "off_district"
+  | "walking_to_work"
+  | "walking_to_workstation"
+  | "working"
+  | "on_break"
+  | "leaving_building"
+  | "walking_home"
+  | "walking_to_destination"
+  | "socializing"
+  | "idle";
 export type CitizenScene = "outside" | "apartment" | "barA" | "barB" | "sportsBar" | "casino" | "restaurant" | "bookShop" | "musicVenue" | "parkingGarage" | "none";
 export type RelationshipLabel = "close friend" | "friend" | "friendly" | "neutral" | "tense" | "disliked" | "enemy";
 export type CitizenInterest =
@@ -91,6 +102,7 @@ export type Citizen = {
   position: { x: number; z: number };
   homePosition: { x: number; z: number };
   offDistrictEntryPortalId: string;
+  routeWaypoints: Array<{ x: number; z: number }>;
   wasLateToday: boolean;
   delayMinutes: number;
   activeShiftKey: string | null;
@@ -198,6 +210,7 @@ function citizen(
     position: { ...homePosition },
     homePosition,
     offDistrictEntryPortalId: "parking-garage-portal",
+    routeWaypoints: [],
     wasLateToday: false,
     delayMinutes: 0,
     activeShiftKey: null,
@@ -627,20 +640,37 @@ function createDistrictCitizens(): Citizen[] {
   addRoster("apartment-manager", "Property Manager", 1, "apartment-operations", ["apartment-property-manager"], 22, minutes(9), minutes(17), ["socializing"]);
   addRoster("apartment-maintenance", "Apartment Maintenance", 1, "apartment-operations", ["apartment-maintenance"], 18, minutes(8), minutes(16), ["quiet places"]);
   addRoster("apartment-security", "Front Desk Security", 1, "apartment-operations", ["apartment-front-desk"], 18, minutes(16), minutes(0), ["socializing"]);
+  addRoster("apartment-manager-evening", "Property Manager", 1, "apartment-operations", ["apartment-property-manager"], 22, minutes(17), minutes(1), ["socializing"]);
+  addRoster("apartment-manager-overnight", "Property Manager", 1, "apartment-operations", ["apartment-property-manager"], 22, minutes(1), minutes(9), ["quiet places"]);
+  addRoster("apartment-maintenance-evening", "Apartment Maintenance", 1, "apartment-operations", ["apartment-maintenance"], 18, minutes(16), minutes(0), ["quiet places"]);
+  addRoster("apartment-maintenance-overnight", "Apartment Maintenance", 1, "apartment-operations", ["apartment-maintenance"], 18, minutes(0), minutes(8), ["quiet places"]);
+  addRoster("apartment-security-overnight", "Front Desk Security", 1, "apartment-operations", ["apartment-front-desk"], 18, minutes(0), minutes(8), ["socializing"]);
 
   addRoster("coffee-manager", "Coffee Shop Manager", 1, "coffee-shop-business", ["coffee-manager"], 18, minutes(7), minutes(15), ["food", "socializing"]);
   addRoster("coffee-barista", "Barista", 4, "coffee-shop-business", ["coffee-barista"], 14, minutes(7), minutes(17), ["food", "socializing"]);
   addRoster("convenience-manager", "Convenience Store Manager", 1, "convenience-store-business", ["convenience-manager"], 18, minutes(8), minutes(16), ["socializing"]);
+  addRoster("convenience-manager-evening", "Convenience Store Manager", 1, "convenience-store-business", ["convenience-manager"], 18, minutes(16), minutes(0), ["socializing"]);
+  addRoster("convenience-manager-overnight", "Convenience Store Manager", 1, "convenience-store-business", ["convenience-manager"], 18, minutes(0), minutes(8), ["quiet places"]);
   addRoster("convenience-clerk", "Convenience Store Clerk", 4, "convenience-store-business", ["convenience-clerk"], 14, minutes(8), minutes(20), ["socializing"]);
+  addRoster("convenience-clerk-evening", "Convenience Store Clerk", 4, "convenience-store-business", ["convenience-clerk"], 14, minutes(16), minutes(0), ["socializing"]);
+  addRoster("convenience-clerk-overnight", "Convenience Store Clerk", 4, "convenience-store-business", ["convenience-clerk"], 14, minutes(0), minutes(8), ["quiet places"]);
   addRoster("barber-manager", "Barber Shop Owner", 1, "barber-shop-business", ["barber-manager"], 20, minutes(9), minutes(17), ["socializing"]);
   addRoster("barber", "Barber", 3, "barber-shop-business", ["barber-chair"], 18, minutes(9), minutes(19), ["socializing"]);
   addRoster("bank-manager", "Bank Manager", 1, "bank-business", ["bank-manager"], 24, minutes(9), minutes(17), ["quiet places"]);
   addRoster("bank-teller", "Bank Teller", 3, "bank-business", ["bank-teller"], 17, minutes(9), minutes(17), ["quiet places"]);
   addRoster("bank-security", "Bank Security", 1, "bank-business", ["bank-security"], 18, minutes(9), minutes(17), ["quiet places"]);
   addRoster("hotel-manager", "Hotel Manager", 1, "small-hotel-business", ["hotel-manager"], 22, minutes(8), minutes(16), ["socializing"]);
+  addRoster("hotel-manager-evening", "Hotel Manager", 1, "small-hotel-business", ["hotel-manager"], 22, minutes(16), minutes(0), ["socializing"]);
+  addRoster("hotel-manager-overnight", "Hotel Manager", 1, "small-hotel-business", ["hotel-manager"], 22, minutes(0), minutes(8), ["quiet places"]);
   addRoster("hotel-front-desk", "Hotel Front Desk Clerk", 3, "small-hotel-business", ["hotel-front-desk"], 16, minutes(8), minutes(20), ["socializing"]);
+  addRoster("hotel-front-desk-evening", "Hotel Front Desk Clerk", 3, "small-hotel-business", ["hotel-front-desk"], 16, minutes(16), minutes(0), ["socializing"]);
+  addRoster("hotel-front-desk-overnight", "Hotel Front Desk Clerk", 3, "small-hotel-business", ["hotel-front-desk"], 16, minutes(0), minutes(8), ["quiet places"]);
   addRoster("hotel-housekeeping", "Housekeeping", 2, "small-hotel-business", ["hotel-housekeeping"], 15, minutes(9), minutes(17), ["quiet places"]);
+  addRoster("hotel-housekeeping-evening", "Housekeeping", 2, "small-hotel-business", ["hotel-housekeeping"], 15, minutes(17), minutes(1), ["quiet places"]);
+  addRoster("hotel-housekeeping-overnight", "Housekeeping", 2, "small-hotel-business", ["hotel-housekeeping"], 15, minutes(1), minutes(9), ["quiet places"]);
   addRoster("hotel-maintenance", "Hotel Maintenance", 1, "small-hotel-business", ["hotel-maintenance"], 18, minutes(8), minutes(16), ["quiet places"]);
+  addRoster("hotel-maintenance-evening", "Hotel Maintenance", 1, "small-hotel-business", ["hotel-maintenance"], 18, minutes(16), minutes(0), ["quiet places"]);
+  addRoster("hotel-maintenance-overnight", "Hotel Maintenance", 1, "small-hotel-business", ["hotel-maintenance"], 18, minutes(0), minutes(8), ["quiet places"]);
 
   const interestPlans: Array<{ interests: CitizenInterest[]; businessId: string; station: string; start: number; end: number; daysList: number[]; label: string }> = [
     { interests: ["sports", "food"], businessId: "sports-bar-business", station: "sports-bar-watch-area", start: minutes(19), end: minutes(22), daysList: days("Monday", "Thursday", "Sunday"), label: "Watch Game" },

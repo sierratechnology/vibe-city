@@ -4,6 +4,7 @@ import { BusinessEntity, deriveBusinessEntities } from "./businessSystem";
 import { Citizen, adjustRelationship, createCitizens, persistCitizenSocial } from "./citizenData";
 import {
   ActiveShiftWindow,
+  enterWorkPortal,
   getActiveShift,
   getUpcomingShift,
   getShiftByKey,
@@ -20,6 +21,7 @@ import {
   seedCitizenKnowledge,
   shareKnowledge
 } from "./knowledgeSystem";
+import { PlayerPresence, createPresenceAdapter } from "./multiplayerPresence";
 import {
   PlayerProfile,
   addContact,
@@ -56,6 +58,13 @@ type CitizenRuntime = {
   speech: THREE.Sprite;
 };
 
+type RemotePlayerRuntime = {
+  presence: PlayerPresence;
+  group: THREE.Group;
+  targetPosition: THREE.Vector3;
+  targetRotation: number;
+};
+
 type DoorAction =
   | "enter_bar_a"
   | "leave_bar_a"
@@ -80,6 +89,7 @@ type HomeAction = "rest" | "profile" | "customize";
 const PLAYER_RADIUS = 0.55;
 const PLAYER_SPEED = 8.2;
 const NPC_WALK_SPEED = 5.4;
+const DOOR_APPROACH_DISTANCE = 2.35;
 const ISO_CAMERA_OFFSET = new THREE.Vector3(24, 24, 24);
 const ISO_FORWARD = new THREE.Vector3(0, 0, -1).normalize();
 const ISO_RIGHT = new THREE.Vector3(1, 0, 0).normalize();
@@ -167,6 +177,9 @@ declare global {
       socialInteractions: number;
       businessesTotal: number;
       businessesOperating: number;
+      remotePlayers: number;
+      multiplayerStatus: string;
+      openBusinessesWithoutWorkers: number;
       time: string;
       triangles: number;
     };
@@ -231,8 +244,12 @@ const citizens = createCitizens();
 seedCitizenKnowledge(citizens);
 let playerProfile: PlayerProfile = loadPlayerProfile() ?? createDefaultPlayerProfile();
 if (loadPlayerProfile()) characterModal.hidden = true;
+const presenceAdapter = createPresenceAdapter();
+const remotePlayerRuntimes = new Map<string, RemotePlayerRuntime>();
+let multiplayerStatus = "Multiplayer offline / local mode";
 const socialTopics = ["work", "sports", "music", "casino", "books", "food", "nightlife", "gossip", "commute"];
 let worldTime: WorldTimeState = getWorldTime();
+initializeCitizenSimulationForCurrentTime();
 let occlusionEnabled = true;
 let gridVisible = false;
 let zoomLevelIndex = 1;
@@ -253,6 +270,8 @@ let lastFrameAt = performance.now();
 let lastSocialCheckAt = 0;
 let lastSocialPersistAt = 0;
 let activeJoystickPointerId: number | null = null;
+const citizenTransitionLog: string[] = [];
+let lastPresencePublishAt = 0;
 
 updateCameraProjection();
 
@@ -600,6 +619,79 @@ for (const [index, citizen] of citizens.entries()) {
   citizenRuntimes.push(createCitizenRuntime(citizen, index));
 }
 
+function createRemotePlayerRuntime(presence: PlayerPresence): RemotePlayerRuntime {
+  const group = new THREE.Group();
+  const body = new THREE.Mesh(
+    new THREE.CapsuleGeometry(0.42, 0.95, 7, 14),
+    new THREE.MeshStandardMaterial({ color: 0x9c7cff, roughness: 0.55 })
+  );
+  body.position.y = 1.08;
+  body.castShadow = true;
+  const ring = new THREE.Mesh(
+    new THREE.RingGeometry(0.62, 0.84, 40),
+    new THREE.MeshBasicMaterial({ color: 0xd2c5ff, transparent: true, opacity: 0.62, depthTest: false })
+  );
+  ring.rotation.x = -Math.PI / 2;
+  ring.position.y = 0.055;
+  ring.renderOrder = 9;
+  const label = createLabelSprite(presence.displayName || "Player", 384, 96, 30);
+  label.position.y = 2.85;
+  label.scale.set(3.3, 1, 1);
+  label.renderOrder = 12;
+  group.add(body, ring, label);
+  group.position.set(presence.position.x, 0, presence.position.z);
+  group.rotation.y = presence.facingDirection;
+  scene.add(group);
+  return {
+    presence,
+    group,
+    targetPosition: new THREE.Vector3(presence.position.x, 0, presence.position.z),
+    targetRotation: presence.facingDirection
+  };
+}
+
+function updateRemotePlayers(delta: number): void {
+  const now = Date.now();
+  if (now - lastPresencePublishAt > 220) {
+    presenceAdapter.publish({
+      playerId: playerProfile.playerId,
+      displayName: playerProfile.displayName,
+      districtId: DISTRICT_ID,
+      currentScene: sceneState.activeScene,
+      position: { x: player.position.x, z: player.position.z },
+      facingDirection: player.rotation.y,
+      currentArea: currentArea.textContent ?? DISTRICT_NAME,
+      lastSeen: now
+    });
+    lastPresencePublishAt = now;
+  }
+
+  const snapshot = presenceAdapter.getSnapshot(now);
+  multiplayerStatus = snapshot.status;
+  const visibleRemoteIds = new Set<string>();
+  for (const presence of snapshot.remotePlayers) {
+    if (presence.districtId !== DISTRICT_ID) continue;
+    visibleRemoteIds.add(presence.playerId);
+    let runtime = remotePlayerRuntimes.get(presence.playerId);
+    if (!runtime) {
+      runtime = createRemotePlayerRuntime(presence);
+      remotePlayerRuntimes.set(presence.playerId, runtime);
+    }
+    runtime.presence = presence;
+    runtime.targetPosition.set(presence.position.x, 0, presence.position.z);
+    runtime.targetRotation = presence.facingDirection;
+    runtime.group.visible = presence.currentScene === sceneState.activeScene;
+    runtime.group.position.lerp(runtime.targetPosition, 1 - Math.pow(0.001, delta));
+    runtime.group.rotation.y += (runtime.targetRotation - runtime.group.rotation.y) * (1 - Math.pow(0.01, delta));
+  }
+
+  for (const [playerId, runtime] of remotePlayerRuntimes) {
+    if (visibleRemoteIds.has(playerId)) continue;
+    scene.remove(runtime.group);
+    remotePlayerRuntimes.delete(playerId);
+  }
+}
+
 function activeColliders(): Collider[] {
   if (sceneState.activeScene === "barA") return barAColliders;
   if (sceneState.activeScene === "barB") return barBColliders;
@@ -907,6 +999,43 @@ function closeHomePanel(): void {
   updateTouchControlVisibility();
 }
 
+function logCitizenTransition(message: string): void {
+  citizenTransitionLog.unshift(`${formatWorldTime(worldTime)} - ${message}`);
+  citizenTransitionLog.length = Math.min(citizenTransitionLog.length, 12);
+  console.info(`[door-routing] ${message}`);
+}
+
+function doorApproachPoint(portal: typeof barAPortal): { x: number; z: number } {
+  if (portal.facingDirection === "south") return { x: portal.exteriorPosition.x, z: portal.exteriorPosition.z + DOOR_APPROACH_DISTANCE };
+  if (portal.facingDirection === "north") return { x: portal.exteriorPosition.x, z: portal.exteriorPosition.z - DOOR_APPROACH_DISTANCE };
+  if (portal.facingDirection === "east") return { x: portal.exteriorPosition.x + DOOR_APPROACH_DISTANCE, z: portal.exteriorPosition.z };
+  return { x: portal.exteriorPosition.x - DOOR_APPROACH_DISTANCE, z: portal.exteriorPosition.z };
+}
+
+function routeCitizenToExteriorDoor(citizen: Citizen, portal: typeof barAPortal): void {
+  if (citizen.routeWaypoints.length) return;
+  const approach = doorApproachPoint(portal);
+  citizen.routeWaypoints = [
+    { x: citizen.position.x, z: approach.z },
+    approach,
+    { ...portal.exteriorPosition }
+  ].filter((point, index, points) => index === 0 || distance2D(point, points[index - 1]) > 0.4);
+}
+
+function nextCitizenWaypoint(citizen: Citizen, finalTarget: { x: number; z: number }): { x: number; z: number } {
+  if (!citizen.routeWaypoints.length) return finalTarget;
+  return citizen.routeWaypoints[0];
+}
+
+function consumeWaypointIfArrived(citizen: Citizen, arrived: boolean): boolean {
+  if (!arrived) return false;
+  if (citizen.routeWaypoints.length) {
+    citizen.routeWaypoints.shift();
+    return citizen.routeWaypoints.length === 0;
+  }
+  return true;
+}
+
 function moveCitizenToward(citizen: Citizen, target: { x: number; z: number }, delta: number): boolean {
   const dx = target.x - citizen.position.x;
   const dz = target.z - citizen.position.z;
@@ -1055,6 +1184,21 @@ function updateSocialInteractions(): void {
   }
 }
 
+function initializeCitizenSimulationForCurrentTime(): void {
+  for (const citizen of citizens) {
+    const activeShift = getActiveShift(citizen, worldTime.absoluteMinutes);
+    if (activeShift) {
+      const minutesIntoShift = worldTime.absoluteMinutes - activeShift.startAbsoluteMinute;
+      if (minutesIntoShift > 45) startWorking(citizen, activeShift, worldTime);
+      else startCommutingToWork(citizen, activeShift);
+      continue;
+    }
+
+    const upcomingShift = getUpcomingShift(citizen, worldTime.absoluteMinutes);
+    if (upcomingShift) startCommutingToWork(citizen, upcomingShift);
+  }
+}
+
 function updateCitizenSchedules(realDelta: number, movementDelta: number): void {
   for (const citizen of citizens) {
     updateCitizenNeeds(citizen, realDelta);
@@ -1081,11 +1225,30 @@ function updateCitizenSchedules(realDelta: number, movementDelta: number): void 
     if (citizen.currentState === "walking_to_work") {
       const shift = activeShift ?? getShiftByKey(citizen, citizen.activeShiftKey, worldTime.absoluteMinutes);
       const targetPortal = shift ? portalById(shift.portalId) : portalById(citizen.offDistrictEntryPortalId);
-      const arrived = moveCitizenToward(citizen, targetPortal.exteriorPosition, movementDelta);
+      routeCitizenToExteriorDoor(citizen, targetPortal);
+      const arrived = moveCitizenToward(citizen, nextCitizenWaypoint(citizen, targetPortal.exteriorPosition), movementDelta);
       if (arrived && shift) {
-        citizen.position = { ...targetPortal.interiorPosition };
-        startWorking(citizen, shift, worldTime);
+        const routeComplete = consumeWaypointIfArrived(citizen, true);
+        if (routeComplete) {
+          enterWorkPortal(citizen, shift);
+          logCitizenTransition(`${citizen.name} entered ${targetPortal.buildingId} via ${targetPortal.id}`);
+          if (shift.scene === "outside" || targetPortal.linkedScene === "outside") startWorking(citizen, shift, worldTime);
+        }
+      } else {
+        consumeWaypointIfArrived(citizen, arrived);
       }
+      continue;
+    }
+
+    if (citizen.currentState === "walking_to_workstation") {
+      const shift = activeShift ?? getShiftByKey(citizen, citizen.activeShiftKey, worldTime.absoluteMinutes);
+      const station = shift ? workstationById(shift.workstationId) : null;
+      if (!shift || !station) {
+        sendCitizenHome(citizen, getShiftByKey(citizen, citizen.activeShiftKey, worldTime.absoluteMinutes));
+        continue;
+      }
+      const arrived = moveCitizenToward(citizen, station.position, movementDelta);
+      if (arrived) startWorking(citizen, shift, worldTime);
       continue;
     }
 
@@ -1109,28 +1272,50 @@ function updateCitizenSchedules(realDelta: number, movementDelta: number): void 
 
     if (citizen.currentState === "walking_home") {
       const portal = portalById(citizen.offDistrictEntryPortalId);
-      const arrived = moveCitizenToward(citizen, portal.exteriorPosition, movementDelta);
-      if (arrived) {
+      routeCitizenToExteriorDoor(citizen, portal);
+      const arrived = moveCitizenToward(citizen, nextCitizenWaypoint(citizen, portal.exteriorPosition), movementDelta);
+      const routeComplete = consumeWaypointIfArrived(citizen, arrived);
+      if (routeComplete) {
         citizen.currentState = "home";
         citizen.currentScene = "none";
         citizen.currentMood = "neutral";
         citizen.currentLocation = "Home";
         citizen.currentDestination = null;
         citizen.activeShiftKey = null;
+        citizen.routeWaypoints = [];
+      }
+      continue;
+    }
+
+    if (citizen.currentState === "leaving_building") {
+      const shift = getShiftByKey(citizen, citizen.activeShiftKey, worldTime.absoluteMinutes);
+      const exitPortal = portalById(shift?.portalId ?? citizen.offDistrictEntryPortalId);
+      const arrived = moveCitizenToward(citizen, exitPortal.interiorPosition, movementDelta);
+      if (arrived) {
+        citizen.position = { ...exitPortal.exteriorPosition };
+        citizen.currentScene = "outside";
+        citizen.currentState = "walking_to_destination";
+        citizen.currentDestination = citizen.offDistrictEntryPortalId;
+        citizen.currentLocation = "Outside";
+        citizen.routeWaypoints = [];
+        logCitizenTransition(`${citizen.name} exited ${exitPortal.buildingId} via ${exitPortal.id}`);
       }
       continue;
     }
 
     if (citizen.currentState === "walking_to_destination") {
       const portal = portalById(citizen.offDistrictEntryPortalId);
-      const arrived = moveCitizenToward(citizen, portal.exteriorPosition, movementDelta);
-      if (arrived) {
+      routeCitizenToExteriorDoor(citizen, portal);
+      const arrived = moveCitizenToward(citizen, nextCitizenWaypoint(citizen, portal.exteriorPosition), movementDelta);
+      const routeComplete = consumeWaypointIfArrived(citizen, arrived);
+      if (routeComplete) {
         citizen.currentState = citizen.home === "home" ? "home" : "off_district";
         citizen.currentScene = "none";
         citizen.currentMood = "neutral";
         citizen.currentLocation = citizen.home === "home" ? "Home" : "Off District";
         citizen.currentDestination = null;
         citizen.activeShiftKey = null;
+        citizen.routeWaypoints = [];
       }
     }
   }
@@ -1588,7 +1773,14 @@ function updateOpsPanel(): void {
   const home = citizens.filter((citizen) => citizen.currentState === "home").length;
   const offDistrict = citizens.filter((citizen) => citizen.currentState === "off_district").length;
   const working = citizens.filter((citizen) => citizen.currentState === "working").length;
-  const commuting = citizens.filter((citizen) => citizen.currentState === "walking_to_work" || citizen.currentState === "walking_home" || citizen.currentState === "walking_to_destination").length;
+  const commuting = citizens.filter(
+    (citizen) =>
+      citizen.currentState === "walking_to_work" ||
+      citizen.currentState === "walking_to_workstation" ||
+      citizen.currentState === "leaving_building" ||
+      citizen.currentState === "walking_home" ||
+      citizen.currentState === "walking_to_destination"
+  ).length;
   const visiting = citizens.filter((citizen) => citizen.currentState === "idle").length;
   const routingToGarage = citizens.filter((citizen) => citizen.currentState === "walking_to_destination" && citizen.currentDestination === "parking-garage-portal").length;
   const socializing = citizens.filter((citizen) => citizen.currentSocialInteraction).length;
@@ -1597,8 +1789,12 @@ function updateOpsPanel(): void {
   const closedBusinesses = businessEntities.length - openBusinesses;
   const operatingBusinesses = businessEntities.filter((business) => business.operationalStatus === "Operating").length;
   const understaffedBusinesses = businessEntities.filter((business) => business.staffingStatus === "understaffed").length;
+  const openBusinessesWithoutWorkers = businessEntities.filter(
+    (business) => business.operationalStatus !== "Closed" && business.employeesPresentCitizenIds.length === 0 && business.workersEnRouteCitizenIds.length === 0
+  );
   opsSummary.innerHTML = `
     <p>Active District: ${DISTRICT_ID}</p>
+    <p>Multiplayer: ${multiplayerStatus} / Remote Players: ${remotePlayerRuntimes.size}</p>
     <p>Citizens: ${citizens.length} total / ${visible} visible</p>
     <p>Home: ${home} / Off District: ${offDistrict}</p>
     <p>Working: ${working} / Commuting: ${commuting}</p>
@@ -1607,6 +1803,8 @@ function updateOpsPanel(): void {
     <p>Socializing: ${socializing} / Conversations: ${socialPairs}</p>
     <p>Business Entities: ${businessEntities.length} total / ${openBusinesses} open / ${closedBusinesses} closed</p>
     <p>Operating: ${operatingBusinesses} / Understaffed Rosters: ${understaffedBusinesses}</p>
+    <p>Open Without Workers Present/En Route: ${openBusinessesWithoutWorkers.length ? openBusinessesWithoutWorkers.map((business) => business.businessName).join(", ") : "None"}</p>
+    <p>Door Transitions: ${citizenTransitionLog[0] ?? "None yet"}</p>
   `;
 
   const inspected = selectedCitizen ?? citizens.find((citizen) => citizen.currentState === "working") ?? citizens[0];
@@ -1681,7 +1879,11 @@ function updateOpsPanel(): void {
       <p>Open Hours: ${formatBusinessHours(focusedBusiness.openHours)}</p>
       <p>Current Status: ${focusedBusiness.operationalStatus}</p>
       <p>Staffing Status: ${focusedBusiness.staffingStatus}</p>
-      <p>Employees Present: ${focusedBusiness.employeesPresentCitizenIds.length} / ${focusedBusiness.employeeCitizenIds.length}</p>
+      <p>Scheduled Staff: ${focusedBusiness.scheduledStaffCitizenIds.length}</p>
+      <p>Present Staff: ${focusedBusiness.employeesPresentCitizenIds.length} / ${focusedBusiness.employeeCitizenIds.length}</p>
+      <p>Workers En Route: ${focusedBusiness.workersEnRouteCitizenIds.length}</p>
+      <p>Workers Home: ${focusedBusiness.workersHomeCitizenIds.length}</p>
+      <p>Workers Off District: ${focusedBusiness.workersOffDistrictCitizenIds.length}</p>
       <p>Visitors Present: ${focusedBusiness.visitorsPresentCitizenIds.length}</p>
       <p>Required Staff: ${renderRequiredStaff(focusedBusiness)}</p>
       <p>Missing Staff: ${renderMissingStaff(focusedBusiness)}</p>
@@ -1690,6 +1892,7 @@ function updateOpsPanel(): void {
       <p>Lease Space: ${focusedBusiness.leaseSpaceId ?? "None"}</p>
       <p>Allowed Types: ${focusedBusiness.allowedBusinessTypes.join(", ")}</p>
       <p>Workstations: ${focusedBusiness.workstationIds.join(", ")}</p>
+      <p>Recent Door Logs: ${citizenTransitionLog.slice(0, 4).join("<br>") || "None yet"}</p>
     </section>
   `;
   for (const button of Array.from(citizenDetails.querySelectorAll<HTMLButtonElement>("[data-business-id]"))) {
@@ -1710,6 +1913,7 @@ function animate(): void {
   updateCitizenSchedules(realDelta, delta);
   updateCitizenMeshes();
   movePlayer(delta);
+  updateRemotePlayers(delta);
   updateCamera(delta);
   updateBuildingOcclusion();
   updateSceneVisibility();
@@ -1743,6 +1947,11 @@ function animate(): void {
     socialInteractions: citizens.filter((citizen) => citizen.currentSocialInteraction).length / 2,
     businessesTotal: businessHealth.length,
     businessesOperating: businessHealth.filter((business) => business.operationalStatus === "Operating").length,
+    remotePlayers: remotePlayerRuntimes.size,
+    multiplayerStatus,
+    openBusinessesWithoutWorkers: businessHealth.filter(
+      (business) => business.operationalStatus !== "Closed" && business.employeesPresentCitizenIds.length === 0 && business.workersEnRouteCitizenIds.length === 0
+    ).length,
     time: formatWorldTime(worldTime),
     triangles: renderer.info.render.triangles
   };
@@ -1767,6 +1976,9 @@ function animate(): void {
   app.dataset.socialInteractions = `${window.__vibeCity3DHealth.socialInteractions}`;
   app.dataset.businessesTotal = `${window.__vibeCity3DHealth.businessesTotal}`;
   app.dataset.businessesOperating = `${window.__vibeCity3DHealth.businessesOperating}`;
+  app.dataset.remotePlayers = `${window.__vibeCity3DHealth.remotePlayers}`;
+  app.dataset.multiplayerStatus = window.__vibeCity3DHealth.multiplayerStatus;
+  app.dataset.openBusinessesWithoutWorkers = `${window.__vibeCity3DHealth.openBusinessesWithoutWorkers}`;
   cameraModeLabel.textContent = "Isometric";
 }
 
@@ -1824,6 +2036,10 @@ window.addEventListener("resize", () => {
   updateCameraProjection();
   updateTouchControlVisibility();
   renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+window.addEventListener("beforeunload", () => {
+  presenceAdapter.dispose();
 });
 
 updateTouchControlVisibility();

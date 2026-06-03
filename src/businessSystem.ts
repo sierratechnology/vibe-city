@@ -56,7 +56,11 @@ export type BusinessEntity = {
   requiredStaff: RequiredStaffRole[];
   currentStaffByRole: Record<string, number>;
   missingStaffByRole: Record<string, number>;
+  scheduledStaffCitizenIds: string[];
   employeesPresentCitizenIds: string[];
+  workersEnRouteCitizenIds: string[];
+  workersHomeCitizenIds: string[];
+  workersOffDistrictCitizenIds: string[];
   visitorsPresentCitizenIds: string[];
 };
 
@@ -255,8 +259,16 @@ function citizenRoleMatches(citizen: Citizen, role: RequiredStaffRole): boolean 
   return role.match.some((match) => currentRole.includes(match.toLowerCase()));
 }
 
-function roleCount(citizens: Citizen[], role: RequiredStaffRole): number {
-  return citizens.filter((citizen) => citizenRoleMatches(citizen, role)).length;
+function shiftRoleMatches(roleName: string, role: RequiredStaffRole): boolean {
+  const currentRole = roleName.toLowerCase();
+  return role.match.some((match) => currentRole.includes(match.toLowerCase()));
+}
+
+function roleCount(citizens: Citizen[], role: RequiredStaffRole, worldTime?: WorldTimeState): number {
+  return citizens.filter((citizen) => {
+    const activeRole = worldTime ? getActiveShift(citizen, worldTime.absoluteMinutes)?.role : null;
+    return activeRole ? shiftRoleMatches(activeRole, role) : citizenRoleMatches(citizen, role);
+  }).length;
 }
 
 function deriveManagerId(definition: BusinessDefinition, employees: Citizen[]): string | null {
@@ -305,12 +317,16 @@ export function deriveBusinessEntities(citizens: Citizen[], worldTime: WorldTime
     const typeDefinition = BUSINESS_TYPES[definition.businessType];
     const employees = citizens.filter((citizen) => isEmployeeOf(citizen, definition.businessId));
     const customers = citizens.filter((citizen) => activeShiftBusinessId(citizen, worldTime) === definition.businessId && getActiveShift(citizen, worldTime.absoluteMinutes)?.hourlyWage === 0);
-    const employeesPresent = employees.filter((citizen) => citizen.currentState === "working" && activeShiftBusinessId(citizen, worldTime) === definition.businessId);
+    const scheduledEmployees = employees.filter((citizen) => activeShiftBusinessId(citizen, worldTime) === definition.businessId);
+    const employeesPresent = scheduledEmployees.filter((citizen) => citizen.currentState === "working" || citizen.currentState === "idle");
+    const workersEnRoute = scheduledEmployees.filter((citizen) => citizen.currentState === "walking_to_work" || citizen.currentState === "walking_to_workstation");
+    const workersHome = scheduledEmployees.filter((citizen) => citizen.currentState === "home");
+    const workersOffDistrict = scheduledEmployees.filter((citizen) => citizen.currentState === "off_district");
     const visitorsPresent = customers.filter((citizen) => citizen.currentState === "idle" && activeShiftBusinessId(citizen, worldTime) === definition.businessId);
-    const currentStaffByRole = Object.fromEntries(typeDefinition.requiredStaffRoles.map((role) => [role.role, roleCount(employees, role)]));
+    const currentStaffByRole = Object.fromEntries(typeDefinition.requiredStaffRoles.map((role) => [role.role, roleCount([...employeesPresent, ...workersEnRoute], role, worldTime)]));
     const missingStaffByRole = Object.fromEntries(typeDefinition.requiredStaffRoles.map((role) => [role.role, Math.max(0, role.count - (currentStaffByRole[role.role] ?? 0))]));
     const missingTotal = Object.values(missingStaffByRole).reduce((sum, count) => sum + count, 0);
-    const staffingStatus: StaffingStatus = employees.length === 0 ? "unstaffed" : missingTotal > 0 ? "understaffed" : "staffed";
+    const staffingStatus: StaffingStatus = scheduledEmployees.length === 0 && workersEnRoute.length === 0 ? "unstaffed" : missingTotal > 0 ? "understaffed" : "staffed";
     const openHours = record.openHours ?? typeDefinition.defaultOpenHours;
     const currentlyOpen = isBusinessOpen(record, worldTime.minuteOfDay);
 
@@ -335,7 +351,11 @@ export function deriveBusinessEntities(citizens: Citizen[], worldTime: WorldTime
       requiredStaff: typeDefinition.requiredStaffRoles,
       currentStaffByRole,
       missingStaffByRole,
+      scheduledStaffCitizenIds: scheduledEmployees.map((citizen) => citizen.id),
       employeesPresentCitizenIds: employeesPresent.map((citizen) => citizen.id),
+      workersEnRouteCitizenIds: workersEnRoute.map((citizen) => citizen.id),
+      workersHomeCitizenIds: workersHome.map((citizen) => citizen.id),
+      workersOffDistrictCitizenIds: workersOffDistrict.map((citizen) => citizen.id),
       visitorsPresentCitizenIds: visitorsPresent.map((citizen) => citizen.id)
     };
   });

@@ -73,9 +73,24 @@ export function startCommutingToWork(citizen: Citizen, shift: ActiveShiftWindow)
   citizen.currentLocation = "Parking Garage";
   citizen.currentWorkstationId = null;
   citizen.activeShiftKey = shift.key;
+  citizen.routeWaypoints = [];
   citizen.wasLateToday = false;
   citizen.delayMinutes = 0;
   citizen.position = { ...entryPortal.exteriorPosition };
+}
+
+export function enterWorkPortal(citizen: Citizen, shift: ActiveShiftWindow): DoorPortal {
+  const portal = portalById(shift.portalId);
+  const staysOutside = shift.scene === "outside" || portal.linkedScene === "outside";
+  citizen.currentState = staysOutside ? (shift.hourlyWage > 0 ? "working" : "idle") : "walking_to_workstation";
+  citizen.currentScene = shift.scene;
+  citizen.currentMood = "rushed";
+  citizen.currentDestination = shift.workstationId;
+  citizen.currentLocation = staysOutside ? portal.buildingId : `${portal.buildingId} Interior Door`;
+  citizen.currentWorkstationId = null;
+  citizen.routeWaypoints = [];
+  citizen.position = staysOutside ? { ...workstationById(shift.workstationId).position } : { ...portal.interiorPosition };
+  return portal;
 }
 
 export function startWorking(citizen: Citizen, shift: ActiveShiftWindow, worldTime: WorldTimeState): void {
@@ -88,6 +103,7 @@ export function startWorking(citizen: Citizen, shift: ActiveShiftWindow, worldTi
   citizen.currentDestination = null;
   citizen.currentLocation = station.name;
   citizen.currentWorkstationId = station.id;
+  citizen.routeWaypoints = [];
   citizen.position = { ...station.position };
 }
 
@@ -95,11 +111,11 @@ export function sendCitizenHome(citizen: Citizen, shift: ActiveShiftWindow | nul
   if (shift) payCompletedShift(citizen, shift);
   const exitPortal = shift ? portalById(shift.portalId) : portalById(citizen.offDistrictEntryPortalId);
   const destinationPortal = portalById(citizen.offDistrictEntryPortalId);
-  citizen.currentState = "walking_to_destination";
-  citizen.currentScene = "outside";
+  citizen.currentState = citizen.currentScene !== "outside" && exitPortal.linkedScene !== "outside" ? "leaving_building" : "walking_to_destination";
+  citizen.currentScene = citizen.currentState === "leaving_building" ? citizen.currentScene : "outside";
   citizen.currentMood = "tired";
-  citizen.currentDestination = destinationPortal.id;
+  citizen.currentDestination = citizen.currentState === "leaving_building" ? exitPortal.id : destinationPortal.id;
   citizen.currentWorkstationId = null;
-  citizen.position = { ...exitPortal.exteriorPosition };
+  citizen.routeWaypoints = [];
   return destinationPortal;
 }
