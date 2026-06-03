@@ -18,6 +18,9 @@ export type PlayerPresence = {
 
 export type PresenceDebugState = {
   envConfigured: boolean;
+  supabaseUrlConfigured: boolean;
+  supabaseAnonKeyConfigured: boolean;
+  mode: "offline" | "realtime";
   channelStatus: string;
   localPlayerId: string;
   localDisplayName: string;
@@ -55,7 +58,7 @@ export function getPersistentPlayerId(): string {
 class MissingEnvPresenceAdapter implements PresenceAdapter {
   private readonly localPlayerId = getPersistentPlayerId();
 
-  private readonly envConfigured = getSupabaseRealtimeConfig().configured;
+  private readonly config = getSupabaseRealtimeConfig();
 
   publish(): void {}
 
@@ -64,7 +67,10 @@ class MissingEnvPresenceAdapter implements PresenceAdapter {
       hudStatus: "Offline / Missing Env",
       remotePlayers: [],
       debug: {
-        envConfigured: this.envConfigured,
+        envConfigured: this.config.configured,
+        supabaseUrlConfigured: this.config.urlConfigured,
+        supabaseAnonKeyConfigured: this.config.anonKeyConfigured,
+        mode: "offline",
         channelStatus: "missing_env",
         localPlayerId: this.localPlayerId,
         localDisplayName: "",
@@ -148,6 +154,9 @@ class SupabasePresenceAdapter implements PresenceAdapter {
       remotePlayers,
       debug: {
         envConfigured: true,
+        supabaseUrlConfigured: true,
+        supabaseAnonKeyConfigured: true,
+        mode: "realtime",
         channelStatus: this.channelStatus,
         localPlayerId: this.localPlayerId,
         localDisplayName: this.localDisplayName,

@@ -1812,7 +1812,9 @@ function updateOpsPanel(): void {
   opsSummary.innerHTML = `
     <p>Active District: ${DISTRICT_ID}</p>
     <h2>Multiplayer Debug</h2>
-    <p>Env Configured: ${multiplayerDebug?.envConfigured ? "true" : "false"}</p>
+    <p>Supabase URL Configured: ${multiplayerDebug?.supabaseUrlConfigured ? "yes" : "no"}</p>
+    <p>Supabase Anon Key Configured: ${multiplayerDebug?.supabaseAnonKeyConfigured ? "yes" : "no"}</p>
+    <p>Current Mode: ${multiplayerDebug?.mode ?? "offline"}</p>
     <p>Channel Status: ${multiplayerDebug?.channelStatus ?? "unknown"}</p>
     <p>Local Player ID: ${multiplayerDebug?.localPlayerId ?? "unknown"}</p>
     <p>Local Display Name: ${multiplayerDebug?.localDisplayName || playerProfile.displayName}</p>
