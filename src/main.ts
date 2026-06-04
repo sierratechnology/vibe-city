@@ -184,6 +184,10 @@ declare global {
       multiplayerPresenceCount: number;
       multiplayerLastBroadcastAt: number | null;
       multiplayerLastPresenceSyncAt: number | null;
+      multiplayerChannelName: string;
+      multiplayerSubscribeStatus: string;
+      multiplayerLastError: string | null;
+      multiplayerWebsocketConnected: boolean;
       openBusinessesWithoutWorkers: number;
       time: string;
       triangles: number;
@@ -1815,7 +1819,11 @@ function updateOpsPanel(): void {
     <p>Supabase URL Configured: ${multiplayerDebug?.supabaseUrlConfigured ? "yes" : "no"}</p>
     <p>Supabase Anon Key Configured: ${multiplayerDebug?.supabaseAnonKeyConfigured ? "yes" : "no"}</p>
     <p>Current Mode: ${multiplayerDebug?.mode ?? "offline"}</p>
+    <p>Channel Name: ${multiplayerDebug?.channelName ?? "vibe-city-district-1"}</p>
     <p>Channel Status: ${multiplayerDebug?.channelStatus ?? "unknown"}</p>
+    <p>Subscribe Status: ${multiplayerDebug?.subscribeStatus ?? "unknown"}</p>
+    <p>Last Error: ${multiplayerDebug?.lastError ?? "None"}</p>
+    <p>Websocket Connected: ${multiplayerDebug?.websocketConnected ? "true" : "false"}</p>
     <p>Local Player ID: ${multiplayerDebug?.localPlayerId ?? "unknown"}</p>
     <p>Local Display Name: ${multiplayerDebug?.localDisplayName || playerProfile.displayName}</p>
     <p>Presence Count: ${multiplayerDebug?.presenceCount ?? 1}</p>
@@ -1981,6 +1989,10 @@ function animate(): void {
     multiplayerPresenceCount: multiplayerDebug?.presenceCount ?? 1,
     multiplayerLastBroadcastAt: multiplayerDebug?.lastBroadcastAt ?? null,
     multiplayerLastPresenceSyncAt: multiplayerDebug?.lastPresenceSyncAt ?? null,
+    multiplayerChannelName: multiplayerDebug?.channelName ?? "vibe-city-district-1",
+    multiplayerSubscribeStatus: multiplayerDebug?.subscribeStatus ?? "unknown",
+    multiplayerLastError: multiplayerDebug?.lastError ?? null,
+    multiplayerWebsocketConnected: multiplayerDebug?.websocketConnected ?? false,
     openBusinessesWithoutWorkers: businessHealth.filter(
       (business) => business.operationalStatus !== "Closed" && business.employeesPresentCitizenIds.length === 0 && business.workersEnRouteCitizenIds.length === 0
     ).length,
@@ -2014,6 +2026,10 @@ function animate(): void {
   app.dataset.multiplayerPresenceCount = `${window.__vibeCity3DHealth.multiplayerPresenceCount}`;
   app.dataset.multiplayerLastBroadcastAt = `${window.__vibeCity3DHealth.multiplayerLastBroadcastAt ?? ""}`;
   app.dataset.multiplayerLastPresenceSyncAt = `${window.__vibeCity3DHealth.multiplayerLastPresenceSyncAt ?? ""}`;
+  app.dataset.multiplayerChannelName = window.__vibeCity3DHealth.multiplayerChannelName;
+  app.dataset.multiplayerSubscribeStatus = window.__vibeCity3DHealth.multiplayerSubscribeStatus;
+  app.dataset.multiplayerLastError = window.__vibeCity3DHealth.multiplayerLastError ?? "";
+  app.dataset.multiplayerWebsocketConnected = `${window.__vibeCity3DHealth.multiplayerWebsocketConnected}`;
   app.dataset.openBusinessesWithoutWorkers = `${window.__vibeCity3DHealth.openBusinessesWithoutWorkers}`;
   cameraModeLabel.textContent = "Isometric";
 }

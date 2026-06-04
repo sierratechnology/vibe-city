@@ -21,7 +21,11 @@ export type PresenceDebugState = {
   supabaseUrlConfigured: boolean;
   supabaseAnonKeyConfigured: boolean;
   mode: "offline" | "realtime";
+  channelName: string;
   channelStatus: string;
+  subscribeStatus: string;
+  lastError: string | null;
+  websocketConnected: boolean;
   localPlayerId: string;
   localDisplayName: string;
   presenceCount: number;
@@ -46,6 +50,18 @@ export type PresenceAdapter = {
 const CHANNEL_NAME = "vibe-city-district-1";
 const LOCAL_PLAYER_ID_KEY = "vibeCity.playerId";
 const REMOTE_TIMEOUT_MS = 10_000;
+const CONNECTING_TIMEOUT_MS = 10_000;
+
+function formatRealtimeError(error: unknown): string {
+  if (!error) return "No error details provided";
+  if (error instanceof Error) return error.message;
+  if (typeof error === "string") return error;
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error);
+  }
+}
 
 export function getPersistentPlayerId(): string {
   const existing = globalThis.localStorage.getItem(LOCAL_PLAYER_ID_KEY);
@@ -71,7 +87,11 @@ class MissingEnvPresenceAdapter implements PresenceAdapter {
         supabaseUrlConfigured: this.config.urlConfigured,
         supabaseAnonKeyConfigured: this.config.anonKeyConfigured,
         mode: "offline",
+        channelName: CHANNEL_NAME,
         channelStatus: "missing_env",
+        subscribeStatus: "missing_env",
+        lastError: "Missing VITE_SUPABASE_URL or VITE_SUPABASE_ANON_KEY",
+        websocketConnected: false,
         localPlayerId: this.localPlayerId,
         localDisplayName: "",
         presenceCount: 1,
@@ -95,6 +115,12 @@ class SupabasePresenceAdapter implements PresenceAdapter {
 
   private channelStatus = "connecting";
 
+  private subscribeStatus = "connecting";
+
+  private lastError: string | null = null;
+
+  private readonly createdAt = Date.now();
+
   private localDisplayName = "";
 
   private remotePlayers = new Map<string, PlayerPresence>();
@@ -107,16 +133,51 @@ class SupabasePresenceAdapter implements PresenceAdapter {
 
   constructor(client: SupabaseClient) {
     this.client = client;
+    console.info("Vibe City presence channel creating", { channelName: CHANNEL_NAME });
     this.channel = this.client.channel(CHANNEL_NAME, {
       config: { presence: { key: this.localPlayerId } }
     });
-    this.channel.on("presence", { event: "sync" }, () => this.syncPresence());
-    this.channel.on("presence", { event: "join" }, () => this.syncPresence());
-    this.channel.on("presence", { event: "leave" }, () => this.syncPresence());
-    this.channel.subscribe((status) => {
-      this.channelStatus = status.toLowerCase();
-      if (status === "SUBSCRIBED" && this.lastPresence) void this.channel.track(this.lastPresence);
+    console.info("Vibe City presence channel created", { channelName: CHANNEL_NAME });
+    this.channel.on("presence", { event: "sync" }, () => {
+      console.info("Vibe City presence sync received", { channelName: CHANNEL_NAME });
+      this.syncPresence();
     });
+    this.channel.on("presence", { event: "join" }, (payload) => {
+      console.info("Vibe City presence join received", { channelName: CHANNEL_NAME, payload });
+      this.syncPresence();
+    });
+    this.channel.on("presence", { event: "leave" }, (payload) => {
+      console.info("Vibe City presence leave received", { channelName: CHANNEL_NAME, payload });
+      this.syncPresence();
+    });
+    this.channel.subscribe((status, error) => {
+      console.info("Vibe City presence subscribe status", { channelName: CHANNEL_NAME, status, error });
+      this.channelStatus = status.toLowerCase();
+      this.subscribeStatus = status;
+
+      if (status === "SUBSCRIBED") {
+        this.lastError = null;
+        if (this.lastPresence) {
+          console.info("Vibe City presence tracking after subscribed", { channelName: CHANNEL_NAME, playerId: this.localPlayerId });
+          void this.channel.track(this.lastPresence);
+        }
+        return;
+      }
+
+      if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") {
+        this.lastError = formatRealtimeError(error) || status;
+        console.error("Vibe City presence connection error", {
+          channelName: CHANNEL_NAME,
+          status,
+          error: this.lastError
+        });
+      }
+    });
+  }
+
+  private websocketConnected(): boolean {
+    const realtime = this.client.realtime as unknown as { isConnected?: () => boolean };
+    return Boolean(realtime.isConnected?.());
   }
 
   private syncPresence(): void {
@@ -140,7 +201,9 @@ class SupabasePresenceAdapter implements PresenceAdapter {
     this.localDisplayName = payload.displayName;
     this.lastPresence = payload;
     this.lastBroadcastAt = payload.updatedAt;
-    if (this.channelStatus === "subscribed") void this.channel.track(payload);
+    if (this.channelStatus === "subscribed") {
+      void this.channel.track(payload);
+    }
   }
 
   getSnapshot(now: number): PresenceSnapshot {
@@ -149,15 +212,29 @@ class SupabasePresenceAdapter implements PresenceAdapter {
     }
     const remotePlayers = [...this.remotePlayers.values()];
     const connected = this.channelStatus === "subscribed";
+    if (!connected && !this.lastError && now - this.createdAt > CONNECTING_TIMEOUT_MS) {
+      this.lastError = `Still ${this.channelStatus} after ${Math.round((now - this.createdAt) / 1000)}s. Websocket connected: ${this.websocketConnected()}.`;
+      console.error("Vibe City presence stuck connecting", {
+        channelName: CHANNEL_NAME,
+        subscribeStatus: this.subscribeStatus,
+        channelStatus: this.channelStatus,
+        websocketConnected: this.websocketConnected(),
+        lastError: this.lastError
+      });
+    }
     return {
-      hudStatus: connected ? "Connected" : "Connecting",
+      hudStatus: connected ? "Connected" : this.lastError ? `Realtime Error: ${this.channelStatus}` : "Connecting",
       remotePlayers,
       debug: {
         envConfigured: true,
         supabaseUrlConfigured: true,
         supabaseAnonKeyConfigured: true,
         mode: "realtime",
+        channelName: CHANNEL_NAME,
         channelStatus: this.channelStatus,
+        subscribeStatus: this.subscribeStatus,
+        lastError: this.lastError,
+        websocketConnected: this.websocketConnected(),
         localPlayerId: this.localPlayerId,
         localDisplayName: this.localDisplayName,
         presenceCount: remotePlayers.length + 1,

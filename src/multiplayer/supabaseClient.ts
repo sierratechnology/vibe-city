@@ -21,6 +21,11 @@ export function getSupabaseRealtimeConfig(): SupabaseRealtimeConfig {
     warnedAboutMissingEnv = true;
     console.warn("Vibe City multiplayer offline: missing VITE_SUPABASE_URL or VITE_SUPABASE_ANON_KEY.");
   }
+  console.info("Vibe City multiplayer env detected", {
+    supabaseUrlConfigured: urlConfigured,
+    supabaseAnonKeyConfigured: anonKeyConfigured,
+    configured
+  });
 
   return { configured, urlConfigured, anonKeyConfigured, url, anonKey };
 }
@@ -28,11 +33,13 @@ export function getSupabaseRealtimeConfig(): SupabaseRealtimeConfig {
 export function createSupabaseClient(): SupabaseClient | null {
   const config = getSupabaseRealtimeConfig();
   if (!config.configured || !config.url || !config.anonKey) return null;
-  return createClient(config.url, config.anonKey, {
+  const client = createClient(config.url, config.anonKey, {
     realtime: {
       params: {
         eventsPerSecond: 12
       }
     }
   });
+  console.info("Vibe City Supabase client created", { realtimeConfigured: true });
+  return client;
 }
