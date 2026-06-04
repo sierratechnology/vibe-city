@@ -90,7 +90,7 @@ class MissingEnvPresenceAdapter implements PresenceAdapter {
         channelName: CHANNEL_NAME,
         channelStatus: "missing_env",
         subscribeStatus: "missing_env",
-        lastError: "Missing VITE_SUPABASE_URL or VITE_SUPABASE_ANON_KEY",
+        lastError: this.config.validationError ?? "Missing VITE_SUPABASE_URL or VITE_SUPABASE_ANON_KEY",
         websocketConnected: false,
         localPlayerId: this.localPlayerId,
         localDisplayName: "",
