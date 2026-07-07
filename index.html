@@ -11,7 +11,7 @@
     <div id="app"></div>
     <section id="hud" aria-label="STG World Zero status">
       <h1>STG World Zero</h1>
-      <p class="hud-chip hud-time"><span id="time-display">World Time: Day 1 - Monday - 8:45 AM</span></p>
+      <p class="hud-chip hud-time"><span id="time-display">Local Time</span></p>
       <p class="hud-chip hud-player">Player: <span id="player-name">Player</span></p>
       <p class="hud-chip hud-wallet">Wallet: $<span id="player-wallet">2000</span></p>
       <p class="hud-extra">Reputation: <span id="player-reputation">0.0</span></p>
@@ -20,9 +20,10 @@
       <p class="hud-chip hud-multiplayer">Multiplayer: <span id="multiplayer-status">Offline / Missing Env</span></p>
       <p class="hud-extra">Camera: <span id="camera-mode">Isometric</span></p>
       <p class="hud-extra">Controls: WASD / Arrow Keys</p>
-      <p class="hud-extra">Time Debug: T +1 hour / Y next day</p>
+      <p class="hud-extra">Time Mode: Real World</p>
       <p class="hud-extra">Debug: <span id="debug-state">Occlusion On / Grid Off / Assets Off / Zoom 2</span></p>
       <button id="journal-open" type="button">Phone (P)</button>
+      <button id="voice-settings-open" type="button">Voice</button>
     </section>
     <aside id="ops-panel" aria-label="STG operations debug">
       <h1>STG Operations</h1>
@@ -30,6 +31,11 @@
       <div id="citizen-details"></div>
     </aside>
     <div id="action-prompt" hidden>[E] Interact</div>
+    <section id="voice-panel" hidden aria-label="Executive Assistant voice status">
+      <div id="voice-status">Voice: unavailable</div>
+      <div id="voice-meter" aria-hidden="true"><span id="voice-meter-fill"></span></div>
+      <p id="voice-caption" hidden></p>
+    </section>
     <div id="fade-overlay"></div>
     <section id="briefing-panel" hidden aria-label="Executive Assistant briefing">
       <button id="briefing-close" type="button" aria-label="Close">X</button>
@@ -76,6 +82,28 @@
         <button type="button" data-phone-app="debug">Debug</button>
       </nav>
       <div id="phone-content"></div>
+    </section>
+    <section id="voice-settings-panel" hidden aria-label="Voice settings">
+      <button id="voice-settings-close" type="button" aria-label="Close">X</button>
+      <h2>Voice Settings</h2>
+      <label class="voice-setting-row" for="voice-enabled-toggle">
+        <span>Voice Enabled</span>
+        <input id="voice-enabled-toggle" type="checkbox" checked />
+      </label>
+      <label class="voice-setting-row" for="captions-enabled-toggle">
+        <span>Captions Enabled</span>
+        <input id="captions-enabled-toggle" type="checkbox" checked />
+      </label>
+      <label class="voice-setting-stack" for="voice-volume-slider">
+        <span>Voice Volume <strong id="voice-volume-value">100%</strong></span>
+        <input id="voice-volume-slider" type="range" min="0" max="100" value="100" />
+      </label>
+      <dl id="voice-settings-readout">
+        <div><dt>Push-to-talk</dt><dd id="voice-push-to-talk-key">V</dd></div>
+        <div><dt>Current room</dt><dd id="voice-current-zone">Outside</dd></div>
+        <div><dt>Agent voice state</dt><dd id="voice-state-display">unavailable</dd></div>
+        <div><dt>OpenAI voice</dt><dd id="voice-openai-status">not connected yet</dd></div>
+      </dl>
     </section>
     <section id="home-panel" hidden aria-label="STG headquarters profile panel">
       <button id="home-close" type="button" aria-label="Close">X</button>

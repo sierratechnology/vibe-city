@@ -42,7 +42,7 @@ import {
 import { ActiveSceneName, createSceneState, fadeToScene } from "./sceneManager";
 import { WorldBuildingRuntime, buildGeneratedCity } from "./world/assetFactory";
 import { CITY_SEED, generateCity } from "./world/cityGenerator";
-import { WorldTimeState, advanceWorldHours, advanceWorldToNextDay, formatWorldTime, getWorldTime } from "./worldTime";
+import { WorldTimeState, formatWorldTime, getWorldTime } from "./worldTime";
 
 type Collider = {
   minX: number;
@@ -69,11 +69,35 @@ type DoorAction =
   | "enter_apartment"
   | "leave_apartment";
 type HomeAction = "rest" | "profile" | "customize";
+type VoiceState = "muted" | "listening" | "speaking" | "unavailable";
+type AudioZoneId = "reception" | "assistant_office" | "boardroom" | "devon_executive_office" | "projects_updates_office" | "outside";
+
+type AudioZone = {
+  id: AudioZoneId;
+  label: string;
+  minX: number;
+  maxX: number;
+  minZ: number;
+  maxZ: number;
+};
 
 const PLAYER_RADIUS = 0.55;
 const PLAYER_SPEED = 8.2;
 const AGENT_WALK_SPEED = 5.4;
 const DOOR_APPROACH_DISTANCE = 2.35;
+const EXECUTIVE_ASSISTANT_ID = "agent_exec_assistant_001";
+const VOICE_INTERACTION_DISTANCE = 3;
+const VOICE_FULL_VOLUME_DISTANCE = 1.2;
+const VOICE_MAX_DISTANCE = 7;
+const VOICE_CROSS_ROOM_ATTENUATION = 0.16;
+const VOICE_PLACEHOLDER_TEXT = "Welcome back, Devon. I have your STG briefing ready.";
+const AUDIO_ZONES: AudioZone[] = [
+  { id: "reception", label: "Reception", minX: -2.8, maxX: 2.8, minZ: 0.5, maxZ: 9.8 },
+  { id: "assistant_office", label: "Assistant Office", minX: -9.6, maxX: -2.8, minZ: 0.5, maxZ: 9.8 },
+  { id: "boardroom", label: "Boardroom", minX: -9.6, maxX: -0.2, minZ: -9.6, maxZ: 0.5 },
+  { id: "devon_executive_office", label: "Devon Executive Office", minX: 0.2, maxX: 9.6, minZ: -9.6, maxZ: 0.5 },
+  { id: "projects_updates_office", label: "Projects & Updates Office", minX: 2.8, maxX: 9.6, minZ: 0.5, maxZ: 9.8 }
+];
 const ISO_CAMERA_OFFSET = new THREE.Vector3(24, 24, 24);
 const ISO_FORWARD = new THREE.Vector3(0, 0, -1).normalize();
 const ISO_RIGHT = new THREE.Vector3(1, 0, 0).normalize();
@@ -90,6 +114,10 @@ const cameraModeLabel = document.querySelector<HTMLSpanElement>("#camera-mode")!
 const debugState = document.querySelector<HTMLSpanElement>("#debug-state")!;
 const timeDisplay = document.querySelector<HTMLSpanElement>("#time-display")!;
 const actionPrompt = document.querySelector<HTMLDivElement>("#action-prompt")!;
+const voicePanel = document.querySelector<HTMLElement>("#voice-panel")!;
+const voiceStatus = document.querySelector<HTMLElement>("#voice-status")!;
+const voiceMeterFill = document.querySelector<HTMLElement>("#voice-meter-fill")!;
+const voiceCaption = document.querySelector<HTMLElement>("#voice-caption")!;
 const fadeOverlay = document.querySelector<HTMLDivElement>("#fade-overlay")!;
 const popup = document.querySelector<HTMLElement>("#interaction-popup")!;
 const popupClose = document.querySelector<HTMLButtonElement>("#interaction-close")!;
@@ -116,6 +144,17 @@ const opsPanel = document.querySelector<HTMLElement>("#ops-panel")!;
 const opsSummary = document.querySelector<HTMLElement>("#ops-summary")!;
 const citizenDetails = document.querySelector<HTMLElement>("#citizen-details")!;
 const journalButton = document.querySelector<HTMLButtonElement>("#journal-open")!;
+const voiceSettingsOpen = document.querySelector<HTMLButtonElement>("#voice-settings-open")!;
+const voiceSettingsPanel = document.querySelector<HTMLElement>("#voice-settings-panel")!;
+const voiceSettingsClose = document.querySelector<HTMLButtonElement>("#voice-settings-close")!;
+const voiceEnabledToggle = document.querySelector<HTMLInputElement>("#voice-enabled-toggle")!;
+const captionsEnabledToggle = document.querySelector<HTMLInputElement>("#captions-enabled-toggle")!;
+const voiceVolumeSlider = document.querySelector<HTMLInputElement>("#voice-volume-slider")!;
+const voiceVolumeValue = document.querySelector<HTMLElement>("#voice-volume-value")!;
+const voicePushToTalkKey = document.querySelector<HTMLElement>("#voice-push-to-talk-key")!;
+const voiceCurrentZone = document.querySelector<HTMLElement>("#voice-current-zone")!;
+const voiceStateDisplay = document.querySelector<HTMLElement>("#voice-state-display")!;
+const voiceOpenAiStatus = document.querySelector<HTMLElement>("#voice-openai-status")!;
 const journalModal = document.querySelector<HTMLElement>("#knowledge-journal")!;
 const journalClose = document.querySelector<HTMLButtonElement>("#journal-close")!;
 const journalTabs = Array.from(document.querySelectorAll<HTMLButtonElement>("[data-journal-tab]"));
@@ -180,6 +219,21 @@ declare global {
       openBusinessesWithoutWorkers: number;
       time: string;
       triangles: number;
+      realWorldTime: string;
+      realWorldDate: string;
+      timezone: string;
+      dayOfWeek: string;
+      vibeCityTimeMode: "real_world" | "simulated";
+      voiceState: VoiceState;
+      agentVoiceEnabled: boolean;
+      captionsEnabled: boolean;
+      voiceVolumeSetting: number;
+      playerDistanceToAgent: number | null;
+      voiceVolume: number;
+      voiceCaption: string;
+      currentAudioZone: AudioZoneId;
+      agentAudioZone: AudioZoneId | null;
+      voiceRoomAttenuation: number;
     };
   }
 }
@@ -248,6 +302,18 @@ let activeJournalTab: "contacts" | "citizen" | "place" | "business" | "rumor" = 
 let activePhoneApp: "contacts" | "messages" | "knowledge" | "profile" | "map" | "debug" = "contacts";
 let contactAddedMessage = "";
 let toastTimeout: number | null = null;
+let voiceState: VoiceState = "unavailable";
+let agentVoiceEnabled = true;
+let captionsEnabled = true;
+let voiceVolumeSetting = 1;
+let playerDistanceToAgent: number | null = null;
+let voiceVolume = 0;
+let currentAudioZone: AudioZoneId = "outside";
+let agentAudioZone: AudioZoneId | null = null;
+let voiceRoomAttenuation = 0;
+let voiceCaptionText = "";
+let voiceTimeout: number | null = null;
+let lastVoiceKeyAt = 0;
 let selectedCitizen: Citizen | null = null;
 let selectedBusinessId: string | null = null;
 let lastFrameAt = performance.now();
@@ -532,6 +598,25 @@ function distance2D(a: { x: number; z: number }, b: { x: number; z: number }): n
   return Math.hypot(a.x - b.x, a.z - b.z);
 }
 
+function clamp01(value: number): number {
+  return Math.max(0, Math.min(1, value));
+}
+
+function executiveAssistant(): Citizen | null {
+  return citizens.find((citizen) => citizen.id === EXECUTIVE_ASSISTANT_ID) ?? null;
+}
+
+function audioZoneForPoint(point: { x: number; z: number }, sceneName: ActiveSceneName | "none"): AudioZoneId {
+  if (sceneName !== "apartment") return "outside";
+  return AUDIO_ZONES.find((zone) => point.x >= zone.minX && point.x <= zone.maxX && point.z >= zone.minZ && point.z <= zone.maxZ)?.id ?? "reception";
+}
+
+function audioZoneLabel(zoneId: AudioZoneId | null): string {
+  if (!zoneId) return "None";
+  if (zoneId === "outside") return "Outside";
+  return AUDIO_ZONES.find((zone) => zone.id === zoneId)?.label ?? zoneId;
+}
+
 function citizenName(id: string): string {
   return citizens.find((citizen) => citizen.id === id)?.name ?? id;
 }
@@ -567,6 +652,14 @@ function renderBriefingList(items: string[], emptyText: string): string {
   return `<ul>${items.map((item) => `<li>${item}</li>`).join("")}</ul>`;
 }
 
+function executiveAssistantGreeting(): string {
+  const hour = Math.floor(worldTime.minuteOfDay / 60);
+  if (hour >= 5 && hour < 12) return "Good morning, Devon. I have your STG briefing ready.";
+  if (hour >= 12 && hour < 17) return "Good afternoon, Devon. I have your STG briefing ready.";
+  if (hour >= 17 && hour < 22) return "Good evening, Devon. I have your STG briefing ready.";
+  return "Good late night, Devon. I have your STG briefing ready.";
+}
+
 function openBriefing(agent: Citizen): void {
   activeInteractionCitizen = agent;
   selectedCitizen = agent;
@@ -574,7 +667,7 @@ function openBriefing(agent: Citizen): void {
   if (addedContact) addPlayerMessage(playerProfile, "Contact added", `${agent.displayName} was added to your contacts.`, worldTime.absoluteMinutes, "contact");
 
   briefingTitle.textContent = `${agent.displayName} Briefing`;
-  briefingGreeting.textContent = agent.greetingScript[0] ?? "Welcome back, Devon. I have your STG briefing ready.";
+  briefingGreeting.textContent = agent.id === EXECUTIVE_ASSISTANT_ID ? executiveAssistantGreeting() : agent.greetingScript[0] ?? "Welcome back, Devon. I have your STG briefing ready.";
 
   const vercelSource = agent.briefingSources.find((source) => source.toLowerCase().includes("vercel"));
   const githubSource = agent.briefingSources.find((source) => source.toLowerCase().includes("github"));
@@ -615,6 +708,119 @@ function closeBriefing(): void {
   updateTouchControlVisibility();
 }
 
+function clearVoiceTimeout(): void {
+  if (voiceTimeout === null) return;
+  window.clearTimeout(voiceTimeout);
+  voiceTimeout = null;
+}
+
+function isAssistantVoiceAvailable(agent: Citizen | null): boolean {
+  if (!agentVoiceEnabled || !agent) return false;
+  if (sceneState.transitioning || sceneState.activeScene !== "apartment") return false;
+  if (agent.currentScene !== sceneState.activeScene || agent.currentState === "home" || agent.currentState === "off_district") return false;
+  return (playerDistanceToAgent ?? Number.POSITIVE_INFINITY) <= VOICE_INTERACTION_DISTANCE;
+}
+
+function setVoiceState(nextState: VoiceState, caption = ""): void {
+  voiceState = nextState;
+  voiceCaptionText = caption;
+}
+
+function createOpenAIRealtimeVoiceSessionPlaceholder(agent: Citizen): void {
+  void agent;
+  // Future hook: create and attach an OpenAI Realtime voice session here.
+}
+
+function startAssistantVoicePlaceholder(): void {
+  const agent = executiveAssistant();
+  updateVoiceState();
+  if (!agentVoiceEnabled) {
+    setVoiceState("unavailable", "Voice is disabled in settings.");
+    showToast("Voice is disabled.");
+    clearVoiceTimeout();
+    voiceTimeout = window.setTimeout(() => {
+      updateVoiceState();
+    }, 1800);
+    return;
+  }
+
+  if (!isAssistantVoiceAvailable(agent)) {
+    setVoiceState("unavailable", "Move closer to the Executive Assistant in Reception.");
+    showToast("Voice is available near the Executive Assistant.");
+    clearVoiceTimeout();
+    voiceTimeout = window.setTimeout(() => {
+      updateVoiceState();
+    }, 1800);
+    return;
+  }
+
+  clearVoiceTimeout();
+  if (agent) createOpenAIRealtimeVoiceSessionPlaceholder(agent);
+  setVoiceState("listening", "Listening...");
+  voiceTimeout = window.setTimeout(() => {
+    setVoiceState("speaking", agent?.id === EXECUTIVE_ASSISTANT_ID ? executiveAssistantGreeting() : VOICE_PLACEHOLDER_TEXT);
+    voiceTimeout = window.setTimeout(() => {
+      setVoiceState(isAssistantVoiceAvailable(agent) ? "muted" : "unavailable");
+    }, 3200);
+  }, 700);
+}
+
+function updateVoiceState(): void {
+  const agent = executiveAssistant();
+  currentAudioZone = audioZoneForPoint({ x: player.position.x, z: player.position.z }, sceneState.activeScene);
+  if (!agent || sceneState.activeScene !== "apartment") {
+    playerDistanceToAgent = null;
+    voiceVolume = 0;
+    agentAudioZone = null;
+    voiceRoomAttenuation = 0;
+    if (voiceState !== "listening" && voiceState !== "speaking") setVoiceState("unavailable");
+  } else {
+    playerDistanceToAgent = distance2D({ x: player.position.x, z: player.position.z }, agent.position);
+    agentAudioZone = audioZoneForPoint(agent.position, agent.currentScene);
+    voiceRoomAttenuation = currentAudioZone === agentAudioZone ? 1 : VOICE_CROSS_ROOM_ATTENUATION;
+    const falloffDistance = VOICE_MAX_DISTANCE - VOICE_FULL_VOLUME_DISTANCE;
+    const distanceVolume = clamp01(1 - Math.max(0, playerDistanceToAgent - VOICE_FULL_VOLUME_DISTANCE) / falloffDistance);
+    voiceVolume = agentVoiceEnabled ? clamp01(distanceVolume * voiceRoomAttenuation * voiceVolumeSetting) : 0;
+    if (!isAssistantVoiceAvailable(agent) && voiceState !== "listening" && voiceState !== "speaking") {
+      setVoiceState("unavailable");
+    } else if (isAssistantVoiceAvailable(agent) && voiceState === "unavailable") {
+      setVoiceState("muted");
+    }
+  }
+
+  voicePanel.hidden = !agentVoiceEnabled || (voiceState === "unavailable" && !voiceCaptionText && !isAssistantVoiceAvailable(agent));
+  const distanceLabel = playerDistanceToAgent === null ? "outside range" : `${playerDistanceToAgent.toFixed(1)}m`;
+  const zoneLabel = audioZoneLabel(currentAudioZone);
+  voiceStatus.textContent = `Voice: ${voiceState} / ${Math.round(voiceVolume * 100)}% / ${distanceLabel} / ${zoneLabel}`;
+  voiceMeterFill.style.width = `${Math.round(voiceVolume * 100)}%`;
+  voiceCaption.hidden = !voiceCaptionText || !captionsEnabled;
+  voiceCaption.textContent = voiceCaptionText;
+  updateVoiceSettingsPanel();
+}
+
+function updateVoiceSettingsPanel(): void {
+  voiceEnabledToggle.checked = agentVoiceEnabled;
+  captionsEnabledToggle.checked = captionsEnabled;
+  voiceVolumeSlider.value = `${Math.round(voiceVolumeSetting * 100)}`;
+  voiceVolumeValue.textContent = `${Math.round(voiceVolumeSetting * 100)}%`;
+  voicePushToTalkKey.textContent = "V";
+  voiceCurrentZone.textContent = audioZoneLabel(currentAudioZone);
+  voiceStateDisplay.textContent = voiceState;
+  voiceOpenAiStatus.textContent = "not connected yet";
+}
+
+function openVoiceSettings(): void {
+  voiceSettingsPanel.hidden = false;
+  updateVoiceSettingsPanel();
+  actionPrompt.hidden = true;
+  updateTouchControlVisibility();
+}
+
+function closeVoiceSettings(): void {
+  voiceSettingsPanel.hidden = true;
+  updateTouchControlVisibility();
+}
+
 function relationshipToPlayerLabel(score: number): string {
   if (score >= 75) return "close friend";
   if (score >= 40) return "friend";
@@ -628,6 +834,7 @@ function relationshipToPlayerLabel(score: number): string {
 function greetingForPlayer(citizen: Citizen): string {
   const score = relationshipForCitizen(playerProfile, citizen.id);
   if (citizen.currentState === "walking_to_work" || citizen.currentMood === "rushed" || citizen.wasLateToday) return `Make it quick, ${playerProfile.displayName}. I'm on my way.`;
+  if (citizen.id === EXECUTIVE_ASSISTANT_ID) return executiveAssistantGreeting();
   if (citizen.agentType === "personal_assistant") return citizen.greetingScript[0] ?? `Welcome back, ${playerProfile.displayName}.`;
   if (score >= 40) return `Hey ${playerProfile.displayName}, good to see you.`;
   if (score <= -10) return "Oh. It's you.";
@@ -803,7 +1010,7 @@ function updateTouchControlVisibility(): void {
     focusedElement instanceof HTMLInputElement ||
     focusedElement instanceof HTMLTextAreaElement ||
     focusedElement instanceof HTMLSelectElement;
-  const blockingPanelOpen = !phonePanel.hidden || !journalModal.hidden || !homePanel.hidden || !popup.hidden || !briefingPanel.hidden || !characterModal.hidden;
+  const blockingPanelOpen = !phonePanel.hidden || !journalModal.hidden || !homePanel.hidden || !voiceSettingsPanel.hidden || !popup.hidden || !briefingPanel.hidden || !characterModal.hidden;
   const shouldShow = shouldShowTouchControls() && !typing && !blockingPanelOpen;
   touchControls.classList.toggle("visible", shouldShow);
   if (!shouldShow) resetJoystick();
@@ -849,10 +1056,8 @@ function renderHomeProfile(): void {
 }
 
 async function restAtHome(): Promise<void> {
-  await fadeToScene(sceneState, fadeOverlay, "apartment", () => {
-    worldTime = advanceWorldHours(1);
-  });
-  showToast("You reviewed the briefing for an hour.");
+  await fadeToScene(sceneState, fadeOverlay, "apartment", () => {});
+  showToast("You reviewed the briefing.");
 }
 
 function closeHomePanel(): void {
@@ -1198,7 +1403,7 @@ function updateCitizenMeshes(): void {
 }
 
 function movePlayer(delta: number): void {
-  if (!popup.hidden || !briefingPanel.hidden || !homePanel.hidden || !journalModal.hidden || !phonePanel.hidden || sceneState.transitioning) {
+  if (!popup.hidden || !briefingPanel.hidden || !homePanel.hidden || !journalModal.hidden || !phonePanel.hidden || !voiceSettingsPanel.hidden || sceneState.transitioning) {
     playerVelocity.lerp(new THREE.Vector3(), 1 - Math.pow(0.00003, delta));
     return;
   }
@@ -1303,13 +1508,16 @@ function updatePrompts(): void {
     if (distance2D(playerPoint, apartmentPortal.interiorPosition) < 2.4) activeDoorAction = "leave_apartment";
   }
 
-  if (!popup.hidden || !briefingPanel.hidden || sceneState.transitioning) {
+  if (!popup.hidden || !briefingPanel.hidden || !voiceSettingsPanel.hidden || sceneState.transitioning) {
     actionPrompt.hidden = true;
     return;
   }
 
   if (nearbyCitizen) {
-    actionPrompt.textContent = `[E] Talk to ${nearbyCitizen.name}`;
+    actionPrompt.textContent =
+      nearbyCitizen.id === EXECUTIVE_ASSISTANT_ID
+        ? `[E] Briefing / [V] Voice with ${nearbyCitizen.preferredName}`
+        : `[E] Talk to ${nearbyCitizen.name}`;
     actionPrompt.hidden = false;
     return;
   }
@@ -1388,9 +1596,9 @@ function closeInteraction(): void {
 
 function maybeOpenReceptionBriefing(): void {
   if (briefingAutoOpened || sceneState.transitioning || sceneState.activeScene !== "apartment") return;
-  if (!briefingPanel.hidden || !popup.hidden || !phonePanel.hidden || !journalModal.hidden || !homePanel.hidden || !characterModal.hidden) return;
+  if (!briefingPanel.hidden || !popup.hidden || !phonePanel.hidden || !voiceSettingsPanel.hidden || !journalModal.hidden || !homePanel.hidden || !characterModal.hidden) return;
 
-  const assistant = citizens.find((citizen) => citizen.id === "agent_exec_assistant_001");
+  const assistant = executiveAssistant();
   if (!assistant) return;
   const inReception = distance2D({ x: player.position.x, z: player.position.z }, { x: 0, z: 5.2 }) < 3.2;
   const nearAssistant = distance2D({ x: player.position.x, z: player.position.z }, assistant.position) < 3.2;
@@ -1403,6 +1611,24 @@ function maybeOpenReceptionBriefing(): void {
 popupClose.addEventListener("click", closeInteraction);
 popupLeave.addEventListener("click", closeInteraction);
 briefingClose.addEventListener("click", closeBriefing);
+voiceSettingsOpen.addEventListener("click", openVoiceSettings);
+voiceSettingsClose.addEventListener("click", closeVoiceSettings);
+voiceEnabledToggle.addEventListener("change", () => {
+  agentVoiceEnabled = voiceEnabledToggle.checked;
+  if (!agentVoiceEnabled) {
+    clearVoiceTimeout();
+    setVoiceState("unavailable");
+  }
+  updateVoiceState();
+});
+captionsEnabledToggle.addEventListener("change", () => {
+  captionsEnabled = captionsEnabledToggle.checked;
+  updateVoiceState();
+});
+voiceVolumeSlider.addEventListener("input", () => {
+  voiceVolumeSetting = clamp01(Number(voiceVolumeSlider.value) / 100);
+  updateVoiceState();
+});
 rememberKnowledgeButton.addEventListener("click", () => {
   if (!activeSharedKnowledge || !activeInteractionCitizen) return;
   const remembered = rememberKnowledge(playerProfile, activeSharedKnowledge.id, activeInteractionCitizen.id, worldTime.absoluteMinutes);
@@ -1722,6 +1948,7 @@ function animate(): void {
   updateCamera(delta);
   updateBuildingOcclusion();
   updateSceneVisibility();
+  updateVoiceState();
   updatePrompts();
   maybeOpenReceptionBriefing();
   updateHud();
@@ -1767,7 +1994,22 @@ function animate(): void {
       (business) => business.operationalStatus !== "Closed" && business.employeesPresentCitizenIds.length === 0 && business.workersEnRouteCitizenIds.length === 0
     ).length,
     time: formatWorldTime(worldTime),
-    triangles: renderer.info.render.triangles
+    triangles: renderer.info.render.triangles,
+    realWorldTime: worldTime.realWorldTime,
+    realWorldDate: worldTime.realWorldDate,
+    timezone: worldTime.timezone,
+    dayOfWeek: worldTime.dayOfWeek,
+    vibeCityTimeMode: worldTime.vibeCityTimeMode,
+    voiceState,
+    agentVoiceEnabled,
+    captionsEnabled,
+    voiceVolumeSetting: Number(voiceVolumeSetting.toFixed(2)),
+    playerDistanceToAgent: playerDistanceToAgent === null ? null : Number(playerDistanceToAgent.toFixed(2)),
+    voiceVolume: Number(voiceVolume.toFixed(2)),
+    voiceCaption: voiceCaptionText,
+    currentAudioZone,
+    agentAudioZone,
+    voiceRoomAttenuation: Number(voiceRoomAttenuation.toFixed(2))
   };
   app.dataset.frames = `${window.__vibeCity3DHealth.frames}`;
   app.dataset.buildings = `${window.__vibeCity3DHealth.buildings}`;
@@ -1801,6 +2043,20 @@ function animate(): void {
   app.dataset.multiplayerLastError = window.__vibeCity3DHealth.multiplayerLastError ?? "";
   app.dataset.multiplayerWebsocketConnected = `${window.__vibeCity3DHealth.multiplayerWebsocketConnected}`;
   app.dataset.openBusinessesWithoutWorkers = `${window.__vibeCity3DHealth.openBusinessesWithoutWorkers}`;
+  app.dataset.realWorldTime = window.__vibeCity3DHealth.realWorldTime;
+  app.dataset.realWorldDate = window.__vibeCity3DHealth.realWorldDate;
+  app.dataset.timezone = window.__vibeCity3DHealth.timezone;
+  app.dataset.dayOfWeek = window.__vibeCity3DHealth.dayOfWeek;
+  app.dataset.vibeCityTimeMode = window.__vibeCity3DHealth.vibeCityTimeMode;
+  app.dataset.voiceState = window.__vibeCity3DHealth.voiceState;
+  app.dataset.agentVoiceEnabled = `${window.__vibeCity3DHealth.agentVoiceEnabled}`;
+  app.dataset.captionsEnabled = `${window.__vibeCity3DHealth.captionsEnabled}`;
+  app.dataset.voiceVolumeSetting = `${window.__vibeCity3DHealth.voiceVolumeSetting}`;
+  app.dataset.playerDistanceToAgent = `${window.__vibeCity3DHealth.playerDistanceToAgent ?? ""}`;
+  app.dataset.voiceVolume = `${window.__vibeCity3DHealth.voiceVolume}`;
+  app.dataset.currentAudioZone = window.__vibeCity3DHealth.currentAudioZone;
+  app.dataset.agentAudioZone = window.__vibeCity3DHealth.agentAudioZone ?? "";
+  app.dataset.voiceRoomAttenuation = `${window.__vibeCity3DHealth.voiceRoomAttenuation}`;
   cameraModeLabel.textContent = "Isometric";
 }
 
@@ -1815,8 +2071,10 @@ function handleKeyDown(event: KeyboardEvent): void {
 
   if (code === "keye") handleInteractionKey();
   if (code === "keyp") openPhone("contacts");
-  if (code === "keyt") worldTime = advanceWorldHours(1);
-  if (code === "keyy") worldTime = advanceWorldToNextDay();
+  if (code === "keyv" && performance.now() - lastVoiceKeyAt > 180) {
+    startAssistantVoicePlaceholder();
+    lastVoiceKeyAt = performance.now();
+  }
 
   if (code === "keyc" && performance.now() - lastZoomCycleAt > 180) {
     zoomLevelIndex = (zoomLevelIndex + 1) % ZOOM_LEVELS.length;

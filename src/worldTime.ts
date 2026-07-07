@@ -1,78 +1,77 @@
 export const DAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"] as const;
 
+export type VibeCityTimeMode = "real_world" | "simulated";
+
 export type WorldTimeState = {
   absoluteMinutes: number;
   seasonDay: number;
   dayOfWeek: (typeof DAY_NAMES)[number];
   minuteOfDay: number;
   seasonStartTimestamp: number;
+  realWorldTime: string;
+  realWorldDate: string;
+  timezone: string;
+  vibeCityTimeMode: VibeCityTimeMode;
 };
 
-const STORAGE_KEY = "stgWorldZero.seasonStartTimestamp";
-const OFFSET_KEY = "stgWorldZero.debugWorldMinuteOffset";
-const START_MINUTE = 8 * 60 + 45;
 const MINUTES_PER_DAY = 1440;
-const MINUTES_PER_REAL_SECOND = 5;
+const MINUTES_PER_WEEK = MINUTES_PER_DAY * DAY_NAMES.length;
+const TIME_MODE: VibeCityTimeMode = "real_world";
 
-function getStoredNumber(key: string): number | null {
-  const value = window.localStorage.getItem(key);
-  if (!value) return null;
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : null;
+function localDayIndex(date: Date): number {
+  return (date.getDay() + 6) % DAY_NAMES.length;
 }
 
-function getSeasonStartTimestamp(): number {
-  const existing = getStoredNumber(STORAGE_KEY);
-  if (existing) return existing;
-  const created = Date.now();
-  window.localStorage.setItem(STORAGE_KEY, `${created}`);
-  return created;
+function formatLocalTime(date: Date): string {
+  return new Intl.DateTimeFormat(undefined, {
+    hour: "numeric",
+    minute: "2-digit",
+    second: "2-digit"
+  }).format(date);
 }
 
-function getDebugOffset(): number {
-  return getStoredNumber(OFFSET_KEY) ?? 0;
+function formatLocalDate(date: Date): string {
+  return new Intl.DateTimeFormat(undefined, {
+    weekday: "long",
+    year: "numeric",
+    month: "long",
+    day: "numeric"
+  }).format(date);
 }
 
-function setDebugOffset(minutes: number): void {
-  window.localStorage.setItem(OFFSET_KEY, `${minutes}`);
+function localTimezone(): string {
+  return Intl.DateTimeFormat().resolvedOptions().timeZone || "Local";
 }
 
 export function getWorldTime(): WorldTimeState {
-  const seasonStartTimestamp = getSeasonStartTimestamp();
-  const elapsedSeconds = Math.max(0, (Date.now() - seasonStartTimestamp) / 1000);
-  const absoluteMinutes = START_MINUTE + elapsedSeconds * MINUTES_PER_REAL_SECOND + getDebugOffset();
-  const dayIndex = Math.floor(absoluteMinutes / MINUTES_PER_DAY);
-  const minuteOfDay = ((Math.floor(absoluteMinutes) % MINUTES_PER_DAY) + MINUTES_PER_DAY) % MINUTES_PER_DAY;
+  const now = new Date();
+  const dayIndex = localDayIndex(now);
+  const minuteOfDay = now.getHours() * 60 + now.getMinutes();
+  const weekIndex = Math.floor(now.getTime() / (MINUTES_PER_WEEK * 60 * 1000));
 
   return {
-    absoluteMinutes,
+    absoluteMinutes: weekIndex * MINUTES_PER_WEEK + dayIndex * MINUTES_PER_DAY + minuteOfDay,
     seasonDay: dayIndex + 1,
-    dayOfWeek: DAY_NAMES[dayIndex % DAY_NAMES.length],
+    dayOfWeek: DAY_NAMES[dayIndex],
     minuteOfDay,
-    seasonStartTimestamp
+    seasonStartTimestamp: 0,
+    realWorldTime: formatLocalTime(now),
+    realWorldDate: formatLocalDate(now),
+    timezone: localTimezone(),
+    vibeCityTimeMode: TIME_MODE
   };
 }
 
-export function advanceWorldHours(hours: number): WorldTimeState {
-  setDebugOffset(getDebugOffset() + hours * 60);
+export function advanceWorldHours(_hours: number): WorldTimeState {
   return getWorldTime();
 }
 
 export function advanceWorldToNextDay(): WorldTimeState {
-  const state = getWorldTime();
-  const nextDayStart = Math.floor(state.absoluteMinutes / MINUTES_PER_DAY + 1) * MINUTES_PER_DAY;
-  const desiredAbsoluteMinutes = nextDayStart + START_MINUTE;
-  const delta = desiredAbsoluteMinutes - state.absoluteMinutes;
-  setDebugOffset(getDebugOffset() + delta);
   return getWorldTime();
 }
 
 export function formatWorldTime(state: WorldTimeState): string {
-  const hours24 = Math.floor(state.minuteOfDay / 60);
-  const minutes = state.minuteOfDay % 60;
-  const suffix = hours24 >= 12 ? "PM" : "AM";
-  const hours12 = hours24 % 12 || 12;
-  return `World Time: Day ${state.seasonDay} - ${state.dayOfWeek} - ${hours12}:${`${minutes}`.padStart(2, "0")} ${suffix}`;
+  return `${state.realWorldDate} - ${state.realWorldTime}`;
 }
 
 export function dayIndexForName(day: (typeof DAY_NAMES)[number]): number {

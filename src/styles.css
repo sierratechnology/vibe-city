@@ -124,7 +124,8 @@ canvas {
   font-weight: 800;
 }
 
-#journal-open {
+#journal-open,
+#voice-settings-open {
   width: 100%;
   min-height: 34px;
   margin-top: 10px;
@@ -134,6 +135,10 @@ canvas {
   color: #14171c;
   font-weight: 800;
   cursor: pointer;
+}
+
+#voice-settings-open {
+  margin-top: 8px;
 }
 
 #action-prompt {
@@ -148,6 +153,144 @@ canvas {
   background: rgba(15, 18, 24, 0.88);
   box-shadow: 0 14px 34px rgba(0, 0, 0, 0.34);
   font-weight: 800;
+}
+
+#voice-panel {
+  position: fixed;
+  left: 50%;
+  bottom: 122px;
+  z-index: 4;
+  width: min(430px, calc(100vw - 32px));
+  transform: translateX(-50%);
+  padding: 10px 12px;
+  border: 1px solid rgba(139, 212, 229, 0.28);
+  border-radius: 8px;
+  background: rgba(13, 17, 22, 0.9);
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.34);
+}
+
+#voice-status {
+  color: #d8ecf0;
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+#voice-meter {
+  height: 6px;
+  margin-top: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.14);
+}
+
+#voice-meter-fill {
+  display: block;
+  width: 0%;
+  height: 100%;
+  border-radius: inherit;
+  background: #8bd4e5;
+  transition: width 140ms ease;
+}
+
+#voice-caption {
+  margin: 8px 0 0;
+  color: #f5f1e8;
+  font-size: 14px;
+  font-weight: 800;
+  line-height: 1.35;
+}
+
+#voice-settings-panel {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  z-index: 6;
+  width: min(330px, calc(100vw - 36px));
+  padding: 16px;
+  border: 1px solid rgba(139, 212, 229, 0.28);
+  border-radius: 8px;
+  background: rgba(13, 17, 22, 0.96);
+  box-shadow: 0 22px 56px rgba(0, 0, 0, 0.44);
+}
+
+#voice-settings-panel h2 {
+  margin: 0 42px 14px 0;
+  font-size: 20px;
+}
+
+#voice-settings-close {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 34px;
+  height: 34px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #f5f1e8;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.voice-setting-row,
+.voice-setting-stack {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 38px;
+  color: #d8ecf0;
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.voice-setting-stack {
+  display: grid;
+  gap: 8px;
+  align-items: stretch;
+  margin-top: 8px;
+}
+
+.voice-setting-stack span {
+  display: flex;
+  justify-content: space-between;
+}
+
+#voice-volume-slider {
+  width: 100%;
+  accent-color: #8bd4e5;
+}
+
+#voice-settings-readout {
+  display: grid;
+  gap: 8px;
+  margin: 14px 0 0;
+}
+
+#voice-settings-readout div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  min-height: 30px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+#voice-settings-readout dt {
+  color: rgba(245, 241, 232, 0.72);
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+#voice-settings-readout dd {
+  margin: 0;
+  color: #f5f1e8;
+  font-size: 13px;
+  font-weight: 900;
+  text-align: right;
 }
 
 #fade-overlay {
@@ -732,7 +875,8 @@ body.dev-mode #touch-debug {
     text-overflow: ellipsis;
   }
 
-  #journal-open {
+  #journal-open,
+  #voice-settings-open {
     width: auto;
     min-width: 84px;
     min-height: 44px;
@@ -750,6 +894,7 @@ body.dev-mode #touch-debug {
   #knowledge-journal,
   #home-panel,
   #briefing-panel,
+  #voice-settings-panel,
   #interaction-popup {
     box-sizing: border-box;
     padding: 14px;
@@ -769,8 +914,10 @@ body.dev-mode #touch-debug {
 
   #knowledge-journal,
   #home-panel,
-  #briefing-panel {
+  #briefing-panel,
+  #voice-settings-panel {
     top: auto;
+    right: auto;
     left: 50%;
     bottom: max(14px, env(safe-area-inset-bottom));
     width: min(88vw, 500px);
@@ -796,6 +943,7 @@ body.dev-mode #touch-debug {
   #phone-panel button,
   #knowledge-journal button,
   #briefing-panel button,
+  #voice-settings-panel button,
   #interaction-popup button,
   #home-actions button,
   #home-close,
@@ -813,6 +961,11 @@ body.dev-mode #touch-debug {
     bottom: calc(146px + env(safe-area-inset-bottom));
     max-width: calc(100vw - 32px);
     font-size: clamp(13px, 3.4vw, 15px);
+  }
+
+  #voice-panel {
+    bottom: calc(198px + env(safe-area-inset-bottom));
+    max-width: calc(100vw - 32px);
   }
 
   #dev-tools {
