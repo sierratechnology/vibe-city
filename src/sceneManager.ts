@@ -1,4 +1,4 @@
-export type ActiveSceneName = "outside" | "barA" | "barB" | "sportsBar" | "casino" | "restaurant" | "bookShop" | "musicVenue" | "parkingGarage" | "apartment";
+export type ActiveSceneName = "outside" | "apartment";
 
 export type SceneState = {
   activeScene: ActiveSceneName;
@@ -7,7 +7,7 @@ export type SceneState = {
 
 export function createSceneState(): SceneState {
   return {
-    activeScene: "outside",
+    activeScene: "apartment",
     transitioning: false
   };
 }

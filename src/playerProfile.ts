@@ -29,7 +29,7 @@ export type PlayerProfile = {
   messages: PlayerMessage[];
 };
 
-const PROFILE_KEY = "vibeCity.playerProfile";
+const PROFILE_KEY = "stgWorldZero.playerProfile";
 
 export function createDefaultPlayerProfile(displayName = "Player"): PlayerProfile {
   return {
@@ -38,17 +38,17 @@ export function createDefaultPlayerProfile(displayName = "Player"): PlayerProfil
     wallet: 2000,
     reputationStars: 0,
     influence: 0,
-    homeBuildingId: "apartment-building",
+    homeBuildingId: "stg_headquarters",
     knownCitizenIds: [],
     relationshipByCitizenId: {},
     lastTalkHourByCitizenId: {},
     knowledgeJournal: [],
-    interests: ["nightlife", "music", "food"],
+    interests: ["briefings", "projects", "decisions"],
     messages: [
       {
         id: "welcome-message",
-        title: "Welcome to District 1",
-        body: "Your phone will collect contacts, messages, and knowledge as you meet people.",
+        title: "Welcome to STG World Zero",
+        body: "Your phone will collect contacts, messages, and knowledge as the headquarters comes online.",
         createdAtWorldTime: 0,
         category: "system"
       }
@@ -144,7 +144,7 @@ export function resetCitizenPersistence(): void {
   const keys: string[] = [];
   for (let index = 0; index < window.localStorage.length; index += 1) {
     const key = window.localStorage.key(index);
-    if (key?.startsWith("vibeCity.social.") || key?.startsWith("vibeCity.knowledge.") || key?.startsWith("vibeCity.wallet.") || key?.startsWith("vibeCity.paidShifts.")) {
+    if (key?.startsWith("stgWorldZero.social.") || key?.startsWith("stgWorldZero.knowledge.") || key?.startsWith("stgWorldZero.wallet.") || key?.startsWith("stgWorldZero.paidShifts.")) {
       keys.push(key);
     }
   }
@@ -152,6 +152,6 @@ export function resetCitizenPersistence(): void {
 }
 
 export function resetWorldTimePersistence(): void {
-  window.localStorage.removeItem("vibeCity.seasonStartTimestamp");
-  window.localStorage.removeItem("vibeCity.debugWorldMinuteOffset");
+  window.localStorage.removeItem("stgWorldZero.seasonStartTimestamp");
+  window.localStorage.removeItem("stgWorldZero.debugWorldMinuteOffset");
 }

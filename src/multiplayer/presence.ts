@@ -1,7 +1,7 @@
 import { RealtimeChannel, SupabaseClient } from "@supabase/supabase-js";
 import { createSupabaseClient, getSupabaseRealtimeConfig } from "./supabaseClient";
 
-export type PresenceScene = "outside" | "apartment" | "barA" | "barB" | "sportsBar" | "casino" | "restaurant" | "bookShop" | "musicVenue" | "parkingGarage" | "none";
+export type PresenceScene = "outside" | "apartment" | "none";
 
 export type PlayerPresence = {
   playerId: string;
@@ -47,8 +47,8 @@ export type PresenceAdapter = {
   dispose(): void;
 };
 
-const CHANNEL_NAME = "vibe-city-district-1";
-const LOCAL_PLAYER_ID_KEY = "vibeCity.playerId";
+const CHANNEL_NAME = "stg-world-zero";
+const LOCAL_PLAYER_ID_KEY = "stgWorldZero.playerId";
 const REMOTE_TIMEOUT_MS = 10_000;
 const CONNECTING_TIMEOUT_MS = 10_000;
 
@@ -133,32 +133,32 @@ class SupabasePresenceAdapter implements PresenceAdapter {
 
   constructor(client: SupabaseClient) {
     this.client = client;
-    console.info("Vibe City presence channel creating", { channelName: CHANNEL_NAME });
+    console.info("STG World Zero presence channel creating", { channelName: CHANNEL_NAME });
     this.channel = this.client.channel(CHANNEL_NAME, {
       config: { presence: { key: this.localPlayerId } }
     });
-    console.info("Vibe City presence channel created", { channelName: CHANNEL_NAME });
+    console.info("STG World Zero presence channel created", { channelName: CHANNEL_NAME });
     this.channel.on("presence", { event: "sync" }, () => {
-      console.info("Vibe City presence sync received", { channelName: CHANNEL_NAME });
+      console.info("STG World Zero presence sync received", { channelName: CHANNEL_NAME });
       this.syncPresence();
     });
     this.channel.on("presence", { event: "join" }, (payload) => {
-      console.info("Vibe City presence join received", { channelName: CHANNEL_NAME, payload });
+      console.info("STG World Zero presence join received", { channelName: CHANNEL_NAME, payload });
       this.syncPresence();
     });
     this.channel.on("presence", { event: "leave" }, (payload) => {
-      console.info("Vibe City presence leave received", { channelName: CHANNEL_NAME, payload });
+      console.info("STG World Zero presence leave received", { channelName: CHANNEL_NAME, payload });
       this.syncPresence();
     });
     this.channel.subscribe((status, error) => {
-      console.info("Vibe City presence subscribe status", { channelName: CHANNEL_NAME, status, error });
+      console.info("STG World Zero presence subscribe status", { channelName: CHANNEL_NAME, status, error });
       this.channelStatus = status.toLowerCase();
       this.subscribeStatus = status;
 
       if (status === "SUBSCRIBED") {
         this.lastError = null;
         if (this.lastPresence) {
-          console.info("Vibe City presence tracking after subscribed", { channelName: CHANNEL_NAME, playerId: this.localPlayerId });
+          console.info("STG World Zero presence tracking after subscribed", { channelName: CHANNEL_NAME, playerId: this.localPlayerId });
           void this.channel.track(this.lastPresence);
         }
         return;
@@ -166,7 +166,7 @@ class SupabasePresenceAdapter implements PresenceAdapter {
 
       if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") {
         this.lastError = formatRealtimeError(error) || status;
-        console.error("Vibe City presence connection error", {
+        console.error("STG World Zero presence connection error", {
           channelName: CHANNEL_NAME,
           status,
           error: this.lastError
@@ -214,7 +214,7 @@ class SupabasePresenceAdapter implements PresenceAdapter {
     const connected = this.channelStatus === "subscribed";
     if (!connected && !this.lastError && now - this.createdAt > CONNECTING_TIMEOUT_MS) {
       this.lastError = `Still ${this.channelStatus} after ${Math.round((now - this.createdAt) / 1000)}s. Websocket connected: ${this.websocketConnected()}.`;
-      console.error("Vibe City presence stuck connecting", {
+      console.error("STG World Zero presence stuck connecting", {
         channelName: CHANNEL_NAME,
         subscribeStatus: this.subscribeStatus,
         channelStatus: this.channelStatus,

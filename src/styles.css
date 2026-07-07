@@ -178,6 +178,79 @@ canvas {
   box-shadow: 0 22px 56px rgba(0, 0, 0, 0.44);
 }
 
+#briefing-panel {
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  z-index: 7;
+  width: min(680px, calc(100vw - 32px));
+  max-height: min(760px, calc(100vh - 32px));
+  overflow: auto;
+  transform: translate(-50%, -50%);
+  padding: 20px;
+  border: 1px solid rgba(148, 196, 205, 0.32);
+  border-radius: 8px;
+  background: rgba(13, 17, 22, 0.98);
+  box-shadow: 0 28px 72px rgba(0, 0, 0, 0.54);
+}
+
+#briefing-panel h2 {
+  margin: 0 42px 8px 0;
+  font-size: 22px;
+}
+
+#briefing-greeting {
+  margin: 0 42px 16px 0;
+  color: #d8ecf0;
+  font-size: 16px;
+  line-height: 1.45;
+}
+
+#briefing-close {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 34px;
+  height: 34px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #f5f1e8;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+#briefing-content {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.briefing-section {
+  min-height: 106px;
+  padding: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.055);
+}
+
+.briefing-section h3 {
+  margin: 0 0 8px;
+  color: #8bd4e5;
+  font-size: 15px;
+}
+
+.briefing-section p,
+.briefing-section li {
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.briefing-section ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
 #knowledge-journal {
   position: fixed;
   top: 50%;
@@ -676,6 +749,7 @@ body.dev-mode #touch-debug {
   #phone-panel,
   #knowledge-journal,
   #home-panel,
+  #briefing-panel,
   #interaction-popup {
     box-sizing: border-box;
     padding: 14px;
@@ -694,7 +768,8 @@ body.dev-mode #touch-debug {
   }
 
   #knowledge-journal,
-  #home-panel {
+  #home-panel,
+  #briefing-panel {
     top: auto;
     left: 50%;
     bottom: max(14px, env(safe-area-inset-bottom));
@@ -720,6 +795,7 @@ body.dev-mode #touch-debug {
 
   #phone-panel button,
   #knowledge-journal button,
+  #briefing-panel button,
   #interaction-popup button,
   #home-actions button,
   #home-close,
@@ -727,6 +803,10 @@ body.dev-mode #touch-debug {
   #phone-close {
     min-height: 44px;
     font-size: clamp(13px, 3.4vw, 15px);
+  }
+
+  #briefing-content {
+    grid-template-columns: 1fr;
   }
 
   #action-prompt {

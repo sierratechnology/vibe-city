@@ -66,29 +66,13 @@ type RemotePlayerRuntime = {
 };
 
 type DoorAction =
-  | "enter_bar_a"
-  | "leave_bar_a"
-  | "enter_bar_b"
-  | "leave_bar_b"
-  | "enter_sports_bar"
-  | "leave_sports_bar"
-  | "enter_casino"
-  | "leave_casino"
-  | "enter_restaurant"
-  | "leave_restaurant"
-  | "enter_book_shop"
-  | "leave_book_shop"
-  | "enter_music_venue"
-  | "leave_music_venue"
-  | "enter_parking_garage"
-  | "leave_parking_garage"
   | "enter_apartment"
   | "leave_apartment";
 type HomeAction = "rest" | "profile" | "customize";
 
 const PLAYER_RADIUS = 0.55;
 const PLAYER_SPEED = 8.2;
-const NPC_WALK_SPEED = 5.4;
+const AGENT_WALK_SPEED = 5.4;
 const DOOR_APPROACH_DISTANCE = 2.35;
 const ISO_CAMERA_OFFSET = new THREE.Vector3(24, 24, 24);
 const ISO_FORWARD = new THREE.Vector3(0, 0, -1).normalize();
@@ -110,6 +94,11 @@ const fadeOverlay = document.querySelector<HTMLDivElement>("#fade-overlay")!;
 const popup = document.querySelector<HTMLElement>("#interaction-popup")!;
 const popupClose = document.querySelector<HTMLButtonElement>("#interaction-close")!;
 const popupLeave = document.querySelector<HTMLButtonElement>("#interaction-leave")!;
+const briefingPanel = document.querySelector<HTMLElement>("#briefing-panel")!;
+const briefingClose = document.querySelector<HTMLButtonElement>("#briefing-close")!;
+const briefingTitle = document.querySelector<HTMLElement>("#briefing-title")!;
+const briefingGreeting = document.querySelector<HTMLElement>("#briefing-greeting")!;
+const briefingContent = document.querySelector<HTMLElement>("#briefing-content")!;
 const popupFields = {
   name: document.querySelector<HTMLElement>("#interaction-name")!,
   role: document.querySelector<HTMLElement>("#interaction-role")!,
@@ -211,16 +200,8 @@ app.append(renderer.domElement);
 
 const sceneState = createSceneState();
 const outsideGroup = new THREE.Group();
-const barAGroup = new THREE.Group();
-const barBGroup = new THREE.Group();
-const sportsBarGroup = new THREE.Group();
-const casinoGroup = new THREE.Group();
-const restaurantGroup = new THREE.Group();
-const bookShopGroup = new THREE.Group();
-const musicVenueGroup = new THREE.Group();
-const parkingGarageGroup = new THREE.Group();
 const apartmentGroup = new THREE.Group();
-scene.add(outsideGroup, barAGroup, barBGroup, sportsBarGroup, casinoGroup, restaurantGroup, bookShopGroup, musicVenueGroup, parkingGarageGroup, apartmentGroup);
+scene.add(outsideGroup, apartmentGroup);
 
 function updateCameraProjection(): void {
   const aspect = window.innerWidth / window.innerHeight;
@@ -233,14 +214,6 @@ function updateCameraProjection(): void {
 }
 
 const outsideColliders: Collider[] = [];
-const barAColliders: Collider[] = [];
-const barBColliders: Collider[] = [];
-const sportsBarColliders: Collider[] = [];
-const casinoColliders: Collider[] = [];
-const restaurantColliders: Collider[] = [];
-const bookShopColliders: Collider[] = [];
-const musicVenueColliders: Collider[] = [];
-const parkingGarageColliders: Collider[] = [];
 const apartmentColliders: Collider[] = [];
 const buildingRuntimes: WorldBuildingRuntime[] = [];
 const citizenRuntimes: CitizenRuntime[] = [];
@@ -257,7 +230,7 @@ const presenceAdapter = createPresenceAdapter();
 const remotePlayerRuntimes = new Map<string, RemotePlayerRuntime>();
 let multiplayerHudStatus = "Offline / Missing Env";
 let multiplayerDebug: PresenceDebugState | null = null;
-const socialTopics = ["work", "sports", "music", "casino", "books", "food", "nightlife", "gossip", "commute"];
+const socialTopics = ["briefing", "projects", "meetings", "decisions", "updates"];
 let worldTime: WorldTimeState = getWorldTime();
 initializeCitizenSimulationForCurrentTime();
 let occlusionEnabled = true;
@@ -270,6 +243,7 @@ let activeDoorAction: DoorAction | null = null;
 let activeHomeAction: HomeAction | null = null;
 let activeInteractionCitizen: Citizen | null = null;
 let activeSharedKnowledge: KnowledgeItem | null = null;
+let briefingAutoOpened = false;
 let activeJournalTab: "contacts" | "citizen" | "place" | "business" | "rumor" = "contacts";
 let activePhoneApp: "contacts" | "messages" | "knowledge" | "profile" | "map" | "debug" = "contacts";
 let contactAddedMessage = "";
@@ -299,14 +273,6 @@ let assetDebugGroup: THREE.Group | null = null;
 let assetDebugVisible = false;
 let generatedAssetCount = 0;
 const apartmentPortal = portalById("apartment-main");
-const barAPortal = portalById("bar-a-main");
-const barBPortal = portalById("bar-b-main");
-const sportsBarPortal = portalById("sports-bar-main");
-const casinoPortal = portalById("casino-main");
-const restaurantPortal = portalById("restaurant-main");
-const bookShopPortal = portalById("book-shop-main");
-const musicVenuePortal = portalById("music-venue-main");
-const parkingGaragePortal = portalById("parking-garage-main");
 
 function addBox(parent: THREE.Group, width: number, height: number, depth: number, x: number, y: number, z: number, material: THREE.Material): THREE.Mesh {
   const mesh = new THREE.Mesh(new THREE.BoxGeometry(width, height, depth), material);
@@ -352,227 +318,60 @@ function buildOutsideMap(): void {
   generatedAssetCount = generatedWorld.assetCount;
 }
 
-function buildBarInterior(): void {
-  barAGroup.visible = false;
-  addPlaneBox(barAGroup, 18, 16, 0.12, 0, 0, new THREE.MeshStandardMaterial({ color: 0x3b3230, roughness: 0.9 }));
-  addBox(barAGroup, 18, 1.5, 0.9, 0, 0, -8, new THREE.MeshStandardMaterial({ color: 0x201b1a, roughness: 0.75 }));
-  addBox(barAGroup, 18, 1.5, 0.9, 0, 0, 8, new THREE.MeshStandardMaterial({ color: 0x201b1a, roughness: 0.75 }));
-  addBox(barAGroup, 0.9, 1.5, 16, -9, 0, 0, new THREE.MeshStandardMaterial({ color: 0x201b1a, roughness: 0.75 }));
-  addBox(barAGroup, 0.9, 1.5, 16, 9, 0, 0, new THREE.MeshStandardMaterial({ color: 0x201b1a, roughness: 0.75 }));
-  addBox(barAGroup, 11, 1.1, 1.6, 0, 0, -4.5, new THREE.MeshStandardMaterial({ color: 0x7d523a, roughness: 0.65 }));
-  addBox(barAGroup, 11, 0.45, 2.2, 0, 1.1, -4.5, new THREE.MeshStandardMaterial({ color: 0x2a1711, roughness: 0.6 }));
-  addBox(barAGroup, 4.4, 1, 2.2, 5.8, 0, -5.2, new THREE.MeshStandardMaterial({ color: 0x4f3b34, roughness: 0.72 }));
-  addCollider(barAColliders, 0, -8, 18, 0.9);
-  addCollider(barAColliders, 0, 8, 18, 0.9);
-  addCollider(barAColliders, -9, 0, 0.9, 16);
-  addCollider(barAColliders, 9, 0, 0.9, 16);
-  addCollider(barAColliders, 0, -4.5, 11, 2.2);
-
-  const stoolMaterial = new THREE.MeshStandardMaterial({ color: 0xc5965b, roughness: 0.75 });
-  for (let x = -4; x <= 4; x += 2) {
-    addBox(barAGroup, 0.7, 0.7, 0.7, x, 0, -2.6, stoolMaterial);
-  }
-
-  const tableMaterial = new THREE.MeshStandardMaterial({ color: 0x6b4533, roughness: 0.72 });
-  for (const [x, z] of [[-4.5, 2.8], [4.5, 2.8], [0, 4.8]]) {
-    addBox(barAGroup, 1.6, 0.65, 1.6, x, 0, z, tableMaterial);
-  }
-
-  const exitPad = addPlaneBox(barAGroup, 3.5, 1.8, 0.14, barAPortal.interiorPosition.x, barAPortal.interiorPosition.z, entryPadMaterial);
-  exitPad.name = "bar-exit-pad";
-  const label = createLabelSprite("Exit", 256, 96, 36);
-  label.position.set(barAPortal.interiorPosition.x, 2.2, barAPortal.interiorPosition.z);
-  label.scale.set(3.2, 1.2, 1);
-  barAGroup.add(label);
-}
-
-function buildVenueInterior(
-  group: THREE.Group,
-  colliders: Collider[],
-  portal: typeof barAPortal,
-  titleText: string,
-  theme: number,
-  options: { bar?: boolean; restaurant?: boolean; books?: boolean; music?: boolean; sports?: boolean; garage?: boolean }
-): void {
-  group.visible = false;
-  const floorMaterial = new THREE.MeshStandardMaterial({ color: theme, roughness: 0.88 });
-  const wallMaterial = new THREE.MeshStandardMaterial({ color: 0x1d2328, roughness: 0.74 });
-  const woodMaterial = new THREE.MeshStandardMaterial({ color: 0x6f4c35, roughness: 0.72 });
-  addPlaneBox(group, 18, 16, 0.12, 0, 0, floorMaterial);
-  addBox(group, 18, 1.5, 0.9, 0, 0, -8, wallMaterial);
-  addBox(group, 18, 1.5, 0.9, 0, 0, 8, wallMaterial);
-  addBox(group, 0.9, 1.5, 16, -9, 0, 0, wallMaterial);
-  addBox(group, 0.9, 1.5, 16, 9, 0, 0, wallMaterial);
-  addCollider(colliders, 0, -8, 18, 0.9);
-  addCollider(colliders, 0, 8, 18, 0.9);
-  addCollider(colliders, -9, 0, 0.9, 16);
-  addCollider(colliders, 9, 0, 0.9, 16);
-
-  if (options.bar || options.sports || options.music) {
-    addBox(group, 11, 1.1, 1.6, 0, 0, -4.5, woodMaterial);
-    addBox(group, 11, 0.45, 2.2, 0, 1.1, -4.5, new THREE.MeshStandardMaterial({ color: 0x2a1711, roughness: 0.6 }));
-    addCollider(colliders, 0, -4.5, 11, 2.2);
-    for (let x = -4; x <= 4; x += 2) addBox(group, 0.7, 0.7, 0.7, x, 0, -2.6, new THREE.MeshStandardMaterial({ color: 0xc5965b, roughness: 0.75 }));
-  }
-
-  if (options.restaurant) {
-    addBox(group, 5.8, 1, 2.2, 4.2, 0, -4.5, new THREE.MeshStandardMaterial({ color: 0x4f5e48, roughness: 0.76 }));
-    addBox(group, 2.2, 1, 1.2, -4.2, 0, 4.6, woodMaterial);
-    addCollider(colliders, 4.2, -4.5, 5.8, 2.2);
-  }
-
-  if (options.books) {
-    for (let x = -5.5; x <= 5.5; x += 3.6) addBox(group, 1.1, 1.9, 7.5, x, 0, -1.3, new THREE.MeshStandardMaterial({ color: 0x5b3f2d, roughness: 0.8 }));
-    addBox(group, 4.2, 1, 1.4, -4, 0, -5.2, woodMaterial);
-  }
-
-  if (options.music) {
-    addBox(group, 7, 0.8, 2.2, 1.8, 0, -5.5, new THREE.MeshStandardMaterial({ color: 0x2e2a46, roughness: 0.72 }));
-    addBox(group, 2.8, 1.1, 1.8, -5, 0, 2.6, new THREE.MeshStandardMaterial({ color: 0x36445f, roughness: 0.72 }));
-  }
-
-  if (options.sports) {
-    for (const [x, z] of [[-5.8, 1.4], [0, 2.8], [5.8, 1.4]] as const) addBox(group, 1.8, 0.7, 1.8, x, 0, z, woodMaterial);
-    for (const x of [-5.5, 0, 5.5]) {
-      addBox(group, 2.2, 1.1, 0.22, x, 1.5, -7.45, new THREE.MeshStandardMaterial({ color: 0x10151c, roughness: 0.35 }));
-      const tv = createLabelSprite("TV", 128, 64, 30);
-      tv.position.set(x, 2.35, -7.2);
-      tv.scale.set(1.5, 0.7, 1);
-      group.add(tv);
-    }
-  }
-
-  if (options.garage) {
-    for (let x = -5; x <= 5; x += 5) addBox(group, 2.8, 0.45, 4.8, x, 0, 0.6, new THREE.MeshStandardMaterial({ color: 0x4d5962, roughness: 0.68 }));
-    addBox(group, 4, 1.1, 2, -3.8, 0, -3.2, new THREE.MeshStandardMaterial({ color: 0x3e4b54, roughness: 0.7 }));
-    const portalLabel = createLabelSprite("Off-District Portal", 512, 96, 30);
-    portalLabel.position.set(0, 2.25, -5.8);
-    portalLabel.scale.set(4.2, 1, 1);
-    group.add(portalLabel);
-  }
-
-  for (const [x, z] of [[-4.5, 2.8], [4.5, 2.8], [0, 4.8]] as const) addBox(group, 1.6, 0.65, 1.6, x, 0, z, woodMaterial);
-
-  const title = createLabelSprite(titleText, 512, 128, 42);
-  title.position.set(0, 2.8, -0.8);
-  title.scale.set(6, 1.5, 1);
-  group.add(title);
-
-  addPlaneBox(group, 3.5, 1.8, 0.14, portal.interiorPosition.x, portal.interiorPosition.z, entryPadMaterial);
-  const exitLabel = createLabelSprite("Exit", 256, 96, 36);
-  exitLabel.position.set(portal.interiorPosition.x, 2.2, portal.interiorPosition.z);
-  exitLabel.scale.set(3.2, 1.2, 1);
-  group.add(exitLabel);
-}
-
-function buildCasinoInterior(): void {
-  casinoGroup.visible = false;
-  const floor = new THREE.MeshStandardMaterial({ color: 0x29313a, roughness: 0.88 });
-  const wall = new THREE.MeshStandardMaterial({ color: 0x161b22, roughness: 0.72 });
-  const felt = new THREE.MeshStandardMaterial({ color: 0x1f6f55, roughness: 0.7 });
-  const slot = new THREE.MeshStandardMaterial({ color: 0x8d7d3f, roughness: 0.55 });
-  addPlaneBox(casinoGroup, 26, 28, 0.12, 0, 0, floor);
-  addBox(casinoGroup, 26, 1.6, 0.9, 0, 0, -14, wall);
-  addBox(casinoGroup, 26, 1.6, 0.9, 0, 0, 14, wall);
-  addBox(casinoGroup, 0.9, 1.6, 28, -13, 0, 0, wall);
-  addBox(casinoGroup, 0.9, 1.6, 28, 13, 0, 0, wall);
-  addCollider(casinoColliders, 0, -14, 26, 0.9);
-  addCollider(casinoColliders, 0, 14, 26, 0.9);
-  addCollider(casinoColliders, -13, 0, 0.9, 28);
-  addCollider(casinoColliders, 13, 0, 0.9, 28);
-
-  addBox(casinoGroup, 3.8, 0.8, 2.2, -4.8, 0, 0.8, felt);
-  addBox(casinoGroup, 3.8, 0.8, 2.2, 0, 0, 0.8, felt);
-  addBox(casinoGroup, 3.8, 0.8, 2.2, 4.8, 0, 0.8, felt);
-  for (let x = -8; x <= -4; x += 2) {
-    for (let z = 4.2; z <= 7.2; z += 1.5) {
-      addBox(casinoGroup, 0.9, 1.1, 0.7, x, 0, z, slot);
-    }
-  }
-  addBox(casinoGroup, 4.4, 1.2, 1.1, 8.4, 0, 4.5, new THREE.MeshStandardMaterial({ color: 0x435066, roughness: 0.65 }));
-  addBox(casinoGroup, 4.6, 1.2, 3, -8.8, 0, -8.5, new THREE.MeshStandardMaterial({ color: 0x283c55, roughness: 0.7 }));
-  addBox(casinoGroup, 4.6, 1.2, 3, 8.2, 0, -8.2, new THREE.MeshStandardMaterial({ color: 0x4c3f57, roughness: 0.7 }));
-  addBox(casinoGroup, 8, 0.8, 2.2, 0, 0, -9, new THREE.MeshStandardMaterial({ color: 0x6c4d35, roughness: 0.7 }));
-  for (const [text, x, z] of [
-    ["Blackjack", -4.8, 2.6],
-    ["Roulette", 0, 2.6],
-    ["Three Card", 4.8, 2.6],
-    ["Slots", -6.4, 8.4],
-    ["Cage", 8.4, 6.4],
-    ["Restaurant Lease", 0, -11.3],
-    ["Surveillance", -8.8, -11],
-    ["Break Room", 8.2, -10.7]
-  ] as const) {
-    const label = createLabelSprite(text, 384, 96, 28);
-    label.position.set(x, 2.3, z);
-    label.scale.set(3.6, 1, 1);
-    casinoGroup.add(label);
-  }
-  const exitPad = addPlaneBox(casinoGroup, 4.2, 1.8, 0.14, casinoPortal.interiorPosition.x, casinoPortal.interiorPosition.z, entryPadMaterial);
-  exitPad.name = "casino-exit-pad";
-  const label = createLabelSprite("Exit", 256, 96, 36);
-  label.position.set(casinoPortal.interiorPosition.x, 2.2, casinoPortal.interiorPosition.z);
-  label.scale.set(3.2, 1.2, 1);
-  casinoGroup.add(label);
-}
-
 function buildApartmentInterior(): void {
   apartmentGroup.visible = false;
-  addPlaneBox(apartmentGroup, 14, 12, 0.12, 0, 0, new THREE.MeshStandardMaterial({ color: 0x566476, roughness: 0.86 }));
-  addBox(apartmentGroup, 14, 1.3, 0.8, 0, 0, -6, new THREE.MeshStandardMaterial({ color: 0x27313d, roughness: 0.7 }));
-  addBox(apartmentGroup, 14, 1.3, 0.8, 0, 0, 6, new THREE.MeshStandardMaterial({ color: 0x27313d, roughness: 0.7 }));
-  addBox(apartmentGroup, 0.8, 1.3, 12, -7, 0, 0, new THREE.MeshStandardMaterial({ color: 0x27313d, roughness: 0.7 }));
-  addBox(apartmentGroup, 0.8, 1.3, 12, 7, 0, 0, new THREE.MeshStandardMaterial({ color: 0x27313d, roughness: 0.7 }));
-  const bedMaterial = new THREE.MeshStandardMaterial({ color: 0x344d77, roughness: 0.82 });
-  const woodMaterial = new THREE.MeshStandardMaterial({ color: 0x7b573c, roughness: 0.74 });
-  const fabricMaterial = new THREE.MeshStandardMaterial({ color: 0x8e5f68, roughness: 0.8 });
-  const kitchenMaterial = new THREE.MeshStandardMaterial({ color: 0x596f6c, roughness: 0.7 });
-  addBox(apartmentGroup, 4.1, 0.55, 2.4, -4.2, 0, -3.8, bedMaterial);
-  addBox(apartmentGroup, 1.2, 0.28, 2.3, -5.55, 0.55, -3.8, new THREE.MeshStandardMaterial({ color: 0xd7d0bd, roughness: 0.78 }));
-  addBox(apartmentGroup, 2.4, 0.75, 1.2, 3.9, 0, -3.8, woodMaterial);
-  addBox(apartmentGroup, 0.65, 0.9, 0.65, 3.9, 0, -2.55, new THREE.MeshStandardMaterial({ color: 0x3d4656, roughness: 0.78 }));
-  addBox(apartmentGroup, 3.5, 0.75, 1.35, -3.8, 0, 1.4, fabricMaterial);
-  addBox(apartmentGroup, 1.1, 0.8, 1.35, -5.55, 0, 1.4, fabricMaterial);
-  addBox(apartmentGroup, 3.8, 0.85, 1.1, 3.9, 0, 2.4, kitchenMaterial);
-  addBox(apartmentGroup, 1.3, 0.65, 1.1, 5.4, 0.85, 2.4, new THREE.MeshStandardMaterial({ color: 0xb8c4c0, roughness: 0.45 }));
-  addBox(apartmentGroup, 1.6, 1.8, 0.9, 5.4, 0, -4.4, new THREE.MeshStandardMaterial({ color: 0x4a3342, roughness: 0.78 }));
-  addCollider(apartmentColliders, 0, -6, 14, 0.8);
-  addCollider(apartmentColliders, 0, 6, 14, 0.8);
-  addCollider(apartmentColliders, -7, 0, 0.8, 12);
-  addCollider(apartmentColliders, 7, 0, 0.8, 12);
-  addCollider(apartmentColliders, -4.2, -3.8, 4.1, 2.4);
-  addCollider(apartmentColliders, 3.9, -3.8, 2.4, 1.2);
-  addCollider(apartmentColliders, -3.8, 1.4, 3.5, 1.35);
-  addCollider(apartmentColliders, 3.9, 2.4, 3.8, 1.1);
-  addCollider(apartmentColliders, 5.4, -4.4, 1.6, 0.9);
-  const title = createLabelSprite("Your Apartment", 512, 128, 42);
-  title.position.set(0, 2.8, -2.8);
-  title.scale.set(6, 1.5, 1);
+  const floorMaterial = new THREE.MeshStandardMaterial({ color: 0x344145, roughness: 0.88 });
+  const wallMaterial = new THREE.MeshStandardMaterial({ color: 0x1f2a2d, roughness: 0.74 });
+  const deskMaterial = new THREE.MeshStandardMaterial({ color: 0x6d543c, roughness: 0.72 });
+  const glassMaterial = new THREE.MeshStandardMaterial({ color: 0x8fb3bd, roughness: 0.45, transparent: true, opacity: 0.62 });
+
+  addPlaneBox(apartmentGroup, 20, 20, 0.12, 0, 0, floorMaterial);
+  addBox(apartmentGroup, 20, 1.55, 0.9, 0, 0, -10, wallMaterial);
+  addBox(apartmentGroup, 20, 1.55, 0.9, 0, 0, 10, wallMaterial);
+  addBox(apartmentGroup, 0.9, 1.55, 20, -10, 0, 0, wallMaterial);
+  addBox(apartmentGroup, 0.9, 1.55, 20, 10, 0, 0, wallMaterial);
+  addCollider(apartmentColliders, 0, -10, 20, 0.9);
+  addCollider(apartmentColliders, 0, 10, 20, 0.9);
+  addCollider(apartmentColliders, -10, 0, 0.9, 20);
+  addCollider(apartmentColliders, 10, 0, 0.9, 20);
+
+  addBox(apartmentGroup, 4.8, 1, 1.4, 0, 0, 4.1, deskMaterial);
+  addCollider(apartmentColliders, 0, 4.1, 4.8, 1.4);
+  addBox(apartmentGroup, 5.4, 0.8, 2.2, -6.4, 0, -2.9, deskMaterial);
+  addBox(apartmentGroup, 3.6, 0.8, 1.8, -6.4, 0, 2.6, deskMaterial);
+  addBox(apartmentGroup, 5.4, 0.8, 2.2, 6.4, 0, -2.9, deskMaterial);
+  addBox(apartmentGroup, 3.8, 0.8, 1.8, 6.4, 0, 2.6, deskMaterial);
+  addCollider(apartmentColliders, -6.4, -2.9, 5.4, 2.2);
+  addCollider(apartmentColliders, -6.4, 2.6, 3.6, 1.8);
+  addCollider(apartmentColliders, 6.4, -2.9, 5.4, 2.2);
+  addCollider(apartmentColliders, 6.4, 2.6, 3.8, 1.8);
+
+  addBox(apartmentGroup, 0.22, 1.25, 8.8, 0, 0, -2.1, glassMaterial);
+  addBox(apartmentGroup, 18, 1.1, 0.22, 0, 0, 0.5, glassMaterial);
+
+  const title = createLabelSprite("STG Headquarters", 512, 128, 42);
+  title.position.set(0, 2.8, -7.2);
+  title.scale.set(6.5, 1.5, 1);
   apartmentGroup.add(title);
+
   for (const [text, x, z] of [
-    ["Rest", -4.2, -2],
-    ["Profile", 3.9, -1.6],
-    ["Kitchen", 3.9, 4],
-    ["Closet", 5.4, -2.8],
-    ["Door", 0, 4.3]
+    ["Reception Area", 0, 6.1],
+    ["Meeting / Boardroom", -6.6, -1.1],
+    ["Assistant Office", -6.4, 4.1],
+    ["Devon Executive Office", 6.4, -1.1],
+    ["Projects & Updates", 6.4, 4.1],
+    ["Exit", 0, 8.3]
   ] as const) {
-    const label = createLabelSprite(text, 256, 96, 30);
-    label.position.set(x, 2.1, z);
-    label.scale.set(2.7, 1, 1);
+    const label = createLabelSprite(text, 512, 96, 28);
+    label.position.set(x, 2.15, z);
+    label.scale.set(4.2, 1, 1);
     apartmentGroup.add(label);
   }
-  addPlaneBox(apartmentGroup, 3.5, 1.8, 0.14, apartmentPortal.interiorPosition.x, apartmentPortal.interiorPosition.z, entryPadMaterial);
+
+  addPlaneBox(apartmentGroup, 4.4, 1.8, 0.14, apartmentPortal.interiorPosition.x, apartmentPortal.interiorPosition.z, entryPadMaterial);
 }
 
 buildOutsideMap();
-buildBarInterior();
-buildVenueInterior(barBGroup, barBColliders, barBPortal, "Bar B", 0x44334c, { bar: true });
-buildVenueInterior(sportsBarGroup, sportsBarColliders, sportsBarPortal, "Sports Bar", 0x263b4f, { sports: true, bar: true });
-buildCasinoInterior();
-buildVenueInterior(restaurantGroup, restaurantColliders, restaurantPortal, "Standalone Restaurant", 0x354d3e, { restaurant: true });
-buildVenueInterior(bookShopGroup, bookShopColliders, bookShopPortal, "Book Shop", 0x493a2f, { books: true });
-buildVenueInterior(musicVenueGroup, musicVenueColliders, musicVenuePortal, "Music Venue", 0x29344f, { music: true, bar: true });
-buildVenueInterior(parkingGarageGroup, parkingGarageColliders, parkingGaragePortal, "Parking Garage", 0x353f47, { garage: true });
 buildApartmentInterior();
 
 const player = new THREE.Group();
@@ -600,7 +399,7 @@ playerName.position.y = 3.25;
 playerName.scale.set(2.6, 1, 1);
 playerName.renderOrder = 11;
 player.add(body, head, playerRing, playerName);
-player.position.set(apartmentPortal.exteriorPosition.x, 0, apartmentPortal.exteriorPosition.z + 1.2);
+player.position.set(0, 0, 3.1);
 player.rotation.y = Math.PI;
 scene.add(player);
 
@@ -710,14 +509,6 @@ function updateRemotePlayers(delta: number): void {
 }
 
 function activeColliders(): Collider[] {
-  if (sceneState.activeScene === "barA") return barAColliders;
-  if (sceneState.activeScene === "barB") return barBColliders;
-  if (sceneState.activeScene === "sportsBar") return sportsBarColliders;
-  if (sceneState.activeScene === "casino") return casinoColliders;
-  if (sceneState.activeScene === "restaurant") return restaurantColliders;
-  if (sceneState.activeScene === "bookShop") return bookShopColliders;
-  if (sceneState.activeScene === "musicVenue") return musicVenueColliders;
-  if (sceneState.activeScene === "parkingGarage") return parkingGarageColliders;
   if (sceneState.activeScene === "apartment") return apartmentColliders;
   return outsideColliders;
 }
@@ -771,6 +562,59 @@ function renderMissingStaff(business: BusinessEntity): string {
   return missing.length ? missing.map(([role, count]) => `${role} x${count}`).join(", ") : "None";
 }
 
+function renderBriefingList(items: string[], emptyText: string): string {
+  if (!items.length) return `<p>${emptyText}</p>`;
+  return `<ul>${items.map((item) => `<li>${item}</li>`).join("")}</ul>`;
+}
+
+function openBriefing(agent: Citizen): void {
+  activeInteractionCitizen = agent;
+  selectedCitizen = agent;
+  const addedContact = addContact(playerProfile, agent.id);
+  if (addedContact) addPlayerMessage(playerProfile, "Contact added", `${agent.displayName} was added to your contacts.`, worldTime.absoluteMinutes, "contact");
+
+  briefingTitle.textContent = `${agent.displayName} Briefing`;
+  briefingGreeting.textContent = agent.greetingScript[0] ?? "Welcome back, Devon. I have your STG briefing ready.";
+
+  const vercelSource = agent.briefingSources.find((source) => source.toLowerCase().includes("vercel"));
+  const githubSource = agent.briefingSources.find((source) => source.toLowerCase().includes("github"));
+  const deviceSource = agent.tools.find((tool) => tool.toLowerCase().includes("device")) ?? agent.briefingSources.find((source) => source.toLowerCase().includes("device") || source.toLowerCase().includes("raspberry"));
+
+  briefingContent.innerHTML = `
+    <article class="briefing-section">
+      <h3>GitHub</h3>
+      ${renderBriefingList(agent.watchingRepos.map((repo) => `${repo} - mock summary ready from ${githubSource ?? "seeded profile"}`), "No watched repositories yet.")}
+    </article>
+    <article class="briefing-section">
+      <h3>Vercel</h3>
+      ${renderBriefingList([`${vercelSource ?? "Vercel summaries"} - no live deployment check connected yet.`], "No Vercel briefing source configured.")}
+    </article>
+    <article class="briefing-section">
+      <h3>Devices</h3>
+      ${renderBriefingList(agent.watchingDevices.map((device) => `${device} - mock status source: ${deviceSource ?? "Device Registry"}`), "No watched devices yet.")}
+    </article>
+    <article class="briefing-section">
+      <h3>Active Projects</h3>
+      ${renderBriefingList(agent.activeProjects, "No active projects in the seeded profile.")}
+    </article>
+    <article class="briefing-section">
+      <h3>Decision Queue</h3>
+      ${renderBriefingList(agent.decisionQueue, "No pending decisions.")}
+    </article>
+  `;
+
+  briefingPanel.hidden = false;
+  popup.hidden = true;
+  actionPrompt.hidden = true;
+  updateTouchControlVisibility();
+}
+
+function closeBriefing(): void {
+  briefingPanel.hidden = true;
+  activeInteractionCitizen = null;
+  updateTouchControlVisibility();
+}
+
 function relationshipToPlayerLabel(score: number): string {
   if (score >= 75) return "close friend";
   if (score >= 40) return "friend";
@@ -784,7 +628,7 @@ function relationshipToPlayerLabel(score: number): string {
 function greetingForPlayer(citizen: Citizen): string {
   const score = relationshipForCitizen(playerProfile, citizen.id);
   if (citizen.currentState === "walking_to_work" || citizen.currentMood === "rushed" || citizen.wasLateToday) return `Make it quick, ${playerProfile.displayName}. I'm on my way.`;
-  if (citizen.currentState === "working" && (citizen.role.includes("Dealer") || citizen.role.includes("Bartender"))) return `Hey ${playerProfile.displayName}, I'm working right now.`;
+  if (citizen.agentType === "personal_assistant") return citizen.greetingScript[0] ?? `Welcome back, ${playerProfile.displayName}.`;
   if (score >= 40) return `Hey ${playerProfile.displayName}, good to see you.`;
   if (score <= -10) return "Oh. It's you.";
   return "Hey, need something?";
@@ -817,7 +661,7 @@ function renderJournal(): void {
   }
   if (activeJournalTab === "contacts") {
     if (!playerProfile.knownCitizenIds.length) {
-      journalList.innerHTML = "<p>No contacts yet. Talk to citizens to add them.</p>";
+      journalList.innerHTML = "<p>No contacts yet. Talk to agents to add them.</p>";
       return;
     }
 
@@ -923,7 +767,7 @@ function renderPhone(): void {
       <article class="phone-card">
         <h3>${DISTRICT_NAME}</h3>
         <p>Current area: ${currentArea.textContent}</p>
-        <p>Parking Garage connects District 1 to future districts. Off-district citizens enter and leave through it.</p>
+        <p>STG Headquarters is the first active World Zero building.</p>
       </article>
       ${businessEntities.map((business) => `<article class="phone-card"><strong>${business.businessName}</strong><p>${business.businessType} / ${business.operationalStatus}</p><p>Reputation ${business.reputation.toFixed(1)} / Staff ${business.staffingStatus}</p></article>`).join("")}
     `;
@@ -959,7 +803,7 @@ function updateTouchControlVisibility(): void {
     focusedElement instanceof HTMLInputElement ||
     focusedElement instanceof HTMLTextAreaElement ||
     focusedElement instanceof HTMLSelectElement;
-  const blockingPanelOpen = !phonePanel.hidden || !journalModal.hidden || !homePanel.hidden || !popup.hidden || !characterModal.hidden;
+  const blockingPanelOpen = !phonePanel.hidden || !journalModal.hidden || !homePanel.hidden || !popup.hidden || !briefingPanel.hidden || !characterModal.hidden;
   const shouldShow = shouldShowTouchControls() && !typing && !blockingPanelOpen;
   touchControls.classList.toggle("visible", shouldShow);
   if (!shouldShow) resetJoystick();
@@ -991,7 +835,7 @@ function resetJoystick(): void {
 }
 
 function renderHomeProfile(): void {
-  homeTitle.textContent = "Your Apartment";
+  homeTitle.textContent = "STG Headquarters";
   homeContent.innerHTML = `
     <p>Player: ${playerProfile.displayName}</p>
     <p>Wallet: $${Math.round(playerProfile.wallet)}</p>
@@ -999,7 +843,7 @@ function renderHomeProfile(): void {
     <p>Influence: ${Math.round(playerProfile.influence)}</p>
     <p>Contacts: ${playerProfile.knownCitizenIds.length}</p>
     <p>Known Knowledge: ${playerProfile.knowledgeJournal.length}</p>
-    <p>Home: Apartment</p>
+    <p>Home: STG Headquarters</p>
   `;
   homePanel.hidden = false;
 }
@@ -1008,7 +852,7 @@ async function restAtHome(): Promise<void> {
   await fadeToScene(sceneState, fadeOverlay, "apartment", () => {
     worldTime = advanceWorldHours(1);
   });
-  showToast("You rested for an hour.");
+  showToast("You reviewed the briefing for an hour.");
 }
 
 function closeHomePanel(): void {
@@ -1022,14 +866,14 @@ function logCitizenTransition(message: string): void {
   console.info(`[door-routing] ${message}`);
 }
 
-function doorApproachPoint(portal: typeof barAPortal): { x: number; z: number } {
+function doorApproachPoint(portal: typeof apartmentPortal): { x: number; z: number } {
   if (portal.facingDirection === "south") return { x: portal.exteriorPosition.x, z: portal.exteriorPosition.z + DOOR_APPROACH_DISTANCE };
   if (portal.facingDirection === "north") return { x: portal.exteriorPosition.x, z: portal.exteriorPosition.z - DOOR_APPROACH_DISTANCE };
   if (portal.facingDirection === "east") return { x: portal.exteriorPosition.x + DOOR_APPROACH_DISTANCE, z: portal.exteriorPosition.z };
   return { x: portal.exteriorPosition.x - DOOR_APPROACH_DISTANCE, z: portal.exteriorPosition.z };
 }
 
-function routeCitizenToExteriorDoor(citizen: Citizen, portal: typeof barAPortal): void {
+function routeCitizenToExteriorDoor(citizen: Citizen, portal: typeof apartmentPortal): void {
   if (citizen.routeWaypoints.length) return;
   const approach = doorApproachPoint(portal);
   citizen.routeWaypoints = [
@@ -1064,7 +908,7 @@ function moveCitizenToward(citizen: Citizen, target: { x: number; z: number }, d
     return true;
   }
 
-  const step = Math.min(distance, NPC_WALK_SPEED * delta);
+  const step = Math.min(distance, AGENT_WALK_SPEED * delta);
   citizen.position.x += (dx / distance) * step;
   citizen.position.z += (dz / distance) * step;
   return false;
@@ -1072,7 +916,7 @@ function moveCitizenToward(citizen: Citizen, target: { x: number; z: number }, d
 
 function updateDealerRotation(): void {
   const rotationMinute = Math.floor(worldTime.absoluteMinutes / 30);
-  const dealerStations = ["blackjack-table", "roulette-table", "three-card-poker-table", "dealer-break-room"];
+  const dealerStations = ["reception"];
   const activeDealers = citizens.filter((citizen) => citizen.currentState === "working" && citizen.role.includes("Dealer"));
   for (const [index, citizen] of activeDealers.entries()) {
     const station = workstationById(dealerStations[(index + rotationMinute) % dealerStations.length]);
@@ -1272,12 +1116,6 @@ function updateCitizenSchedules(realDelta: number, movementDelta: number): void 
     if (citizen.currentState === "working") {
       if (!activeShift) {
         sendCitizenHome(citizen, getShiftByKey(citizen, citizen.activeShiftKey, worldTime.absoluteMinutes));
-      } else if (citizen.role.includes("Security")) {
-        patrolCitizen(citizen, ["security-entrance", "security-slot-floor", "casino-restaurant-host"].map(workstationById), movementDelta);
-      } else if (citizen.role.includes("Maintenance")) {
-        patrolCitizen(citizen, ["maintenance-route", "cage-window-1", "dealer-break-room"].map(workstationById), movementDelta);
-      } else if (citizen.role.includes("Cocktail")) {
-        patrolCitizen(citizen, ["cocktail-floor", "blackjack-table", "roulette-table", "three-card-poker-table"].map(workstationById), movementDelta);
       }
       continue;
     }
@@ -1360,7 +1198,7 @@ function updateCitizenMeshes(): void {
 }
 
 function movePlayer(delta: number): void {
-  if (!popup.hidden || !homePanel.hidden || !journalModal.hidden || !phonePanel.hidden || sceneState.transitioning) {
+  if (!popup.hidden || !briefingPanel.hidden || !homePanel.hidden || !journalModal.hidden || !phonePanel.hidden || sceneState.transitioning) {
     playerVelocity.lerp(new THREE.Vector3(), 1 - Math.pow(0.00003, delta));
     return;
   }
@@ -1439,14 +1277,6 @@ function updateBuildingOcclusion(): void {
 
 function updateSceneVisibility(): void {
   outsideGroup.visible = sceneState.activeScene === "outside";
-  barAGroup.visible = sceneState.activeScene === "barA";
-  barBGroup.visible = sceneState.activeScene === "barB";
-  sportsBarGroup.visible = sceneState.activeScene === "sportsBar";
-  casinoGroup.visible = sceneState.activeScene === "casino";
-  restaurantGroup.visible = sceneState.activeScene === "restaurant";
-  bookShopGroup.visible = sceneState.activeScene === "bookShop";
-  musicVenueGroup.visible = sceneState.activeScene === "musicVenue";
-  parkingGarageGroup.visible = sceneState.activeScene === "parkingGarage";
   apartmentGroup.visible = sceneState.activeScene === "apartment";
 }
 
@@ -1466,39 +1296,14 @@ function updatePrompts(): void {
   }
 
   if (sceneState.activeScene === "outside") {
-    if (distance2D(playerPoint, barAPortal.exteriorPosition) < 2.6) activeDoorAction = "enter_bar_a";
-    if (distance2D(playerPoint, barBPortal.exteriorPosition) < 2.6) activeDoorAction = "enter_bar_b";
-    if (distance2D(playerPoint, sportsBarPortal.exteriorPosition) < 2.8) activeDoorAction = "enter_sports_bar";
-    if (distance2D(playerPoint, casinoPortal.exteriorPosition) < 3) activeDoorAction = "enter_casino";
-    if (distance2D(playerPoint, restaurantPortal.exteriorPosition) < 2.8) activeDoorAction = "enter_restaurant";
-    if (distance2D(playerPoint, bookShopPortal.exteriorPosition) < 2.6) activeDoorAction = "enter_book_shop";
-    if (distance2D(playerPoint, musicVenuePortal.exteriorPosition) < 2.8) activeDoorAction = "enter_music_venue";
-    if (distance2D(playerPoint, parkingGaragePortal.exteriorPosition) < 3.2) activeDoorAction = "enter_parking_garage";
     if (distance2D(playerPoint, apartmentPortal.exteriorPosition) < 2.8) activeDoorAction = "enter_apartment";
-  } else if (sceneState.activeScene === "barA" && distance2D(playerPoint, barAPortal.interiorPosition) < 2.4) {
-    activeDoorAction = "leave_bar_a";
-  } else if (sceneState.activeScene === "barB" && distance2D(playerPoint, barBPortal.interiorPosition) < 2.4) {
-    activeDoorAction = "leave_bar_b";
-  } else if (sceneState.activeScene === "sportsBar" && distance2D(playerPoint, sportsBarPortal.interiorPosition) < 2.4) {
-    activeDoorAction = "leave_sports_bar";
-  } else if (sceneState.activeScene === "casino" && distance2D(playerPoint, casinoPortal.interiorPosition) < 2.7) {
-    activeDoorAction = "leave_casino";
-  } else if (sceneState.activeScene === "restaurant" && distance2D(playerPoint, restaurantPortal.interiorPosition) < 2.4) {
-    activeDoorAction = "leave_restaurant";
-  } else if (sceneState.activeScene === "bookShop" && distance2D(playerPoint, bookShopPortal.interiorPosition) < 2.4) {
-    activeDoorAction = "leave_book_shop";
-  } else if (sceneState.activeScene === "musicVenue" && distance2D(playerPoint, musicVenuePortal.interiorPosition) < 2.4) {
-    activeDoorAction = "leave_music_venue";
-  } else if (sceneState.activeScene === "parkingGarage" && distance2D(playerPoint, parkingGaragePortal.interiorPosition) < 2.4) {
-    activeDoorAction = "leave_parking_garage";
   } else if (sceneState.activeScene === "apartment") {
-    if (distance2D(playerPoint, { x: -4.2, z: -2.1 }) < 2) activeHomeAction = "rest";
-    if (distance2D(playerPoint, { x: 3.9, z: -2.0 }) < 2) activeHomeAction = "profile";
-    if (distance2D(playerPoint, { x: 5.4, z: -2.8 }) < 1.9) activeHomeAction = "customize";
+    if (distance2D(playerPoint, { x: 6.4, z: -2.9 }) < 2) activeHomeAction = "rest";
+    if (distance2D(playerPoint, { x: 6.4, z: 2.6 }) < 2) activeHomeAction = "profile";
     if (distance2D(playerPoint, apartmentPortal.interiorPosition) < 2.4) activeDoorAction = "leave_apartment";
   }
 
-  if (!popup.hidden || sceneState.transitioning) {
+  if (!popup.hidden || !briefingPanel.hidden || sceneState.transitioning) {
     actionPrompt.hidden = true;
     return;
   }
@@ -1510,7 +1315,7 @@ function updatePrompts(): void {
   }
 
   const homeLabels: Record<HomeAction, string> = {
-    rest: "[E] Rest",
+    rest: "[E] Review Briefing",
     profile: "[E] Check Profile",
     customize: "[E] Customize Character Coming Soon"
   };
@@ -1522,24 +1327,8 @@ function updatePrompts(): void {
   }
 
   const labels: Record<DoorAction, string> = {
-    enter_bar_a: "[E] Enter Bar A",
-    leave_bar_a: "[E] Leave Bar A",
-    enter_bar_b: "[E] Enter Bar B",
-    leave_bar_b: "[E] Leave Bar B",
-    enter_sports_bar: "[E] Enter Sports Bar",
-    leave_sports_bar: "[E] Leave Sports Bar",
-    enter_casino: "[E] Enter Casino",
-    leave_casino: "[E] Leave Casino",
-    enter_restaurant: "[E] Enter Restaurant",
-    leave_restaurant: "[E] Leave Restaurant",
-    enter_book_shop: "[E] Enter Book Shop",
-    leave_book_shop: "[E] Leave Book Shop",
-    enter_music_venue: "[E] Enter Music Venue",
-    leave_music_venue: "[E] Leave Music Venue",
-    enter_parking_garage: "[E] Enter Parking Garage",
-    leave_parking_garage: "[E] Leave Parking Garage",
-    enter_apartment: "[E] Enter Apartment",
-    leave_apartment: "[E] Leave Apartment"
+    enter_apartment: "[E] Enter STG Headquarters",
+    leave_apartment: "[E] Exit STG Headquarters"
   };
 
   if (activeDoorAction) {
@@ -1551,6 +1340,11 @@ function updatePrompts(): void {
 }
 
 function openInteraction(citizen: Citizen): void {
+  if (citizen.agentType === "personal_assistant") {
+    openBriefing(citizen);
+    return;
+  }
+
   activeInteractionCitizen = citizen;
   selectedCitizen = citizen;
   const addedContact = addContact(playerProfile, citizen.id);
@@ -1592,8 +1386,23 @@ function closeInteraction(): void {
   updateTouchControlVisibility();
 }
 
+function maybeOpenReceptionBriefing(): void {
+  if (briefingAutoOpened || sceneState.transitioning || sceneState.activeScene !== "apartment") return;
+  if (!briefingPanel.hidden || !popup.hidden || !phonePanel.hidden || !journalModal.hidden || !homePanel.hidden || !characterModal.hidden) return;
+
+  const assistant = citizens.find((citizen) => citizen.id === "agent_exec_assistant_001");
+  if (!assistant) return;
+  const inReception = distance2D({ x: player.position.x, z: player.position.z }, { x: 0, z: 5.2 }) < 3.2;
+  const nearAssistant = distance2D({ x: player.position.x, z: player.position.z }, assistant.position) < 3.2;
+  if (!inReception && !nearAssistant) return;
+
+  briefingAutoOpened = true;
+  openBriefing(assistant);
+}
+
 popupClose.addEventListener("click", closeInteraction);
 popupLeave.addEventListener("click", closeInteraction);
+briefingClose.addEventListener("click", closeBriefing);
 rememberKnowledgeButton.addEventListener("click", () => {
   if (!activeSharedKnowledge || !activeInteractionCitizen) return;
   const remembered = rememberKnowledge(playerProfile, activeSharedKnowledge.id, activeInteractionCitizen.id, worldTime.absoluteMinutes);
@@ -1720,40 +1529,8 @@ function handleInteractionKey(): void {
     return;
   }
 
-  if (activeDoorAction === "enter_bar_a") {
-    void switchToScene("barA", { x: barAPortal.interiorPosition.x, z: barAPortal.interiorPosition.z - 1.6 });
-  } else if (activeDoorAction === "leave_bar_a") {
-    void switchToScene("outside", { x: barAPortal.exteriorPosition.x + 1.2, z: barAPortal.exteriorPosition.z });
-  } else if (activeDoorAction === "enter_bar_b") {
-    void switchToScene("barB", { x: barBPortal.interiorPosition.x, z: barBPortal.interiorPosition.z - 1.6 });
-  } else if (activeDoorAction === "leave_bar_b") {
-    void switchToScene("outside", { x: barBPortal.exteriorPosition.x, z: barBPortal.exteriorPosition.z + 1.2 });
-  } else if (activeDoorAction === "enter_sports_bar") {
-    void switchToScene("sportsBar", { x: sportsBarPortal.interiorPosition.x, z: sportsBarPortal.interiorPosition.z - 1.6 });
-  } else if (activeDoorAction === "leave_sports_bar") {
-    void switchToScene("outside", { x: sportsBarPortal.exteriorPosition.x, z: sportsBarPortal.exteriorPosition.z + 1.2 });
-  } else if (activeDoorAction === "enter_casino") {
-    void switchToScene("casino", { x: casinoPortal.interiorPosition.x, z: casinoPortal.interiorPosition.z - 1.8 });
-  } else if (activeDoorAction === "leave_casino") {
-    void switchToScene("outside", { x: casinoPortal.exteriorPosition.x, z: casinoPortal.exteriorPosition.z + 1.4 });
-  } else if (activeDoorAction === "enter_restaurant") {
-    void switchToScene("restaurant", { x: restaurantPortal.interiorPosition.x, z: restaurantPortal.interiorPosition.z - 1.6 });
-  } else if (activeDoorAction === "leave_restaurant") {
-    void switchToScene("outside", { x: restaurantPortal.exteriorPosition.x, z: restaurantPortal.exteriorPosition.z + 1.2 });
-  } else if (activeDoorAction === "enter_book_shop") {
-    void switchToScene("bookShop", { x: bookShopPortal.interiorPosition.x, z: bookShopPortal.interiorPosition.z - 1.6 });
-  } else if (activeDoorAction === "leave_book_shop") {
-    void switchToScene("outside", { x: bookShopPortal.exteriorPosition.x, z: bookShopPortal.exteriorPosition.z + 1.2 });
-  } else if (activeDoorAction === "enter_music_venue") {
-    void switchToScene("musicVenue", { x: musicVenuePortal.interiorPosition.x, z: musicVenuePortal.interiorPosition.z - 1.6 });
-  } else if (activeDoorAction === "leave_music_venue") {
-    void switchToScene("outside", { x: musicVenuePortal.exteriorPosition.x, z: musicVenuePortal.exteriorPosition.z + 1.2 });
-  } else if (activeDoorAction === "enter_parking_garage") {
-    void switchToScene("parkingGarage", { x: parkingGaragePortal.interiorPosition.x, z: parkingGaragePortal.interiorPosition.z - 1.6 });
-  } else if (activeDoorAction === "leave_parking_garage") {
-    void switchToScene("outside", { x: parkingGaragePortal.exteriorPosition.x, z: parkingGaragePortal.exteriorPosition.z + 1.2 });
-  } else if (activeDoorAction === "enter_apartment") {
-    void switchToScene("apartment", { x: apartmentPortal.interiorPosition.x, z: apartmentPortal.interiorPosition.z - 1.5 });
+  if (activeDoorAction === "enter_apartment") {
+    void switchToScene("apartment", { x: 0, z: 3.1 });
   } else if (activeDoorAction === "leave_apartment") {
     void switchToScene("outside", { x: apartmentPortal.exteriorPosition.x, z: apartmentPortal.exteriorPosition.z + 1.1 });
   }
@@ -1762,15 +1539,7 @@ function handleInteractionKey(): void {
 function updateHud(): void {
   const areaLabels: Record<ActiveSceneName, string> = {
     outside: DISTRICT_NAME,
-    barA: "Bar A Interior",
-    barB: "Bar B Interior",
-    sportsBar: "Sports Bar Interior",
-    casino: "Casino Interior",
-    restaurant: "Standalone Restaurant Interior",
-    bookShop: "Book Shop Interior",
-    musicVenue: "Music Venue Interior",
-    parkingGarage: "Parking Garage",
-    apartment: "Your Apartment"
+    apartment: "STG Headquarters"
   };
   timeDisplay.textContent = formatWorldTime(worldTime);
   playerNameLabel.textContent = playerProfile.displayName;
@@ -1800,7 +1569,7 @@ function updateOpsPanel(): void {
       citizen.currentState === "walking_to_destination"
   ).length;
   const visiting = citizens.filter((citizen) => citizen.currentState === "idle").length;
-  const routingToGarage = citizens.filter((citizen) => citizen.currentState === "walking_to_destination" && citizen.currentDestination === "parking-garage-portal").length;
+  const routingToGarage = citizens.filter((citizen) => citizen.currentState === "walking_to_destination").length;
   const socializing = citizens.filter((citizen) => citizen.currentSocialInteraction).length;
   const socialPairs = citizens.filter((citizen) => citizen.currentSocialInteraction).length / 2;
   const openBusinesses = businessEntities.filter((business) => business.operationalStatus !== "Closed").length;
@@ -1819,7 +1588,7 @@ function updateOpsPanel(): void {
     <p>Supabase URL Configured: ${multiplayerDebug?.supabaseUrlConfigured ? "yes" : "no"}</p>
     <p>Supabase Anon Key Configured: ${multiplayerDebug?.supabaseAnonKeyConfigured ? "yes" : "no"}</p>
     <p>Current Mode: ${multiplayerDebug?.mode ?? "offline"}</p>
-    <p>Channel Name: ${multiplayerDebug?.channelName ?? "vibe-city-district-1"}</p>
+    <p>Channel Name: ${multiplayerDebug?.channelName ?? "stg-world-zero"}</p>
     <p>Channel Status: ${multiplayerDebug?.channelStatus ?? "unknown"}</p>
     <p>Subscribe Status: ${multiplayerDebug?.subscribeStatus ?? "unknown"}</p>
     <p>Last Error: ${multiplayerDebug?.lastError ?? "None"}</p>
@@ -1831,11 +1600,11 @@ function updateOpsPanel(): void {
     <p>Last Broadcast: ${multiplayerDebug?.lastBroadcastAt ? new Date(multiplayerDebug.lastBroadcastAt).toLocaleTimeString() : "None"}</p>
     <p>Last Presence Sync: ${multiplayerDebug?.lastPresenceSyncAt ? new Date(multiplayerDebug.lastPresenceSyncAt).toLocaleTimeString() : "None"}</p>
     <p>Remote Players: ${remotePlayerList}</p>
-    <p>Citizens: ${citizens.length} total / ${visible} visible</p>
+    <p>Agents: ${citizens.length} total / ${visible} visible</p>
     <p>Home: ${home} / Off District: ${offDistrict}</p>
     <p>Working: ${working} / Commuting: ${commuting}</p>
     <p>Visiting Interest Locations: ${visiting}</p>
-    <p>Routing to Parking Garage: ${routingToGarage}</p>
+    <p>Routing to Exit: ${routingToGarage}</p>
     <p>Socializing: ${socializing} / Conversations: ${socialPairs}</p>
     <p>Business Entities: ${businessEntities.length} total / ${openBusinesses} open / ${closedBusinesses} closed</p>
     <p>Operating: ${operatingBusinesses} / Understaffed Rosters: ${understaffedBusinesses}</p>
@@ -1858,7 +1627,7 @@ function updateOpsPanel(): void {
     ? `${citizenName(inspected.currentSocialInteraction.partnerId)} / ${inspected.currentSocialInteraction.topic} / ${Math.max(0, Math.ceil(inspected.currentSocialInteraction.endsAtAbsoluteMinute - worldTime.absoluteMinutes))} min`
     : "None";
   citizenDetails.innerHTML = `
-    <h2>Selected Citizen</h2>
+    <h2>Selected Agent</h2>
     <p>${inspected.name}</p>
     <p>Interests: ${inspected.interests.join(", ") || "None"}</p>
     <p>State: ${inspected.currentState}</p>
@@ -1874,7 +1643,7 @@ function updateOpsPanel(): void {
     <p>Current Social: ${social}</p>
     <p>Relationships: ${topRelationships || "None"}</p>
     <p>Player Contact: ${playerProfile.knownCitizenIds.includes(inspected.id) ? "Known" : "Not in phone"} / Player Relationship ${relationshipForCitizen(playerProfile, inspected.id)} (${relationshipLabelForCitizen(playerProfile, inspected.id)})</p>
-    <p>Known Citizens: ${formatCitizenList(inspected.knownCitizens, 8)}</p>
+    <p>Known Agents: ${formatCitizenList(inspected.knownCitizens, 8)}</p>
     <p>Known Places: ${inspected.knownPlaces.join(", ") || "None"}</p>
     <p>Known Businesses: ${inspected.knownBusinesses.join(", ") || "None"}</p>
     <p>Known Knowledge: ${inspected.knownKnowledgeIds.length}</p>
@@ -1954,6 +1723,7 @@ function animate(): void {
   updateBuildingOcclusion();
   updateSceneVisibility();
   updatePrompts();
+  maybeOpenReceptionBriefing();
   updateHud();
   updateOpsPanel();
   if (!phonePanel.hidden) renderPhone();
@@ -1989,7 +1759,7 @@ function animate(): void {
     multiplayerPresenceCount: multiplayerDebug?.presenceCount ?? 1,
     multiplayerLastBroadcastAt: multiplayerDebug?.lastBroadcastAt ?? null,
     multiplayerLastPresenceSyncAt: multiplayerDebug?.lastPresenceSyncAt ?? null,
-    multiplayerChannelName: multiplayerDebug?.channelName ?? "vibe-city-district-1",
+    multiplayerChannelName: multiplayerDebug?.channelName ?? "stg-world-zero",
     multiplayerSubscribeStatus: multiplayerDebug?.subscribeStatus ?? "unknown",
     multiplayerLastError: multiplayerDebug?.lastError ?? null,
     multiplayerWebsocketConnected: multiplayerDebug?.websocketConnected ?? false,

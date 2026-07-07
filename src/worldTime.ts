@@ -8,8 +8,8 @@ export type WorldTimeState = {
   seasonStartTimestamp: number;
 };
 
-const STORAGE_KEY = "vibeCity.seasonStartTimestamp";
-const OFFSET_KEY = "vibeCity.debugWorldMinuteOffset";
+const STORAGE_KEY = "stgWorldZero.seasonStartTimestamp";
+const OFFSET_KEY = "stgWorldZero.debugWorldMinuteOffset";
 const START_MINUTE = 8 * 60 + 45;
 const MINUTES_PER_DAY = 1440;
 const MINUTES_PER_REAL_SECOND = 5;

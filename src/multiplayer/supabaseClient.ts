@@ -50,9 +50,9 @@ export function getSupabaseRealtimeConfig(): SupabaseRealtimeConfig {
 
   if (!configured && !warnedAboutMissingEnv) {
     warnedAboutMissingEnv = true;
-    console.warn("Vibe City multiplayer offline: Supabase env is missing or invalid.", { validationError });
+    console.warn("STG World Zero multiplayer offline: Supabase env is missing or invalid.", { validationError });
   }
-  console.info("Vibe City multiplayer env detected", {
+  console.info("STG World Zero multiplayer env detected", {
     supabaseUrlConfigured: urlConfigured,
     supabaseAnonKeyConfigured: anonKeyConfigured,
     supabaseUrlValid: urlValid,
@@ -74,6 +74,6 @@ export function createSupabaseClient(): SupabaseClient | null {
       }
     }
   });
-  console.info("Vibe City Supabase client created", { realtimeConfigured: true });
+  console.info("STG World Zero Supabase client created", { realtimeConfigured: true });
   return client;
 }

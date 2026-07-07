@@ -70,7 +70,7 @@ export function startCommutingToWork(citizen: Citizen, shift: ActiveShiftWindow)
   citizen.currentScene = "outside";
   citizen.currentMood = "rushed";
   citizen.currentDestination = portal.id;
-  citizen.currentLocation = "Parking Garage";
+  citizen.currentLocation = "STG Headquarters";
   citizen.currentWorkstationId = null;
   citizen.activeShiftKey = shift.key;
   citizen.routeWaypoints = [];

@@ -15,99 +15,39 @@ export type KnowledgeItem = {
   tags: string[];
 };
 
-const KNOWLEDGE_STORAGE_PREFIX = "vibeCity.knowledge.";
-const PLAYER_JOURNAL_KEY = "vibeCity.playerKnowledgeJournal";
+const KNOWLEDGE_STORAGE_PREFIX = "stgWorldZero.knowledge.";
+const PLAYER_JOURNAL_KEY = "stgWorldZero.playerKnowledgeJournal";
 
 export const KNOWLEDGE_LIBRARY: KnowledgeItem[] = [
   {
-    id: "rumor-dealer-rotation",
-    type: "rumor",
-    title: "Dealer Rotation",
-    description: "The casino manager rotates dealers every few hours.",
-    sourceCitizenId: "olivia-grant",
-    confidence: 78,
-    discoveredAtWorldTime: 0,
-    tags: ["casino", "dealer", "schedule"]
-  },
-  {
-    id: "rumor-bar-a-after-nine",
-    type: "rumor",
-    title: "Bar A Late Crowd",
-    description: "Bar A gets busier after 9 PM.",
-    sourceCitizenId: "marcus-reed",
-    confidence: 72,
-    discoveredAtWorldTime: 0,
-    tags: ["bar", "barA", "event"]
-  },
-  {
-    id: "rumor-book-shop-regulars",
-    type: "rumor",
-    title: "Book Shop Regulars",
-    description: "The book shop owner knows a lot of regulars.",
-    sourceCitizenId: "hannah-booker",
-    confidence: 66,
-    discoveredAtWorldTime: 0,
-    tags: ["bookShop", "people"]
-  },
-  {
-    id: "rumor-parking-garage-districts",
-    type: "rumor",
-    title: "Parking Garage Routes",
-    description: "The parking garage connects to other districts, but those routes are not open yet.",
-    sourceCitizenId: null,
-    confidence: 82,
-    discoveredAtWorldTime: 0,
-    tags: ["parkingGarage", "district", "portal"]
-  },
-  {
-    id: "rumor-casino-overnights",
-    type: "rumor",
-    title: "Overnight Casino Staff",
-    description: "Some casino staff work overnight shifts.",
-    sourceCitizenId: "maya-cross",
-    confidence: 80,
-    discoveredAtWorldTime: 0,
-    tags: ["casino", "schedule", "overnight"]
-  },
-  {
-    id: "place-bar-a",
+    id: "place-stg-headquarters",
     type: "place",
-    title: "Bar A",
-    description: "A neighborhood bar on the Fremont East strip.",
+    title: "STG Headquarters",
+    description: "World Zero's first single-story headquarters building.",
     sourceCitizenId: null,
     confidence: 100,
     discoveredAtWorldTime: 0,
-    tags: ["bar", "place"]
+    tags: ["stg", "headquarters", "world-zero"]
   },
   {
-    id: "place-casino",
-    type: "place",
-    title: "Casino",
-    description: "A 24-hour casino with table games, slots, security, cage, and restaurant lease space.",
-    sourceCitizenId: null,
-    confidence: 100,
-    discoveredAtWorldTime: 0,
-    tags: ["casino", "place"]
-  },
-  {
-    id: "place-parking-garage",
-    type: "place",
-    title: "Parking Garage",
-    description: "The district portal for off-district travel.",
-    sourceCitizenId: null,
-    confidence: 100,
-    discoveredAtWorldTime: 0,
-    tags: ["parkingGarage", "place", "portal"]
-  },
-  {
-    id: "business-casino-restaurant-lease",
+    id: "business-stg-headquarters-operations",
     type: "business",
-    title: "Casino Restaurant Lease Space",
-    description: "A restaurant business operates inside the casino as a leased space.",
-    sourceCitizenId: "grace-holland",
-    confidence: 86,
+    title: "STG Headquarters Operations",
+    description: "The active operating base for Devon, the executive assistant, project updates, meetings, and decisions.",
+    sourceCitizenId: "agent_exec_assistant_001",
+    confidence: 100,
     discoveredAtWorldTime: 0,
-    tags: ["restaurant", "casino", "lease"]
+    tags: ["stg", "operations", "assistant"]
+  },
+  {
+    id: "briefing-stg-morning",
+    type: "event",
+    title: "STG Morning Briefing",
+    description: "The Executive Assistant has Devon's STG briefing ready.",
+    sourceCitizenId: "agent_exec_assistant_001",
+    confidence: 100,
+    discoveredAtWorldTime: 0,
+    tags: ["briefing", "decisions", "updates"]
   }
 ];
 
@@ -179,86 +119,49 @@ export function seedCitizenKnowledge(citizens: Citizen[]): void {
     registerKnowledgeItem({
       id: `citizen-${person.id}`,
       type: "citizen",
-      title: person.name,
-      description: `${person.name} is currently known around the district as ${person.role}.`,
+      title: person.displayName,
+      description: `${person.displayName} is ${person.roleTitle} in ${person.department}.`,
       sourceCitizenId: person.id,
-      confidence: 92,
+      confidence: 100,
       discoveredAtWorldTime: 0,
-      tags: ["citizen", person.role.toLowerCase().replaceAll(" ", "-")]
+      tags: ["agent", person.slug, person.agentType]
     });
-  }
 
-  for (const citizen of citizens) {
-    const persisted = loadCitizenKnowledge(citizen.id);
-    citizen.knownKnowledgeIds = Array.from(new Set([...citizen.knownKnowledgeIds, ...persisted]));
+    registerKnowledgeItem({
+      id: `job-${person.id}`,
+      type: "job",
+      title: `${person.displayName} Role`,
+      description: person.responsibilities.join("; "),
+      sourceCitizenId: person.id,
+      confidence: 100,
+      discoveredAtWorldTime: 0,
+      tags: ["job", person.assignedBuilding, person.roleTitle.toLowerCase().replaceAll(" ", "-")]
+    });
 
-    const seedIds = new Set<string>();
-    for (const shift of citizen.schedule) {
-      registerKnowledgeItem({
-        id: `job-${citizen.id}`,
-        type: "job",
-        title: `${citizen.name}'s Job`,
-        description: `${citizen.name} works as ${shift.role} at ${shift.businessId}.`,
-        sourceCitizenId: citizen.id,
-        confidence: 100,
-        discoveredAtWorldTime: 0,
-        tags: ["job", shift.businessId, shift.role.toLowerCase().replaceAll(" ", "-")]
-      });
-      seedIds.add(`job-${citizen.id}`);
-      if (shift.businessId === "bar-a-business") {
-        seedIds.add("place-bar-a");
-        seedIds.add("rumor-bar-a-after-nine");
-      }
-      if (shift.businessId === "casino-business") {
-        seedIds.add("place-casino");
-        seedIds.add("rumor-casino-overnights");
-      }
-      if (shift.businessId === "casino-restaurant-operator") {
-        seedIds.add("business-casino-restaurant-lease");
-      }
-    }
-
-    for (const knownCitizenId of citizen.knownCitizens) {
-      seedIds.add(`citizen-${knownCitizenId}`);
-    }
-    if (citizen.supervisor) seedIds.add(`citizen-${citizen.supervisor}`);
-
-    if (citizen.role.includes("Manager")) {
-      seedIds.add("rumor-dealer-rotation");
-      seedIds.add("rumor-parking-garage-districts");
-    }
-    if (citizen.id === "hannah-booker") seedIds.add("rumor-book-shop-regulars");
-    if (citizen.home === "off_district") seedIds.add("place-parking-garage");
-
-    for (const id of seedIds) addCitizenKnowledge(citizen, id);
-    citizen.knownRumorIds = citizen.knownKnowledgeIds.filter((id) => getKnowledgeItem(id)?.type === "rumor");
-    persistCitizenKnowledge(citizen);
+    const persisted = loadCitizenKnowledge(person.id);
+    const seedIds = ["place-stg-headquarters", "business-stg-headquarters-operations", "briefing-stg-morning", `citizen-${person.id}`, `job-${person.id}`];
+    person.knownKnowledgeIds = Array.from(new Set([...person.knownKnowledgeIds, ...persisted, ...seedIds]));
+    person.knownRumorIds = person.knownKnowledgeIds.filter((id) => getKnowledgeItem(id)?.type === "rumor");
+    persistCitizenKnowledge(person);
   }
 }
 
 export function chooseShareableKnowledge(from: Citizen, to: Citizen, worldTime: WorldTimeState, includePrivate = false): KnowledgeItem | null {
-  const relationship = from.relationships[to.id]?.score ?? 0;
-  const chance = 0.25 + Math.max(0, relationship) / 180 - Math.max(0, -relationship) / 280;
-  const seed = `${from.id}:${to.id}:${Math.floor(worldTime.absoluteMinutes / 9)}:${from.knownKnowledgeIds.length}`;
-  const roll = deterministicUnit(seed);
-  if (roll > Math.max(0.05, Math.min(0.8, chance))) return null;
-
   const knownByReceiver = new Set(to.knownKnowledgeIds);
   const candidates = knowledgeItemsForIds([...from.knownKnowledgeIds, ...(includePrivate ? from.privateKnowledgeIds : [])]).filter((item) => !knownByReceiver.has(item.id));
   if (!candidates.length) return null;
+  const seed = `${from.id}:${to.id}:${Math.floor(worldTime.absoluteMinutes / 9)}:${candidates.length}`;
   return candidates[Math.floor(deterministicUnit(`${seed}:pick`) * candidates.length)];
 }
 
-export function shareKnowledge(from: Citizen, to: Citizen, item: KnowledgeItem, worldTime: WorldTimeState): boolean {
-  const relationship = from.relationships[to.id]?.score ?? 0;
-  const confidenceShift = Math.round((deterministicUnit(`${from.id}:${to.id}:${item.id}:${worldTime.seasonDay}`) - 0.5) * 10 + relationship / 35);
+export function shareKnowledge(from: Citizen, to: Citizen, item: KnowledgeItem, _worldTime?: WorldTimeState): boolean {
   const learned = addCitizenKnowledge(to, item.id);
   if (learned) {
     to.lastSharedKnowledgeId = item.id;
-    to.recentKnowledgeReceived = [`${item.title} from ${from.name}`, ...to.recentKnowledgeReceived].slice(0, 5);
+    to.recentKnowledgeReceived = [`${item.title} from ${from.displayName}`, ...to.recentKnowledgeReceived].slice(0, 5);
     from.lastSharedKnowledgeId = item.id;
-    item.confidence = Math.max(0, Math.min(100, item.confidence + confidenceShift));
     persistCitizenKnowledge(to);
+    persistCitizenKnowledge(from);
   }
   return learned;
 }

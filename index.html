@@ -3,13 +3,14 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="description" content="Vibe City is an isometric 3D district simulation prototype built with Vite, TypeScript, and Three.js." />
-    <title>Vibe City</title>
+    <meta name="description" content="World Zero is the first STG Operating System headquarters world." />
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='10' fill='%231f2a2d'/%3E%3Cpath d='M14 41h36v8H14zM18 22h28v17H18zM22 15h20v5H22z' fill='%238fb3bd'/%3E%3C/svg%3E" />
+    <title>STG World Zero</title>
   </head>
   <body>
     <div id="app"></div>
-    <section id="hud" aria-label="Vibe City status">
-      <h1>Vibe City</h1>
+    <section id="hud" aria-label="STG World Zero status">
+      <h1>STG World Zero</h1>
       <p class="hud-chip hud-time"><span id="time-display">World Time: Day 1 - Monday - 8:45 AM</span></p>
       <p class="hud-chip hud-player">Player: <span id="player-name">Player</span></p>
       <p class="hud-chip hud-wallet">Wallet: $<span id="player-wallet">2000</span></p>
@@ -23,16 +24,22 @@
       <p class="hud-extra">Debug: <span id="debug-state">Occlusion On / Grid Off / Assets Off / Zoom 2</span></p>
       <button id="journal-open" type="button">Phone (P)</button>
     </section>
-    <aside id="ops-panel" aria-label="City operations debug">
-      <h1>City Operations</h1>
+    <aside id="ops-panel" aria-label="STG operations debug">
+      <h1>STG Operations</h1>
       <div id="ops-summary"></div>
       <div id="citizen-details"></div>
     </aside>
     <div id="action-prompt" hidden>[E] Interact</div>
     <div id="fade-overlay"></div>
-    <section id="interaction-popup" hidden aria-label="NPC interaction">
+    <section id="briefing-panel" hidden aria-label="Executive Assistant briefing">
+      <button id="briefing-close" type="button" aria-label="Close">X</button>
+      <h2 id="briefing-title">STG Briefing</h2>
+      <p id="briefing-greeting">Welcome back, Devon. I have your STG briefing ready.</p>
+      <div id="briefing-content"></div>
+    </section>
+    <section id="interaction-popup" hidden aria-label="Agent interaction">
       <button id="interaction-close" type="button" aria-label="Close">X</button>
-      <h2 id="interaction-name">NPC Name</h2>
+      <h2 id="interaction-name">Agent Name</h2>
       <p id="interaction-role">Role</p>
       <p id="interaction-mood">Mood</p>
       <p id="interaction-state">State</p>
@@ -70,9 +77,9 @@
       </nav>
       <div id="phone-content"></div>
     </section>
-    <section id="home-panel" hidden aria-label="Apartment profile panel">
+    <section id="home-panel" hidden aria-label="STG headquarters profile panel">
       <button id="home-close" type="button" aria-label="Close">X</button>
-      <h2 id="home-title">Your Apartment</h2>
+      <h2 id="home-title">STG Headquarters</h2>
       <div id="home-content"></div>
       <div id="home-actions">
         <button id="home-open-contacts" type="button">Open Contacts</button>
