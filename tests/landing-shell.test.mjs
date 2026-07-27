@@ -90,8 +90,8 @@ test("main synchronizes navigation-only Action hidden and disabled state", () =>
 
 test("keyboard and touch Action share a navigation-only scene handler", () => {
   const handler = between(main, "function handleNavigationAction(): void {", "function updateHud");
-  assert.match(handler, /activeDoorAction\s*===\s*["']enter_apartment["'][\s\S]*?switchToScene\(["']apartment["']/);
-  assert.match(handler, /activeDoorAction\s*===\s*["']leave_apartment["'][\s\S]*?switchToScene\(["']outside["']/);
+  assert.match(handler, /activeDoorAction\s*===\s*["']enter_headquarters["'][\s\S]*?switchToScene\(["']headquarters["']/);
+  assert.match(handler, /activeDoorAction\s*===\s*["']leave_headquarters["'][\s\S]*?switchToScene\(["']outside["']/);
   assert.doesNotMatch(handler, /openInteraction|restAtHome|renderHomeProfile|showToast|openPhone|phone|voice/i);
   assert.match(main, /touchActionButton\.addEventListener\(["']click["'],\s*handleNavigationAction\)/);
   const keyboard = between(main, "function handleKeyDown(event: KeyboardEvent): void {", "function handleKeyUp");
@@ -109,9 +109,9 @@ test("unsafe HTML render sinks are gone", () => {
   assert.equal((main.match(/\.innerHTML\b/g) ?? []).length, 0, "main.ts must contain zero .innerHTML uses");
 });
 
-test("apartment player spawn is outside the expanded reception-desk collider", () => {
-  const spawnMatch = main.match(/const APARTMENT_PLAYER_SPAWN = \{ x: (-?[\d.]+), z: (-?[\d.]+) \} as const;/);
-  assert.ok(spawnMatch, "apartment spawn must be a named release invariant");
+test("headquarters player spawn is outside the expanded reception-desk collider", () => {
+  const spawnMatch = main.match(/const HEADQUARTERS_PLAYER_SPAWN = \{ x: (-?[\d.]+), z: (-?[\d.]+) \} as const;/);
+  assert.ok(spawnMatch, "headquarters spawn must be a named release invariant");
   const radiusMatch = main.match(/const PLAYER_RADIUS = ([\d.]+);/);
   assert.ok(radiusMatch, "player radius must remain explicit");
 
@@ -125,8 +125,8 @@ test("apartment player spawn is outside the expanded reception-desk collider", (
   };
   const trapped = spawn.x >= desk.minX && spawn.x <= desk.maxX && spawn.z >= desk.minZ && spawn.z <= desk.maxZ;
   assert.equal(trapped, false, `spawn (${spawn.x}, ${spawn.z}) must not overlap the reception desk collider`);
-  assert.match(main, /player\.position\.set\(APARTMENT_PLAYER_SPAWN\.x, 0, APARTMENT_PLAYER_SPAWN\.z\)/);
-  assert.match(main, /switchToScene\("apartment", \{ \.\.\.APARTMENT_PLAYER_SPAWN \}\)/);
+  assert.match(main, /player\.position\.set\(HEADQUARTERS_PLAYER_SPAWN\.x, 0, HEADQUARTERS_PLAYER_SPAWN\.z\)/);
+  assert.match(main, /switchToScene\("headquarters", \{ \.\.\.HEADQUARTERS_PLAYER_SPAWN \}\)/);
 });
 
 test("package exposes the focused Node test without dependency changes", () => {

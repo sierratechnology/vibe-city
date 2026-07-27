@@ -11,7 +11,7 @@ export const buildingAssets: AssetDefinition[] = [
     color: "#4d6875",
     material: baseBuildingMaterial,
     collisionBox: { size: { x: 18, y: 3.2, z: 15 } },
-    doorPoints: [{ id: "stg-headquarters-main-door", side: "south", offset: { x: 0, y: 0, z: 8.85 }, prompt: "[E] Enter STG Headquarters", targetScene: "apartment", tags: ["stg", "headquarters", "entrance"] }],
+    doorPoints: [{ id: "stg-headquarters-main-door", side: "south", offset: { x: 0, y: 0, z: 8.85 }, prompt: "[E] Enter STG Headquarters", targetScene: "headquarters", tags: ["stg", "headquarters", "entrance"] }],
     tags: ["stg", "headquarters", "building", "exterior", "activeInterior"]
   }
 ];

@@ -67,8 +67,8 @@ type RemotePlayerRuntime = {
 };
 
 type DoorAction =
-  | "enter_apartment"
-  | "leave_apartment";
+  | "enter_headquarters"
+  | "leave_headquarters";
 type VoiceState = "muted" | "listening" | "speaking" | "unavailable";
 type AudioZoneId = "reception" | "assistant_office" | "boardroom" | "devon_executive_office" | "projects_updates_office" | "outside";
 
@@ -82,7 +82,7 @@ type AudioZone = {
 };
 
 const PLAYER_RADIUS = 0.55;
-const APARTMENT_PLAYER_SPAWN = { x: 0, z: 8.2 } as const;
+const HEADQUARTERS_PLAYER_SPAWN = { x: 0, z: 8.2 } as const;
 const PLAYER_SPEED = 8.2;
 const AGENT_WALK_SPEED = 5.4;
 const DOOR_APPROACH_DISTANCE = 2.35;
@@ -255,8 +255,8 @@ app.append(renderer.domElement);
 
 const sceneState = createSceneState();
 const outsideGroup = new THREE.Group();
-const apartmentGroup = new THREE.Group();
-scene.add(outsideGroup, apartmentGroup);
+const headquartersGroup = new THREE.Group();
+scene.add(outsideGroup, headquartersGroup);
 
 function updateCameraProjection(): void {
   const aspect = window.innerWidth / window.innerHeight;
@@ -269,7 +269,7 @@ function updateCameraProjection(): void {
 }
 
 const outsideColliders: Collider[] = [];
-const apartmentColliders: Collider[] = [];
+const headquartersColliders: Collider[] = [];
 const buildingRuntimes: WorldBuildingRuntime[] = [];
 const citizenRuntimes: CitizenRuntime[] = [];
 const keys = new Set<string>();
@@ -338,7 +338,7 @@ const entryPadMaterial = new THREE.MeshStandardMaterial({ color: 0xe8d27c, rough
 let assetDebugGroup: THREE.Group | null = null;
 let assetDebugVisible = false;
 let generatedAssetCount = 0;
-const apartmentPortal = portalById("apartment-main");
+const headquartersPortal = portalById("headquarters-main");
 
 function addBox(parent: THREE.Group, width: number, height: number, depth: number, x: number, y: number, z: number, material: THREE.Material): THREE.Mesh {
   const mesh = new THREE.Mesh(new THREE.BoxGeometry(width, height, depth), material);
@@ -384,41 +384,41 @@ function buildOutsideMap(): void {
   generatedAssetCount = generatedWorld.assetCount;
 }
 
-function buildApartmentInterior(): void {
-  apartmentGroup.visible = false;
+function buildHeadquartersInterior(): void {
+  headquartersGroup.visible = false;
   const floorMaterial = new THREE.MeshStandardMaterial({ color: 0x344145, roughness: 0.88 });
   const wallMaterial = new THREE.MeshStandardMaterial({ color: 0x1f2a2d, roughness: 0.74 });
   const deskMaterial = new THREE.MeshStandardMaterial({ color: 0x6d543c, roughness: 0.72 });
   const glassMaterial = new THREE.MeshStandardMaterial({ color: 0x8fb3bd, roughness: 0.45, transparent: true, opacity: 0.62 });
 
-  addPlaneBox(apartmentGroup, 20, 20, 0.12, 0, 0, floorMaterial);
-  addBox(apartmentGroup, 20, 1.55, 0.9, 0, 0, -10, wallMaterial);
-  addBox(apartmentGroup, 20, 1.55, 0.9, 0, 0, 10, wallMaterial);
-  addBox(apartmentGroup, 0.9, 1.55, 20, -10, 0, 0, wallMaterial);
-  addBox(apartmentGroup, 0.9, 1.55, 20, 10, 0, 0, wallMaterial);
-  addCollider(apartmentColliders, 0, -10, 20, 0.9);
-  addCollider(apartmentColliders, 0, 10, 20, 0.9);
-  addCollider(apartmentColliders, -10, 0, 0.9, 20);
-  addCollider(apartmentColliders, 10, 0, 0.9, 20);
+  addPlaneBox(headquartersGroup, 20, 20, 0.12, 0, 0, floorMaterial);
+  addBox(headquartersGroup, 20, 1.55, 0.9, 0, 0, -10, wallMaterial);
+  addBox(headquartersGroup, 20, 1.55, 0.9, 0, 0, 10, wallMaterial);
+  addBox(headquartersGroup, 0.9, 1.55, 20, -10, 0, 0, wallMaterial);
+  addBox(headquartersGroup, 0.9, 1.55, 20, 10, 0, 0, wallMaterial);
+  addCollider(headquartersColliders, 0, -10, 20, 0.9);
+  addCollider(headquartersColliders, 0, 10, 20, 0.9);
+  addCollider(headquartersColliders, -10, 0, 0.9, 20);
+  addCollider(headquartersColliders, 10, 0, 0.9, 20);
 
-  addBox(apartmentGroup, 4.8, 1, 1.4, 0, 0, 4.1, deskMaterial);
-  addCollider(apartmentColliders, 0, 4.1, 4.8, 1.4);
-  addBox(apartmentGroup, 5.4, 0.8, 2.2, -6.4, 0, -2.9, deskMaterial);
-  addBox(apartmentGroup, 3.6, 0.8, 1.8, -6.4, 0, 2.6, deskMaterial);
-  addBox(apartmentGroup, 5.4, 0.8, 2.2, 6.4, 0, -2.9, deskMaterial);
-  addBox(apartmentGroup, 3.8, 0.8, 1.8, 6.4, 0, 2.6, deskMaterial);
-  addCollider(apartmentColliders, -6.4, -2.9, 5.4, 2.2);
-  addCollider(apartmentColliders, -6.4, 2.6, 3.6, 1.8);
-  addCollider(apartmentColliders, 6.4, -2.9, 5.4, 2.2);
-  addCollider(apartmentColliders, 6.4, 2.6, 3.8, 1.8);
+  addBox(headquartersGroup, 4.8, 1, 1.4, 0, 0, 4.1, deskMaterial);
+  addCollider(headquartersColliders, 0, 4.1, 4.8, 1.4);
+  addBox(headquartersGroup, 5.4, 0.8, 2.2, -6.4, 0, -2.9, deskMaterial);
+  addBox(headquartersGroup, 3.6, 0.8, 1.8, -6.4, 0, 2.6, deskMaterial);
+  addBox(headquartersGroup, 5.4, 0.8, 2.2, 6.4, 0, -2.9, deskMaterial);
+  addBox(headquartersGroup, 3.8, 0.8, 1.8, 6.4, 0, 2.6, deskMaterial);
+  addCollider(headquartersColliders, -6.4, -2.9, 5.4, 2.2);
+  addCollider(headquartersColliders, -6.4, 2.6, 3.6, 1.8);
+  addCollider(headquartersColliders, 6.4, -2.9, 5.4, 2.2);
+  addCollider(headquartersColliders, 6.4, 2.6, 3.8, 1.8);
 
-  addBox(apartmentGroup, 0.22, 1.25, 8.8, 0, 0, -2.1, glassMaterial);
-  addBox(apartmentGroup, 18, 1.1, 0.22, 0, 0, 0.5, glassMaterial);
+  addBox(headquartersGroup, 0.22, 1.25, 8.8, 0, 0, -2.1, glassMaterial);
+  addBox(headquartersGroup, 18, 1.1, 0.22, 0, 0, 0.5, glassMaterial);
 
   const title = createLabelSprite("STG Headquarters", 512, 128, 42);
   title.position.set(0, 2.8, -7.2);
   title.scale.set(6.5, 1.5, 1);
-  apartmentGroup.add(title);
+  headquartersGroup.add(title);
 
   for (const [text, x, z] of [
     ["Reception Area", 0, 6.1],
@@ -431,14 +431,14 @@ function buildApartmentInterior(): void {
     const label = createLabelSprite(text, 512, 96, 28);
     label.position.set(x, 2.15, z);
     label.scale.set(4.2, 1, 1);
-    apartmentGroup.add(label);
+    headquartersGroup.add(label);
   }
 
-  addPlaneBox(apartmentGroup, 4.4, 1.8, 0.14, apartmentPortal.interiorPosition.x, apartmentPortal.interiorPosition.z, entryPadMaterial);
+  addPlaneBox(headquartersGroup, 4.4, 1.8, 0.14, headquartersPortal.interiorPosition.x, headquartersPortal.interiorPosition.z, entryPadMaterial);
 }
 
 buildOutsideMap();
-buildApartmentInterior();
+buildHeadquartersInterior();
 
 const player = new THREE.Group();
 const body = new THREE.Mesh(
@@ -465,7 +465,7 @@ playerName.position.y = 3.25;
 playerName.scale.set(2.6, 1, 1);
 playerName.renderOrder = 11;
 player.add(body, head, playerRing, playerName);
-player.position.set(APARTMENT_PLAYER_SPAWN.x, 0, APARTMENT_PLAYER_SPAWN.z);
+player.position.set(HEADQUARTERS_PLAYER_SPAWN.x, 0, HEADQUARTERS_PLAYER_SPAWN.z);
 player.rotation.y = Math.PI;
 scene.add(player);
 
@@ -575,7 +575,7 @@ function updateRemotePlayers(delta: number): void {
 }
 
 function activeColliders(): Collider[] {
-  if (sceneState.activeScene === "apartment") return apartmentColliders;
+  if (sceneState.activeScene === "headquarters") return headquartersColliders;
   return outsideColliders;
 }
 
@@ -607,7 +607,7 @@ function executiveAssistant(): Citizen | null {
 }
 
 function audioZoneForPoint(point: { x: number; z: number }, sceneName: ActiveSceneName | "none"): AudioZoneId {
-  if (sceneName !== "apartment") return "outside";
+  if (sceneName !== "headquarters") return "outside";
   return AUDIO_ZONES.find((zone) => point.x >= zone.minX && point.x <= zone.maxX && point.z >= zone.minZ && point.z <= zone.maxZ)?.id ?? "reception";
 }
 
@@ -716,7 +716,7 @@ function clearVoiceTimeout(): void {
 
 function isAssistantVoiceAvailable(agent: Citizen | null): boolean {
   if (!agentVoiceEnabled || !agent) return false;
-  if (sceneState.transitioning || sceneState.activeScene !== "apartment") return false;
+  if (sceneState.transitioning || sceneState.activeScene !== "headquarters") return false;
   if (agent.currentScene !== sceneState.activeScene || agent.currentState === "home" || agent.currentState === "off_district") return false;
   return (playerDistanceToAgent ?? Number.POSITIVE_INFINITY) <= VOICE_INTERACTION_DISTANCE;
 }
@@ -768,7 +768,7 @@ function startAssistantVoicePlaceholder(): void {
 function updateVoiceState(): void {
   const agent = executiveAssistant();
   currentAudioZone = audioZoneForPoint({ x: player.position.x, z: player.position.z }, sceneState.activeScene);
-  if (!agent || sceneState.activeScene !== "apartment") {
+  if (!agent || sceneState.activeScene !== "headquarters") {
     playerDistanceToAgent = null;
     voiceVolume = 0;
     agentAudioZone = null;
@@ -1064,7 +1064,7 @@ function renderHomeProfile(): void {
 }
 
 async function restAtHome(): Promise<void> {
-  await fadeToScene(sceneState, fadeOverlay, "apartment", () => {});
+  await fadeToScene(sceneState, fadeOverlay, "headquarters", () => {});
   showToast("You reviewed the briefing.");
 }
 
@@ -1079,14 +1079,14 @@ function logCitizenTransition(message: string): void {
   console.info(`[door-routing] ${message}`);
 }
 
-function doorApproachPoint(portal: typeof apartmentPortal): { x: number; z: number } {
+function doorApproachPoint(portal: typeof headquartersPortal): { x: number; z: number } {
   if (portal.facingDirection === "south") return { x: portal.exteriorPosition.x, z: portal.exteriorPosition.z + DOOR_APPROACH_DISTANCE };
   if (portal.facingDirection === "north") return { x: portal.exteriorPosition.x, z: portal.exteriorPosition.z - DOOR_APPROACH_DISTANCE };
   if (portal.facingDirection === "east") return { x: portal.exteriorPosition.x + DOOR_APPROACH_DISTANCE, z: portal.exteriorPosition.z };
   return { x: portal.exteriorPosition.x - DOOR_APPROACH_DISTANCE, z: portal.exteriorPosition.z };
 }
 
-function routeCitizenToExteriorDoor(citizen: Citizen, portal: typeof apartmentPortal): void {
+function routeCitizenToExteriorDoor(citizen: Citizen, portal: typeof headquartersPortal): void {
   if (citizen.routeWaypoints.length) return;
   const approach = doorApproachPoint(portal);
   citizen.routeWaypoints = [
@@ -1490,7 +1490,7 @@ function updateBuildingOcclusion(): void {
 
 function updateSceneVisibility(): void {
   outsideGroup.visible = sceneState.activeScene === "outside";
-  apartmentGroup.visible = sceneState.activeScene === "apartment";
+  headquartersGroup.visible = sceneState.activeScene === "headquarters";
 }
 
 function updateNavigationContext(): void {
@@ -1498,9 +1498,9 @@ function updateNavigationContext(): void {
   const playerPoint = { x: player.position.x, z: player.position.z };
 
   if (sceneState.activeScene === "outside") {
-    if (distance2D(playerPoint, apartmentPortal.exteriorPosition) < 2.8) activeDoorAction = "enter_apartment";
-  } else if (sceneState.activeScene === "apartment") {
-    if (distance2D(playerPoint, apartmentPortal.interiorPosition) < 2.4) activeDoorAction = "leave_apartment";
+    if (distance2D(playerPoint, headquartersPortal.exteriorPosition) < 2.8) activeDoorAction = "enter_headquarters";
+  } else if (sceneState.activeScene === "headquarters") {
+    if (distance2D(playerPoint, headquartersPortal.interiorPosition) < 2.4) activeDoorAction = "leave_headquarters";
   }
 
   updateTouchControlVisibility();
@@ -1554,7 +1554,7 @@ function closeInteraction(): void {
 }
 
 function maybeOpenReceptionBriefing(): void {
-  if (briefingAutoOpened || sceneState.transitioning || sceneState.activeScene !== "apartment") return;
+  if (briefingAutoOpened || sceneState.transitioning || sceneState.activeScene !== "headquarters") return;
   if (!briefingPanel.hidden || !popup.hidden || !phonePanel.hidden || !voiceSettingsPanel.hidden || !journalModal.hidden || !homePanel.hidden || !characterModal.hidden) return;
 
   const assistant = executiveAssistant();
@@ -1704,17 +1704,17 @@ async function switchToScene(nextScene: ActiveSceneName, playerPosition: { x: nu
 
 function handleNavigationAction(): void {
   if (sceneState.transitioning) return;
-  if (activeDoorAction === "enter_apartment") {
-    void switchToScene("apartment", { ...APARTMENT_PLAYER_SPAWN });
-  } else if (activeDoorAction === "leave_apartment") {
-    void switchToScene("outside", { x: apartmentPortal.exteriorPosition.x, z: apartmentPortal.exteriorPosition.z + 1.1 });
+  if (activeDoorAction === "enter_headquarters") {
+    void switchToScene("headquarters", { ...HEADQUARTERS_PLAYER_SPAWN });
+  } else if (activeDoorAction === "leave_headquarters") {
+    void switchToScene("outside", { x: headquartersPortal.exteriorPosition.x, z: headquartersPortal.exteriorPosition.z + 1.1 });
   }
 }
 
 function updateHud(): void {
   const areaLabels: Record<ActiveSceneName, string> = {
     outside: DISTRICT_NAME,
-    apartment: "STG Headquarters"
+    headquarters: "STG Headquarters"
   };
   timeDisplay.textContent = formatWorldTime(worldTime);
   playerNameLabel.textContent = playerProfile.displayName;

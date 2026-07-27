@@ -1,4 +1,4 @@
-export type SceneName = "outside" | "apartment";
+export type SceneName = "outside" | "headquarters";
 
 export type DoorPortal = {
   id: string;
@@ -41,13 +41,13 @@ export const WORLD_LIMIT = 58;
 
 export const DOOR_PORTALS: DoorPortal[] = [
   {
-    id: "apartment-main",
+    id: "headquarters-main",
     buildingId: "stg_headquarters",
     exteriorPosition: { x: 0, z: 8.85 },
     interiorPosition: { x: 0, z: 9.2 },
     facingDirection: "south",
     width: 3.4,
-    linkedScene: "apartment",
+    linkedScene: "headquarters",
     linkedDoorId: "stg-headquarters-exit"
   }
 ];
@@ -58,19 +58,19 @@ export const BUSINESSES: BusinessEntity[] = [
     name: "STG Headquarters Operations",
     buildingId: "stg_headquarters",
     category: "headquarters",
-    scene: "apartment",
+    scene: "headquarters",
     openHours: "24h",
     tags: ["stg", "headquarters", "executive-office"]
   }
 ];
 
 export const WORKSTATIONS: Workstation[] = [
-  { id: "reception", buildingId: "stg_headquarters", scene: "apartment", name: "Reception Area", roleTags: ["reception", "assistant"], position: { x: 0, z: 5.2 } },
-  { id: "meeting_boardroom", buildingId: "stg_headquarters", scene: "apartment", name: "Meeting / Boardroom", roleTags: ["meeting", "boardroom"], position: { x: -6.6, z: -2.9 } },
-  { id: "assistant_office", buildingId: "stg_headquarters", scene: "apartment", name: "Assistant Office", roleTags: ["assistant", "office"], position: { x: -6.4, z: 2.6 } },
-  { id: "devon_executive_office", buildingId: "stg_headquarters", scene: "apartment", name: "Devon's Executive Office", roleTags: ["executive", "devon"], position: { x: 6.4, z: -2.9 } },
-  { id: "projects_updates_office", buildingId: "stg_headquarters", scene: "apartment", name: "Projects & Updates Office", roleTags: ["projects", "updates"], position: { x: 6.4, z: 2.6 } },
-  { id: "entrance_exit_door", buildingId: "stg_headquarters", scene: "apartment", name: "Entrance / Exit Door", roleTags: ["door", "portal"], position: { x: 0, z: 8.1 } }
+  { id: "reception", buildingId: "stg_headquarters", scene: "headquarters", name: "Reception Area", roleTags: ["reception", "assistant"], position: { x: 0, z: 5.2 } },
+  { id: "meeting_boardroom", buildingId: "stg_headquarters", scene: "headquarters", name: "Meeting / Boardroom", roleTags: ["meeting", "boardroom"], position: { x: -6.6, z: -2.9 } },
+  { id: "assistant_office", buildingId: "stg_headquarters", scene: "headquarters", name: "Assistant Office", roleTags: ["assistant", "office"], position: { x: -6.4, z: 2.6 } },
+  { id: "devon_executive_office", buildingId: "stg_headquarters", scene: "headquarters", name: "Devon's Executive Office", roleTags: ["executive", "devon"], position: { x: 6.4, z: -2.9 } },
+  { id: "projects_updates_office", buildingId: "stg_headquarters", scene: "headquarters", name: "Projects & Updates Office", roleTags: ["projects", "updates"], position: { x: 6.4, z: 2.6 } },
+  { id: "entrance_exit_door", buildingId: "stg_headquarters", scene: "headquarters", name: "Entrance / Exit Door", roleTags: ["door", "portal"], position: { x: 0, z: 8.1 } }
 ];
 
 export function portalById(id: string): DoorPortal {
