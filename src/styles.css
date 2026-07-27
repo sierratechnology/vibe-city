@@ -1004,3 +1004,108 @@ body.dev-mode #touch-debug {
     min-height: 60px;
   }
 }
+
+/* Landing reset: the world remains live beneath a minimal, accessible shell. */
+[hidden] {
+  display: none !important;
+}
+
+#legacy-interface {
+  display: none !important;
+}
+
+#landing-shell {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  box-sizing: border-box;
+  display: grid;
+  align-content: center;
+  justify-items: start;
+  gap: clamp(14px, 2.4vh, 26px);
+  padding: clamp(28px, 7vw, 112px);
+  overflow: hidden;
+  background: linear-gradient(108deg, rgba(0, 0, 0, 0.96) 0%, rgba(0, 0, 0, 0.78) 48%, rgba(0, 0, 0, 0.6) 100%);
+  color: #f4f5f2;
+  font-family: Arial, Helvetica, sans-serif;
+  text-transform: uppercase;
+}
+
+#landing-shell::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: clamp(14px, 3vw, 48px);
+  width: 1px;
+  background: linear-gradient(transparent, rgba(244, 245, 242, 0.8), transparent);
+  opacity: 0.46;
+}
+
+.landing-kicker,
+.landing-copy,
+#landing-title {
+  margin: 0;
+}
+
+.landing-kicker {
+  color: rgba(244, 245, 242, 0.66);
+  font-size: clamp(10px, 0.9vw, 13px);
+  letter-spacing: 0.42em;
+}
+
+#landing-title {
+  max-width: 12ch;
+  font-size: clamp(54px, 13vw, 196px);
+  font-weight: 400;
+  letter-spacing: 0.08em;
+  line-height: 0.78;
+}
+
+.landing-copy {
+  max-width: 52ch;
+  color: rgba(244, 245, 242, 0.72);
+  font-size: clamp(11px, 1vw, 15px);
+  letter-spacing: 0.2em;
+  line-height: 1.8;
+}
+
+#enter-world {
+  min-height: 48px;
+  padding: 0 2px;
+  border: 0;
+  border-bottom: 1px solid rgba(244, 245, 242, 0.56);
+  border-radius: 0;
+  background: transparent;
+  color: #f4f5f2;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.34em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+#enter-world:hover,
+#enter-world:focus-visible {
+  border-bottom-color: #f4f5f2;
+  outline: 1px solid rgba(244, 245, 242, 0.5);
+  outline-offset: 8px;
+}
+
+#touch-controls,
+body:not(.city-entered) #touch-controls {
+  display: none !important;
+}
+
+@media (max-width: 1024px), (pointer: coarse) {
+  body.city-entered #touch-controls.visible {
+    display: block !important;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #fade-overlay {
+    transition: none;
+  }
+}

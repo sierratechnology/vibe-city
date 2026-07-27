@@ -21,6 +21,7 @@ import {
   seedCitizenKnowledge,
   shareKnowledge
 } from "./knowledgeSystem";
+import { computeMobileControlState } from "./mobileControlState";
 import { PlayerPresence, PresenceDebugState, createPresenceAdapter } from "./multiplayer/presence";
 import {
   PlayerProfile,
@@ -68,7 +69,6 @@ type RemotePlayerRuntime = {
 type DoorAction =
   | "enter_apartment"
   | "leave_apartment";
-type HomeAction = "rest" | "profile" | "customize";
 type VoiceState = "muted" | "listening" | "speaking" | "unavailable";
 type AudioZoneId = "reception" | "assistant_office" | "boardroom" | "devon_executive_office" | "projects_updates_office" | "outside";
 
@@ -82,6 +82,7 @@ type AudioZone = {
 };
 
 const PLAYER_RADIUS = 0.55;
+const APARTMENT_PLAYER_SPAWN = { x: 0, z: 8.2 } as const;
 const PLAYER_SPEED = 8.2;
 const AGENT_WALK_SPEED = 5.4;
 const DOOR_APPROACH_DISTANCE = 2.35;
@@ -104,6 +105,8 @@ const ISO_RIGHT = new THREE.Vector3(1, 0, 0).normalize();
 const ZOOM_LEVELS = [24, 30, 38];
 
 const app = document.querySelector<HTMLDivElement>("#app")!;
+const landingShell = document.querySelector<HTMLElement>("#landing-shell")!;
+const enterWorldButton = document.querySelector<HTMLButtonElement>("#enter-world")!;
 const currentArea = document.querySelector<HTMLSpanElement>("#current-area")!;
 const multiplayerStatusLabel = document.querySelector<HTMLSpanElement>("#multiplayer-status")!;
 const playerNameLabel = document.querySelector<HTMLSpanElement>("#player-name")!;
@@ -181,8 +184,6 @@ const touchControls = document.querySelector<HTMLElement>("#touch-controls")!;
 const touchJoystick = document.querySelector<HTMLElement>("#touch-joystick")!;
 const touchJoystickKnob = document.querySelector<HTMLElement>("#touch-joystick-knob")!;
 const touchActionButton = document.querySelector<HTMLButtonElement>("#touch-action")!;
-const touchPhoneButton = document.querySelector<HTMLButtonElement>("#touch-phone")!;
-const touchDebugButton = document.querySelector<HTMLButtonElement>("#touch-debug")!;
 
 declare global {
   interface Window {
@@ -292,9 +293,7 @@ let gridVisible = false;
 let zoomLevelIndex = 1;
 let lastZoomCycleAt = 0;
 let lastDebugToggleAt = 0;
-let nearbyCitizen: Citizen | null = null;
 let activeDoorAction: DoorAction | null = null;
-let activeHomeAction: HomeAction | null = null;
 let activeInteractionCitizen: Citizen | null = null;
 let activeSharedKnowledge: KnowledgeItem | null = null;
 let briefingAutoOpened = false;
@@ -317,6 +316,7 @@ let lastVoiceKeyAt = 0;
 let selectedCitizen: Citizen | null = null;
 let selectedBusinessId: string | null = null;
 let lastFrameAt = performance.now();
+let cityEntered = false;
 let lastSocialCheckAt = 0;
 let lastSocialPersistAt = 0;
 let activeJoystickPointerId: number | null = null;
@@ -465,7 +465,7 @@ playerName.position.y = 3.25;
 playerName.scale.set(2.6, 1, 1);
 playerName.renderOrder = 11;
 player.add(body, head, playerRing, playerName);
-player.position.set(0, 0, 3.1);
+player.position.set(APARTMENT_PLAYER_SPAWN.x, 0, APARTMENT_PLAYER_SPAWN.z);
 player.rotation.y = Math.PI;
 scene.add(player);
 
@@ -673,7 +673,7 @@ function openBriefing(agent: Citizen): void {
   const githubSource = agent.briefingSources.find((source) => source.toLowerCase().includes("github"));
   const deviceSource = agent.tools.find((tool) => tool.toLowerCase().includes("device")) ?? agent.briefingSources.find((source) => source.toLowerCase().includes("device") || source.toLowerCase().includes("raspberry"));
 
-  briefingContent.innerHTML = `
+  briefingContent.textContent = `
     <article class="briefing-section">
       <h3>GitHub</h3>
       ${renderBriefingList(agent.watchingRepos.map((repo) => `${repo} - mock summary ready from ${githubSource ?? "seeded profile"}`), "No watched repositories yet.")}
@@ -868,11 +868,11 @@ function renderJournal(): void {
   }
   if (activeJournalTab === "contacts") {
     if (!playerProfile.knownCitizenIds.length) {
-      journalList.innerHTML = "<p>No contacts yet. Talk to agents to add them.</p>";
+      journalList.textContent = "<p>No contacts yet. Talk to agents to add them.</p>";
       return;
     }
 
-    journalList.innerHTML = playerProfile.knownCitizenIds
+    journalList.textContent = playerProfile.knownCitizenIds
       .map((citizenId) => {
         const citizen = citizens.find((entry) => entry.id === citizenId);
         if (!citizen) return "";
@@ -895,11 +895,11 @@ function renderJournal(): void {
 
   const items = knowledgeItemsForIds(playerKnowledgeIds()).filter((item) => item.type === activeJournalTab);
   if (!items.length) {
-    journalList.innerHTML = `<p>No ${activeJournalTab === "citizen" ? "people" : `${activeJournalTab}s`} discovered yet.</p>`;
+    journalList.textContent = `<p>No ${activeJournalTab === "citizen" ? "people" : `${activeJournalTab}s`} discovered yet.</p>`;
     return;
   }
 
-  journalList.innerHTML = items
+  journalList.textContent = items
     .map(
       (item) => `
         <article class="journal-item">
@@ -924,7 +924,7 @@ function renderPhone(): void {
   for (const tab of phoneTabs) tab.classList.toggle("active", tab.dataset.phoneApp === activePhoneApp);
 
   if (activePhoneApp === "contacts") {
-    phoneContent.innerHTML = playerProfile.knownCitizenIds.length
+    phoneContent.textContent = playerProfile.knownCitizenIds.length
       ? playerProfile.knownCitizenIds
           .map((citizenId) => {
             const citizen = citizens.find((entry) => entry.id === citizenId);
@@ -937,7 +937,7 @@ function renderPhone(): void {
   }
 
   if (activePhoneApp === "messages") {
-    phoneContent.innerHTML = playerProfile.messages.length
+    phoneContent.textContent = playerProfile.messages.length
       ? playerProfile.messages.map((message) => `<article class="phone-card"><h3>${message.title}</h3><p>${message.body}</p><p>${message.category}</p></article>`).join("")
       : "<p>No messages yet.</p>";
     return;
@@ -949,12 +949,12 @@ function renderPhone(): void {
       const matches = items.filter((item) => item.type === type);
       return `<h3>${label}</h3>${matches.length ? matches.map((item) => `<article class="phone-card"><strong>${item.title}</strong><p>${item.description}</p></article>`).join("") : "<p>None discovered.</p>"}`;
     };
-    phoneContent.innerHTML = `${section("People", "citizen")}${section("Places", "place")}${section("Businesses", "business")}${section("Rumors", "rumor")}`;
+    phoneContent.textContent = `${section("People", "citizen")}${section("Places", "place")}${section("Businesses", "business")}${section("Rumors", "rumor")}`;
     return;
   }
 
   if (activePhoneApp === "profile") {
-    phoneContent.innerHTML = `
+    phoneContent.textContent = `
       <article class="phone-card">
         <h3>${playerProfile.displayName}</h3>
         <p>Wallet: $${Math.round(playerProfile.wallet)}</p>
@@ -970,7 +970,7 @@ function renderPhone(): void {
 
   if (activePhoneApp === "map") {
     const businessEntities = deriveBusinessEntities(citizens, worldTime);
-    phoneContent.innerHTML = `
+    phoneContent.textContent = `
       <article class="phone-card">
         <h3>${DISTRICT_NAME}</h3>
         <p>Current area: ${currentArea.textContent}</p>
@@ -981,7 +981,7 @@ function renderPhone(): void {
     return;
   }
 
-  phoneContent.innerHTML = `<article class="phone-card">${opsSummary.innerHTML}<p>Selected: ${(selectedCitizen ?? citizens[0]).name}</p></article>`;
+  phoneContent.textContent = `<article class="phone-card">${opsSummary.textContent}<p>Selected: ${(selectedCitizen ?? citizens[0]).name}</p></article>`;
 }
 
 function openPhone(appName: typeof activePhoneApp = activePhoneApp): void {
@@ -1010,10 +1010,17 @@ function updateTouchControlVisibility(): void {
     focusedElement instanceof HTMLInputElement ||
     focusedElement instanceof HTMLTextAreaElement ||
     focusedElement instanceof HTMLSelectElement;
-  const blockingPanelOpen = !phonePanel.hidden || !journalModal.hidden || !homePanel.hidden || !voiceSettingsPanel.hidden || !popup.hidden || !briefingPanel.hidden || !characterModal.hidden;
-  const shouldShow = shouldShowTouchControls() && !typing && !blockingPanelOpen;
-  touchControls.classList.toggle("visible", shouldShow);
-  if (!shouldShow) resetJoystick();
+  const state = computeMobileControlState({
+    cityEntered,
+    mobileCapable: shouldShowTouchControls(),
+    typing,
+    transitionBlocked: sceneState.transitioning,
+    activeDoorAction: activeDoorAction !== null
+  });
+  touchControls.classList.toggle("visible", state.containerVisible);
+  touchActionButton.hidden = !state.actionVisible;
+  touchActionButton.disabled = !state.actionVisible;
+  if (!state.containerVisible) resetJoystick();
 }
 
 function updateJoystickFromPointer(event: PointerEvent): void {
@@ -1043,7 +1050,7 @@ function resetJoystick(): void {
 
 function renderHomeProfile(): void {
   homeTitle.textContent = "STG Headquarters";
-  homeContent.innerHTML = `
+  homeContent.textContent = `
     <p>Player: ${playerProfile.displayName}</p>
     <p>Wallet: $${Math.round(playerProfile.wallet)}</p>
     <p>Reputation: ${playerProfile.reputationStars.toFixed(1)}</p>
@@ -1053,6 +1060,7 @@ function renderHomeProfile(): void {
     <p>Home: STG Headquarters</p>
   `;
   homePanel.hidden = false;
+  updateTouchControlVisibility();
 }
 
 async function restAtHome(): Promise<void> {
@@ -1403,7 +1411,7 @@ function updateCitizenMeshes(): void {
 }
 
 function movePlayer(delta: number): void {
-  if (!popup.hidden || !briefingPanel.hidden || !homePanel.hidden || !journalModal.hidden || !phonePanel.hidden || !voiceSettingsPanel.hidden || sceneState.transitioning) {
+  if (!cityEntered || sceneState.transitioning) {
     playerVelocity.lerp(new THREE.Vector3(), 1 - Math.pow(0.00003, delta));
     return;
   }
@@ -1485,66 +1493,17 @@ function updateSceneVisibility(): void {
   apartmentGroup.visible = sceneState.activeScene === "apartment";
 }
 
-function updatePrompts(): void {
-  nearbyCitizen = null;
+function updateNavigationContext(): void {
   activeDoorAction = null;
-  activeHomeAction = null;
   const playerPoint = { x: player.position.x, z: player.position.z };
-
-  for (const citizen of citizens) {
-    if (citizen.currentScene !== sceneState.activeScene || citizen.currentState === "home" || citizen.currentState === "off_district") continue;
-    if (distance2D(playerPoint, citizen.position) < 2.2) {
-      nearbyCitizen = citizen;
-      selectedCitizen = citizen;
-      break;
-    }
-  }
 
   if (sceneState.activeScene === "outside") {
     if (distance2D(playerPoint, apartmentPortal.exteriorPosition) < 2.8) activeDoorAction = "enter_apartment";
   } else if (sceneState.activeScene === "apartment") {
-    if (distance2D(playerPoint, { x: 6.4, z: -2.9 }) < 2) activeHomeAction = "rest";
-    if (distance2D(playerPoint, { x: 6.4, z: 2.6 }) < 2) activeHomeAction = "profile";
     if (distance2D(playerPoint, apartmentPortal.interiorPosition) < 2.4) activeDoorAction = "leave_apartment";
   }
 
-  if (!popup.hidden || !briefingPanel.hidden || !voiceSettingsPanel.hidden || sceneState.transitioning) {
-    actionPrompt.hidden = true;
-    return;
-  }
-
-  if (nearbyCitizen) {
-    actionPrompt.textContent =
-      nearbyCitizen.id === EXECUTIVE_ASSISTANT_ID
-        ? `[E] Briefing / [V] Voice with ${nearbyCitizen.preferredName}`
-        : `[E] Talk to ${nearbyCitizen.name}`;
-    actionPrompt.hidden = false;
-    return;
-  }
-
-  const homeLabels: Record<HomeAction, string> = {
-    rest: "[E] Review Briefing",
-    profile: "[E] Check Profile",
-    customize: "[E] Customize Character Coming Soon"
-  };
-
-  if (activeHomeAction) {
-    actionPrompt.textContent = homeLabels[activeHomeAction];
-    actionPrompt.hidden = false;
-    return;
-  }
-
-  const labels: Record<DoorAction, string> = {
-    enter_apartment: "[E] Enter STG Headquarters",
-    leave_apartment: "[E] Exit STG Headquarters"
-  };
-
-  if (activeDoorAction) {
-    actionPrompt.textContent = labels[activeDoorAction];
-    actionPrompt.hidden = false;
-  } else {
-    actionPrompt.hidden = true;
-  }
+  updateTouchControlVisibility();
 }
 
 function openInteraction(citizen: Citizen): void {
@@ -1721,11 +1680,18 @@ touchJoystick.addEventListener("pointercancel", (event) => {
   if (event.pointerId === activeJoystickPointerId) resetJoystick();
 });
 
-touchActionButton.addEventListener("click", () => handleInteractionKey());
-touchPhoneButton.addEventListener("click", () => openPhone("contacts"));
-touchDebugButton.addEventListener("click", () => {
-  assetDebugVisible = !assetDebugVisible;
-});
+touchActionButton.addEventListener("click", handleNavigationAction);
+
+function enterWorld(): void {
+  cityEntered = true;
+  document.body.classList.add("city-entered");
+  landingShell.hidden = true;
+  landingShell.inert = true;
+  landingShell.setAttribute("aria-hidden", "true");
+  updateTouchControlVisibility();
+}
+
+enterWorldButton.addEventListener("click", enterWorld);
 
 async function switchToScene(nextScene: ActiveSceneName, playerPosition: { x: number; z: number }): Promise<void> {
   await fadeToScene(sceneState, fadeOverlay, nextScene, () => {
@@ -1736,27 +1702,10 @@ async function switchToScene(nextScene: ActiveSceneName, playerPosition: { x: nu
   });
 }
 
-function handleInteractionKey(): void {
-  if (nearbyCitizen) {
-    openInteraction(nearbyCitizen);
-    return;
-  }
-
-  if (activeHomeAction === "rest") {
-    void restAtHome();
-    return;
-  }
-  if (activeHomeAction === "profile") {
-    renderHomeProfile();
-    return;
-  }
-  if (activeHomeAction === "customize") {
-    showToast("Customize Character Coming Soon");
-    return;
-  }
-
+function handleNavigationAction(): void {
+  if (sceneState.transitioning) return;
   if (activeDoorAction === "enter_apartment") {
-    void switchToScene("apartment", { x: 0, z: 3.1 });
+    void switchToScene("apartment", { ...APARTMENT_PLAYER_SPAWN });
   } else if (activeDoorAction === "leave_apartment") {
     void switchToScene("outside", { x: apartmentPortal.exteriorPosition.x, z: apartmentPortal.exteriorPosition.z + 1.1 });
   }
@@ -1808,7 +1757,7 @@ function updateOpsPanel(): void {
   const remotePlayerList = multiplayerDebug?.remotePlayers.length
     ? multiplayerDebug.remotePlayers.map((presence) => `${presence.displayName} / ${presence.currentScene} / ${presence.currentArea}`).join("<br>")
     : "None";
-  opsSummary.innerHTML = `
+  opsSummary.textContent = `
     <p>Active District: ${DISTRICT_ID}</p>
     <h2>Multiplayer Debug</h2>
     <p>Supabase URL Configured: ${multiplayerDebug?.supabaseUrlConfigured ? "yes" : "no"}</p>
@@ -1852,7 +1801,7 @@ function updateOpsPanel(): void {
   const social = inspected.currentSocialInteraction
     ? `${citizenName(inspected.currentSocialInteraction.partnerId)} / ${inspected.currentSocialInteraction.topic} / ${Math.max(0, Math.ceil(inspected.currentSocialInteraction.endsAtAbsoluteMinute - worldTime.absoluteMinutes))} min`
     : "None";
-  citizenDetails.innerHTML = `
+  citizenDetails.textContent = `
     <h2>Selected Agent</h2>
     <p>${inspected.name}</p>
     <p>Interests: ${inspected.interests.join(", ") || "None"}</p>
@@ -1899,7 +1848,7 @@ function updateOpsPanel(): void {
     )
     .join("");
   const managerName = focusedBusiness.managerCitizenId ? citizenName(focusedBusiness.managerCitizenId) : "None";
-  citizenDetails.innerHTML += `
+  citizenDetails.textContent += `
     <h2>Business Inspector</h2>
     <div id="business-inspector-list">${businessCards}</div>
     <section class="business-inspector-detail">
@@ -1948,12 +1897,7 @@ function animate(): void {
   updateCamera(delta);
   updateBuildingOcclusion();
   updateSceneVisibility();
-  updateVoiceState();
-  updatePrompts();
-  maybeOpenReceptionBriefing();
-  updateHud();
-  updateOpsPanel();
-  if (!phonePanel.hidden) renderPhone();
+  updateNavigationContext();
   renderer.render(scene, camera);
   const businessHealth = deriveBusinessEntities(citizens, worldTime);
   window.__vibeCity3DHealth = {
@@ -2065,16 +2009,12 @@ animate();
 
 function handleKeyDown(event: KeyboardEvent): void {
   const code = event.code.toLowerCase();
+  if (!cityEntered) return;
   keys.add(code);
 
   if (event.repeat) return;
 
-  if (code === "keye") handleInteractionKey();
-  if (code === "keyp") openPhone("contacts");
-  if (code === "keyv" && performance.now() - lastVoiceKeyAt > 180) {
-    startAssistantVoicePlaceholder();
-    lastVoiceKeyAt = performance.now();
-  }
+  if (code === "keye") handleNavigationAction();
 
   if (code === "keyc" && performance.now() - lastZoomCycleAt > 180) {
     zoomLevelIndex = (zoomLevelIndex + 1) % ZOOM_LEVELS.length;
