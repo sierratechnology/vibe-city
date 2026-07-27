@@ -9,6 +9,14 @@
   </head>
   <body>
     <div id="app"></div>
+    <section id="landing-shell" aria-labelledby="landing-title">
+      <p class="landing-kicker">World Zero / Live Simulation</p>
+      <h1 id="landing-title">Vibe City</h1>
+      <p class="landing-copy">A city in motion. Explore the current Three.js world.</p>
+      <button id="enter-world" type="button">Enter World Zero</button>
+    </section>
+    <!-- End landing shell -->
+    <div id="legacy-interface" hidden inert aria-hidden="true">
     <section id="hud" aria-label="STG World Zero status">
       <h1>STG World Zero</h1>
       <p class="hud-chip hud-time"><span id="time-display">Local Time</span></p>
@@ -36,7 +44,6 @@
       <div id="voice-meter" aria-hidden="true"><span id="voice-meter-fill"></span></div>
       <p id="voice-caption" hidden></p>
     </section>
-    <div id="fade-overlay"></div>
     <section id="briefing-panel" hidden aria-label="Executive Assistant briefing">
       <button id="briefing-close" type="button" aria-label="Close">X</button>
       <h2 id="briefing-title">STG Briefing</h2>
@@ -116,7 +123,7 @@
       </div>
     </section>
     <div id="toast-message" hidden></div>
-    <section id="character-modal" aria-label="Create Character">
+    <section id="character-modal" hidden aria-label="Create Character">
       <form id="character-form">
         <h2>Create Character</h2>
         <label for="character-name">Display Name</label>
@@ -130,16 +137,18 @@
       <button id="reset-citizens" type="button">Reset Citizen Persistence</button>
       <button id="reset-world-time" type="button">Reset World Time</button>
     </section>
+    </div>
+    <!-- End legacy interface -->
+    <div id="fade-overlay"></div>
     <section id="touch-controls" aria-label="Touch controls">
       <div id="touch-joystick" aria-label="Move" role="application">
         <div id="touch-joystick-knob"></div>
       </div>
       <div id="touch-actions">
-        <button id="touch-phone" type="button" aria-label="Open phone">Phone</button>
-        <button id="touch-debug" type="button" aria-label="Toggle debug tools">Debug</button>
-        <button id="touch-action" type="button" aria-label="Interact">Action</button>
+        <button id="touch-action" type="button" aria-label="Interact" hidden disabled>Action</button>
       </div>
     </section>
+    <!-- End touch controls -->
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>
