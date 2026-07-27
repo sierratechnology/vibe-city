@@ -13,7 +13,7 @@ export type CitizenState =
   | "walking_to_destination"
   | "socializing"
   | "idle";
-export type CitizenScene = "outside" | "apartment" | "none";
+export type CitizenScene = "outside" | "headquarters" | "none";
 export type RelationshipLabel = "close friend" | "friend" | "friendly" | "neutral" | "tense" | "disliked" | "enemy";
 export type CitizenInterest = "executive support" | "project updates" | "meetings" | "decisions" | "agent coordination";
 
@@ -318,8 +318,8 @@ function createExecutiveAssistant(): Citizen {
       role: EXECUTIVE_ASSISTANT_PROFILE.roleTitle,
       businessId: "stg-headquarters-operations",
       buildingId: "stg_headquarters",
-      portalId: "apartment-main",
-      scene: "apartment",
+      portalId: "headquarters-main",
+      scene: "headquarters",
       workstationId: "reception",
       hourlyWage: 0
     },
@@ -331,8 +331,8 @@ function createExecutiveAssistant(): Citizen {
       role: EXECUTIVE_ASSISTANT_PROFILE.roleTitle,
       businessId: "stg-headquarters-operations",
       buildingId: "stg_headquarters",
-      portalId: "apartment-main",
-      scene: "apartment",
+      portalId: "headquarters-main",
+      scene: "headquarters",
       workstationId: "reception",
       hourlyWage: 0
     }
@@ -367,7 +367,7 @@ function createExecutiveAssistant(): Citizen {
     role: EXECUTIVE_ASSISTANT_PROFILE.roleTitle,
     currentMood: "friendly",
     currentState: "working",
-    currentScene: "apartment",
+    currentScene: "headquarters",
     currentLocation: EXECUTIVE_ASSISTANT_PROFILE.currentLocation,
     currentDestination: null,
     currentWorkstationId: "reception",
@@ -376,7 +376,7 @@ function createExecutiveAssistant(): Citizen {
     schedule,
     position: { x: 0, z: 5.2 },
     homePosition: { x: -6.4, z: 2.6 },
-    offDistrictEntryPortalId: "apartment-main",
+    offDistrictEntryPortalId: "headquarters-main",
     routeWaypoints: [],
     wasLateToday: false,
     delayMinutes: 0,

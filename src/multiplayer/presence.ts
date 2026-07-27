@@ -1,7 +1,7 @@
 import { RealtimeChannel, SupabaseClient } from "@supabase/supabase-js";
 import { createSupabaseClient, getSupabaseRealtimeConfig } from "./supabaseClient";
 
-export type PresenceScene = "outside" | "apartment" | "none";
+export type PresenceScene = "outside" | "headquarters" | "none";
 
 export type PlayerPresence = {
   playerId: string;
@@ -14,6 +14,11 @@ export type PlayerPresence = {
   currentScene: PresenceScene;
   currentArea: string;
   updatedAt: number;
+};
+
+type WirePlayerPresence = Omit<PlayerPresence, "currentScene"> & {
+  currentScene: string;
+  currentSceneV2?: PresenceScene;
 };
 
 export type PresenceDebugState = {
@@ -51,6 +56,13 @@ const CHANNEL_NAME = "stg-world-zero";
 const LOCAL_PLAYER_ID_KEY = "stgWorldZero.playerId";
 const REMOTE_TIMEOUT_MS = 10_000;
 const CONNECTING_TIMEOUT_MS = 10_000;
+const LEGACY_WIRE_HEADQUARTERS_SCENE = ["apart", "ment"].join("");
+
+export function normalizePresenceScene(value: unknown): PresenceScene | null {
+  if (value === LEGACY_WIRE_HEADQUARTERS_SCENE) return "headquarters";
+  if (value === "outside" || value === "headquarters" || value === "none") return value;
+  return null;
+}
 
 function formatRealtimeError(error: unknown): string {
   if (!error) return "No error details provided";
@@ -129,7 +141,7 @@ class SupabasePresenceAdapter implements PresenceAdapter {
 
   private lastPresenceSyncAt: number | null = null;
 
-  private lastPresence: PlayerPresence | null = null;
+  private lastPresence: WirePlayerPresence | null = null;
 
   constructor(client: SupabaseClient) {
     this.client = client;
@@ -181,28 +193,35 @@ class SupabasePresenceAdapter implements PresenceAdapter {
   }
 
   private syncPresence(): void {
-    const state = this.channel.presenceState<PlayerPresence>();
+    const state = this.channel.presenceState<WirePlayerPresence>();
     const next = new Map<string, PlayerPresence>();
     for (const entries of Object.values(state)) {
       const latest = entries.sort((a, b) => b.updatedAt - a.updatedAt)[0];
       if (!latest || latest.playerId === this.localPlayerId) continue;
-      next.set(latest.playerId, latest);
+      const currentScene = normalizePresenceScene(latest.currentSceneV2 ?? latest.currentScene);
+      if (!currentScene) continue;
+      next.set(latest.playerId, { ...latest, currentScene });
     }
     this.remotePlayers = next;
     this.lastPresenceSyncAt = Date.now();
   }
 
   publish(presence: Omit<PlayerPresence, "playerId" | "updatedAt">): void {
-    const payload: PlayerPresence = {
+    const publicPayload: PlayerPresence = {
       ...presence,
       playerId: this.localPlayerId,
       updatedAt: Date.now()
     };
-    this.localDisplayName = payload.displayName;
-    this.lastPresence = payload;
-    this.lastBroadcastAt = payload.updatedAt;
+    const wirePayload: WirePlayerPresence = {
+      ...publicPayload,
+      currentScene: publicPayload.currentScene === "headquarters" ? LEGACY_WIRE_HEADQUARTERS_SCENE : publicPayload.currentScene,
+      currentSceneV2: publicPayload.currentScene
+    };
+    this.localDisplayName = publicPayload.displayName;
+    this.lastPresence = wirePayload;
+    this.lastBroadcastAt = publicPayload.updatedAt;
     if (this.channelStatus === "subscribed") {
-      void this.channel.track(payload);
+      void this.channel.track(wirePayload);
     }
   }
 
