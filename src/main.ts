@@ -22,6 +22,8 @@ import {
 } from "./knowledgeSystem";
 import { computeMobileControlState } from "./mobileControlState";
 import { PlayerPresence, PresenceDebugState, createPresenceAdapter } from "./multiplayer/presence";
+import { createOperationsDirectoryController } from "./operations/operationsDirectory";
+import { createWorldOperationsSnapshot, deriveRealtimeObservation, type RecordsObservation } from "./operations/worldOperationsSnapshot";
 import { createRecordsTerminalController } from "./records/recordsTerminal";
 import {
   PlayerProfile,
@@ -70,7 +72,8 @@ type RemotePlayerRuntime = {
 type DoorAction =
   | "enter_headquarters"
   | "leave_headquarters";
-type ContextAction = DoorAction | "inspect_records";
+type OperationsContextAction = "inspect_reception_status" | "inspect_chief_identity" | "inspect_executive_authority";
+type ContextAction = DoorAction | "inspect_records" | OperationsContextAction;
 type VoiceState = "muted" | "listening" | "speaking" | "unavailable";
 type AudioZoneId = "reception" | "assistant_office" | "boardroom" | "devon_executive_office" | "projects_updates_office" | "outside";
 
@@ -86,6 +89,47 @@ type AudioZone = {
 const PLAYER_RADIUS = 0.55;
 const HEADQUARTERS_PLAYER_SPAWN = { x: 0, z: 8.2 } as const;
 const RECORDS_TERMINAL_INTERACTION_POSITION = { x: 6.4, z: 4.65 } as const;
+const RECEPTION_STATUS_INTERACTION_POSITION = { x: 3.25, z: 6.3 } as const;
+const CHIEF_AGENT_IDENTITY_INTERACTION_POSITION = { x: -6.4, z: 5.0 } as const;
+const EXECUTIVE_AUTHORITY_INTERACTION_POSITION = { x: 2.6, z: -0.7 } as const;
+type OperationsFixture = {
+  id: "reception-status" | "chief-agent-identity" | "executive-authority";
+  action: OperationsContextAction;
+  label: string;
+  actionLabel: string;
+  ariaLabel: string;
+  position: { readonly x: number; readonly z: number };
+  radius: number;
+};
+const OPERATIONS_FIXTURES: readonly OperationsFixture[] = [
+  {
+    id: "reception-status",
+    action: "inspect_reception_status",
+    label: "Reception Status",
+    actionLabel: "Status",
+    ariaLabel: "Inspect Reception Status",
+    position: RECEPTION_STATUS_INTERACTION_POSITION,
+    radius: 1.9
+  },
+  {
+    id: "chief-agent-identity",
+    action: "inspect_chief_identity",
+    label: "Spiders Identity",
+    actionLabel: "Identity",
+    ariaLabel: "Inspect Spiders Identity",
+    position: CHIEF_AGENT_IDENTITY_INTERACTION_POSITION,
+    radius: 1.9
+  },
+  {
+    id: "executive-authority",
+    action: "inspect_executive_authority",
+    label: "Executive Authority",
+    actionLabel: "Authority",
+    ariaLabel: "Inspect Executive Authority",
+    position: EXECUTIVE_AUTHORITY_INTERACTION_POSITION,
+    radius: 1.9
+  }
+];
 const PLAYER_SPEED = 8.2;
 const AGENT_WALK_SPEED = 5.4;
 const DOOR_APPROACH_DISTANCE = 2.35;
@@ -97,7 +141,7 @@ const VOICE_CROSS_ROOM_ATTENUATION = 0.16;
 const VOICE_PLACEHOLDER_TEXT = "Welcome back, Devon. I have your STG briefing ready.";
 const AUDIO_ZONES: AudioZone[] = [
   { id: "reception", label: "Reception", minX: -2.8, maxX: 2.8, minZ: 0.5, maxZ: 9.8 },
-  { id: "assistant_office", label: "Assistant Office", minX: -9.6, maxX: -2.8, minZ: 0.5, maxZ: 9.8 },
+  { id: "assistant_office", label: "Chief Agent Office", minX: -9.6, maxX: -2.8, minZ: 0.5, maxZ: 9.8 },
   { id: "boardroom", label: "Boardroom", minX: -9.6, maxX: -0.2, minZ: -9.6, maxZ: 0.5 },
   { id: "devon_executive_office", label: "Devon Executive Office", minX: 0.2, maxX: 9.6, minZ: -9.6, maxZ: 0.5 },
   { id: "projects_updates_office", label: "Projects & Updates Office", minX: 2.8, maxX: 9.6, minZ: 0.5, maxZ: 9.8 }
@@ -187,6 +231,28 @@ const touchControls = document.querySelector<HTMLElement>("#touch-controls")!;
 const touchJoystick = document.querySelector<HTMLElement>("#touch-joystick")!;
 const touchJoystickKnob = document.querySelector<HTMLElement>("#touch-joystick-knob")!;
 const touchActionButton = document.querySelector<HTMLButtonElement>("#touch-action")!;
+let recordsObservation: RecordsObservation = { state: "not_checked", asOf: null };
+const operationsDirectoryDialog = document.querySelector<HTMLDialogElement>("#operations-directory-dialog")!;
+const operationsDirectory = createOperationsDirectoryController(
+  {
+    access: document.querySelector<HTMLButtonElement>("#operations-directory-access")!,
+    dialog: operationsDirectoryDialog,
+    close: document.querySelector<HTMLButtonElement>("#operations-directory-close")!,
+    state: document.querySelector<HTMLElement>("#operations-directory-state")!,
+    services: document.querySelector<HTMLElement>("#operations-directory-services")!,
+    records: document.querySelector<HTMLElement>("#operations-directory-record")!,
+    identity: document.querySelector<HTMLElement>("#operations-directory-identity")!,
+    authority: document.querySelector<HTMLElement>("#operations-directory-authority")!,
+    onOpenChange: updateTouchControlVisibility
+  },
+  () => createWorldOperationsSnapshot({
+    services: {
+      coreWorld: renderer.domElement.isConnected && !renderer.getContext().isContextLost() ? "working" : "unavailable",
+      realtime: deriveRealtimeObservation(multiplayerDebug),
+      records: recordsObservation
+    }
+  })
+);
 const recordsTerminalDialog = document.querySelector<HTMLDialogElement>("#records-terminal-dialog")!;
 const recordsTerminal = createRecordsTerminalController({
   dialog: recordsTerminalDialog,
@@ -200,7 +266,25 @@ const recordsTerminal = createRecordsTerminalController({
   observed: document.querySelector<HTMLElement>("#records-terminal-observed")!,
   freshness: document.querySelector<HTMLElement>("#records-terminal-freshness")!,
   source: document.querySelector<HTMLAnchorElement>("#records-terminal-source")!,
-  onOpenChange: updateTouchControlVisibility
+  onOpenChange: updateTouchControlVisibility,
+  onStateChange: (state) => {
+    recordsObservation = state.status === "unavailable"
+      ? { state: "unavailable", asOf: state.checkedAt, failure: state.reason, record: null }
+      : {
+          state: state.freshness,
+          asOf: state.observedAt,
+          failure: state.staleReason ?? null,
+          record: {
+            title: state.title,
+            source: state.source,
+            sourceId: state.sourceId,
+            sourceUpdatedAt: state.sourceUpdatedAt,
+            observedAt: state.observedAt,
+            checkedAt: state.checkedAt,
+            url: state.url
+          }
+        };
+  }
 });
 
 declare global {
@@ -269,6 +353,8 @@ renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.domElement.tabIndex = 0;
+renderer.domElement.setAttribute("aria-label", "Vibe City world viewport");
 app.append(renderer.domElement);
 
 const sceneState = createSceneState();
@@ -442,6 +528,21 @@ function buildHeadquartersInterior(): void {
   recordsTerminalLabel.scale.set(3.2, 0.78, 1);
   headquartersGroup.add(recordsTerminalLabel);
 
+  const operationsMaterial = new THREE.MeshStandardMaterial({
+    color: 0x243f47,
+    emissive: 0x517985,
+    emissiveIntensity: 0.42,
+    roughness: 0.48
+  });
+  for (const fixture of OPERATIONS_FIXTURES) {
+    addBox(headquartersGroup, 0.95, 0.78, 0.2, fixture.position.x, 0.08, fixture.position.z, operationsMaterial);
+    addCollider(headquartersColliders, fixture.position.x, fixture.position.z, 0.95, 0.2);
+    const operationsLabel = createLabelSprite(fixture.label, 512, 96, 28);
+    operationsLabel.position.set(fixture.position.x, 1.9, fixture.position.z);
+    operationsLabel.scale.set(3.25, 0.78, 1);
+    headquartersGroup.add(operationsLabel);
+  }
+
   addBox(headquartersGroup, 0.22, 1.25, 8.8, 0, 0, -2.1, glassMaterial);
   addBox(headquartersGroup, 18, 1.1, 0.22, 0, 0, 0.5, glassMaterial);
 
@@ -453,7 +554,7 @@ function buildHeadquartersInterior(): void {
   for (const [text, x, z] of [
     ["Reception Area", 0, 6.1],
     ["Meeting / Boardroom", -6.6, -1.1],
-    ["Assistant Office", -6.4, 4.1],
+    ["Chief Agent Office", -6.4, 4.1],
     ["Devon Executive Office", 6.4, -1.1],
     ["Projects & Updates", 6.4, 4.1],
     ["Exit", 0, 8.3]
@@ -1044,17 +1145,30 @@ function updateTouchControlVisibility(): void {
     cityEntered,
     mobileCapable: shouldShowTouchControls(),
     typing,
-    interactionBlocked: recordsTerminalDialog.open,
+    interactionBlocked: recordsTerminalDialog.open || operationsDirectoryDialog.open,
     transitionBlocked: sceneState.transitioning,
     activeContextAction: activeContextAction !== null
   });
   touchControls.classList.toggle("visible", state.containerVisible);
   touchActionButton.hidden = !state.actionVisible;
   touchActionButton.disabled = !state.actionVisible;
-  const inspectingRecords = activeContextAction === "inspect_records";
-  touchActionButton.textContent = inspectingRecords ? "Inspect" : "Action";
-  touchActionButton.setAttribute("aria-label", inspectingRecords ? "Inspect Records Terminal" : "Interact");
+  touchActionButton.textContent = contextActionLabel(activeContextAction);
+  touchActionButton.setAttribute("aria-label", contextActionAriaLabel(activeContextAction));
   if (!state.containerVisible) resetJoystick();
+}
+
+function contextActionLabel(action: ContextAction | null): string {
+  if (action === "inspect_records") return "Inspect";
+  const operationsFixture = OPERATIONS_FIXTURES.find((fixture) => fixture.action === action);
+  if (operationsFixture) return operationsFixture.actionLabel;
+  return "Action";
+}
+
+function contextActionAriaLabel(action: ContextAction | null): string {
+  if (action === "inspect_records") return "Inspect Records Terminal";
+  const operationsFixture = OPERATIONS_FIXTURES.find((fixture) => fixture.action === action);
+  if (operationsFixture) return operationsFixture.ariaLabel;
+  return "Interact";
 }
 
 function updateJoystickFromPointer(event: PointerEvent): void {
@@ -1445,7 +1559,7 @@ function updateCitizenMeshes(): void {
 }
 
 function movePlayer(delta: number): void {
-  if (!cityEntered || sceneState.transitioning || recordsTerminalDialog.open) {
+  if (!cityEntered || sceneState.transitioning || recordsTerminalDialog.open || operationsDirectoryDialog.open) {
     playerVelocity.lerp(new THREE.Vector3(), 1 - Math.pow(0.00003, delta));
     return;
   }
@@ -1534,6 +1648,13 @@ function canInspectRecordsTerminal(): boolean {
   );
 }
 
+function canInspectOperationsFixture(fixture: OperationsFixture): boolean {
+  return (
+    sceneState.activeScene === "headquarters" &&
+    distance2D({ x: player.position.x, z: player.position.z }, fixture.position) < fixture.radius
+  );
+}
+
 function updateNavigationContext(): void {
   activeContextAction = null;
   const playerPoint = { x: player.position.x, z: player.position.z };
@@ -1543,6 +1664,10 @@ function updateNavigationContext(): void {
   } else if (sceneState.activeScene === "headquarters") {
     if (distance2D(playerPoint, headquartersPortal.interiorPosition) < 2.4) activeContextAction = "leave_headquarters";
     else if (canInspectRecordsTerminal()) activeContextAction = "inspect_records";
+    else {
+      const operationsFixture = OPERATIONS_FIXTURES.find(canInspectOperationsFixture);
+      if (operationsFixture) activeContextAction = operationsFixture.action;
+    }
   }
 
   updateTouchControlVisibility();
@@ -1752,6 +1877,14 @@ function handleNavigationAction(): void {
     void switchToScene("outside", { x: headquartersPortal.exteriorPosition.x, z: headquartersPortal.exteriorPosition.z + 1.1 });
   } else if (activeContextAction === "inspect_records" && canInspectRecordsTerminal()) {
     void recordsTerminal.open();
+  } else {
+    const operationsFixture = OPERATIONS_FIXTURES.find(
+      (fixture) => fixture.action === activeContextAction && canInspectOperationsFixture(fixture)
+    );
+    if (operationsFixture) {
+      const opener = shouldShowTouchControls() ? touchActionButton : renderer.domElement;
+      operationsDirectory.open(opener);
+    }
   }
 }
 
@@ -2053,7 +2186,7 @@ animate();
 
 function handleKeyDown(event: KeyboardEvent): void {
   const code = event.code.toLowerCase();
-  if (!cityEntered || recordsTerminalDialog.open) return;
+  if (!cityEntered || recordsTerminalDialog.open || operationsDirectoryDialog.open) return;
   keys.add(code);
 
   if (event.repeat) return;

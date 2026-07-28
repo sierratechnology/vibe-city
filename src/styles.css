@@ -1110,6 +1110,112 @@ body:not(.city-entered) #touch-controls {
   }
 }
 
+.operations-directory-access,
+body:not(.city-entered) .operations-directory-access {
+  display: none;
+}
+
+body.city-entered .operations-directory-access {
+  position: fixed;
+  top: max(1rem, env(safe-area-inset-top));
+  right: max(1rem, env(safe-area-inset-right));
+  z-index: 3;
+  display: block;
+  min-height: 2.75rem;
+  padding: 0.65rem 0.85rem;
+  border: 1px solid rgb(143 179 189 / 72%);
+  border-radius: 0.35rem;
+  background: rgb(16 25 29 / 88%);
+  color: #f4f7f8;
+  font: inherit;
+  font-weight: 700;
+  opacity: 0.72;
+}
+
+body.city-entered .operations-directory-access:hover,
+body.city-entered .operations-directory-access:focus-visible {
+  opacity: 1;
+}
+
+#operations-directory-dialog {
+  box-sizing: border-box;
+  width: min(44rem, calc(100vw - 2rem));
+  max-height: calc(100vh - 2rem);
+  overflow: auto;
+  padding: 1.25rem;
+  border: 1px solid #58737c;
+  border-radius: 0.65rem;
+  background: #10191d;
+  color: #f4f7f8;
+  box-shadow: 0 1.5rem 5rem rgb(0 0 0 / 55%);
+}
+
+#operations-directory-dialog::backdrop {
+  background: rgb(3 8 10 / 78%);
+}
+
+.operations-directory-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.operations-directory-kicker {
+  margin: 0 0 0.35rem;
+  color: #8fb3bd;
+  font-size: 0.75rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+#operations-directory-title {
+  margin: 0;
+}
+
+#operations-directory-state {
+  margin: 1rem 0;
+  padding: 0.75rem;
+  border-left: 3px solid #8fb3bd;
+  background: #172329;
+}
+
+#operations-directory-dialog section {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid #2d424a;
+}
+
+#operations-directory-dialog h3 {
+  margin: 0 0 0.65rem;
+}
+
+#operations-directory-services {
+  display: grid;
+  gap: 0.55rem;
+  margin: 0;
+  padding-left: 1.25rem;
+}
+
+#operations-directory-dialog p,
+#operations-directory-dialog li {
+  line-height: 1.5;
+}
+
+.operations-directory-records-note {
+  color: #b8cbd1;
+}
+
+.operations-directory-header button {
+  min-height: 2.75rem;
+  padding: 0.65rem 0.85rem;
+  border: 1px solid #58737c;
+  border-radius: 0.35rem;
+  background: #1b2a30;
+  color: #f4f7f8;
+  font: inherit;
+}
+
 #records-terminal-dialog {
   box-sizing: border-box;
   width: min(42rem, calc(100vw - 2rem));
@@ -1193,6 +1299,23 @@ body:not(.city-entered) #touch-controls {
 }
 
 @media (max-width: 520px) {
+  #operations-directory-dialog {
+    width: calc(100vw - 1rem);
+    max-height: calc(100vh - 1rem);
+    padding: 1rem;
+  }
+
+  .operations-directory-header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  body.city-entered .operations-directory-access {
+    top: max(0.5rem, env(safe-area-inset-top));
+    right: max(0.5rem, env(safe-area-inset-right));
+    min-height: 2.75rem;
+  }
+
   .records-terminal-header,
   .records-terminal-actions {
     align-items: stretch;

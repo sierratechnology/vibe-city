@@ -17,6 +17,7 @@ type RecordsTerminalElements = {
   freshness: HTMLElement;
   source: HTMLAnchorElement;
   onOpenChange?: () => void;
+  onStateChange?: (state: PublicProjectRecordState) => void;
 };
 
 type LoadRecord = (options?: { force?: boolean }) => Promise<PublicProjectRecordState>;
@@ -49,6 +50,7 @@ export function createRecordsTerminalController(
   }
 
   function render(state: PublicProjectRecordState): void {
+    elements.onStateChange?.(state);
     elements.refresh.disabled = false;
     if (state.status === "unavailable") {
       elements.state.textContent = `${REASON_LABELS[state.reason]}. No record is being claimed.`;
