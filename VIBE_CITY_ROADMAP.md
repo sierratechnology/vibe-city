@@ -47,7 +47,7 @@ Every milestone must preserve these rules:
 | Contextual door Action | Working | Hidden and disabled away from the active door |
 | Legacy HUD, phone, operations, debug, character, and voice panels | Retired from visible product | Compatibility DOM remains inert and hidden pending replacement |
 | Mixed-version multiplayer scene protocol | Working | Old/new scene values normalized only at the wire boundary |
-| Realtime multiplayer service | Degraded | Local protocol works; production Supabase configuration is invalid |
+| Realtime multiplayer service | Not configured | Public production reports `Offline / Missing Env`; local protocol and lazy fallback behavior remain verified |
 | Lazy realtime bundle boundary | Working | Released and publicly verified; optional Realtime remains outside the offline-critical entry path |
 | Public identity/operations/records world loop | Working | Milestone 1 released through PR #6 and publicly verified at `https://vibe-city.net/` |
 | Multi-tenant skyscraper | Planned | Requires identity and authorization architecture |
