@@ -1,5 +1,3 @@
-import { SupabaseClient, createClient } from "@supabase/supabase-js";
-
 export type SupabaseRealtimeConfig = {
   configured: boolean;
   urlConfigured: boolean;
@@ -62,18 +60,4 @@ export function getSupabaseRealtimeConfig(): SupabaseRealtimeConfig {
   });
 
   return { configured, urlConfigured, anonKeyConfigured, validationError, url, anonKey };
-}
-
-export function createSupabaseClient(): SupabaseClient | null {
-  const config = getSupabaseRealtimeConfig();
-  if (!config.configured || !config.url || !config.anonKey) return null;
-  const client = createClient(config.url, config.anonKey, {
-    realtime: {
-      params: {
-        eventsPerSecond: 12
-      }
-    }
-  });
-  console.info("STG World Zero Supabase client created", { realtimeConfigured: true });
-  return client;
 }
