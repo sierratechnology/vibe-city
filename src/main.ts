@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import "./styles.css";
 import { BusinessEntity, deriveBusinessEntities } from "./businessSystem";
-import { Citizen, adjustRelationship, createCitizens, persistCitizenSocial } from "./citizenData";
+import { Citizen, adjustRelationship, persistCitizenSocial } from "./citizenData";
 import {
   ActiveShiftWindow,
   enterWorkPortal,
@@ -18,11 +18,11 @@ import {
   chooseShareableKnowledge,
   getKnowledgeItem,
   knowledgeItemsForIds,
-  seedCitizenKnowledge,
   shareKnowledge
 } from "./knowledgeSystem";
 import { computeMobileControlState } from "./mobileControlState";
 import { PlayerPresence, PresenceDebugState, createPresenceAdapter } from "./multiplayer/presence";
+import { createRecordsTerminalController } from "./records/recordsTerminal";
 import {
   PlayerProfile,
   addContact,
@@ -42,6 +42,7 @@ import {
 } from "./playerProfile";
 import { ActiveSceneName, createSceneState, fadeToScene } from "./sceneManager";
 import { WorldBuildingRuntime, buildGeneratedCity } from "./world/assetFactory";
+import { projectAuthorizedAgents } from "./world/agentProjection";
 import { CITY_SEED, generateCity } from "./world/cityGenerator";
 import { WorldTimeState, formatWorldTime, getWorldTime } from "./worldTime";
 
@@ -69,6 +70,7 @@ type RemotePlayerRuntime = {
 type DoorAction =
   | "enter_headquarters"
   | "leave_headquarters";
+type ContextAction = DoorAction | "inspect_records";
 type VoiceState = "muted" | "listening" | "speaking" | "unavailable";
 type AudioZoneId = "reception" | "assistant_office" | "boardroom" | "devon_executive_office" | "projects_updates_office" | "outside";
 
@@ -83,6 +85,7 @@ type AudioZone = {
 
 const PLAYER_RADIUS = 0.55;
 const HEADQUARTERS_PLAYER_SPAWN = { x: 0, z: 8.2 } as const;
+const RECORDS_TERMINAL_INTERACTION_POSITION = { x: 6.4, z: 4.65 } as const;
 const PLAYER_SPEED = 8.2;
 const AGENT_WALK_SPEED = 5.4;
 const DOOR_APPROACH_DISTANCE = 2.35;
@@ -184,6 +187,21 @@ const touchControls = document.querySelector<HTMLElement>("#touch-controls")!;
 const touchJoystick = document.querySelector<HTMLElement>("#touch-joystick")!;
 const touchJoystickKnob = document.querySelector<HTMLElement>("#touch-joystick-knob")!;
 const touchActionButton = document.querySelector<HTMLButtonElement>("#touch-action")!;
+const recordsTerminalDialog = document.querySelector<HTMLDialogElement>("#records-terminal-dialog")!;
+const recordsTerminal = createRecordsTerminalController({
+  dialog: recordsTerminalDialog,
+  close: document.querySelector<HTMLButtonElement>("#records-terminal-close")!,
+  refresh: document.querySelector<HTMLButtonElement>("#records-terminal-refresh")!,
+  state: document.querySelector<HTMLElement>("#records-terminal-state")!,
+  record: document.querySelector<HTMLElement>("#records-terminal-record")!,
+  status: document.querySelector<HTMLElement>("#records-terminal-status")!,
+  sourceId: document.querySelector<HTMLElement>("#records-terminal-source-id")!,
+  sourceUpdated: document.querySelector<HTMLElement>("#records-terminal-updated")!,
+  observed: document.querySelector<HTMLElement>("#records-terminal-observed")!,
+  freshness: document.querySelector<HTMLElement>("#records-terminal-freshness")!,
+  source: document.querySelector<HTMLAnchorElement>("#records-terminal-source")!,
+  onOpenChange: updateTouchControlVisibility
+});
 
 declare global {
   interface Window {
@@ -277,8 +295,7 @@ const playerVelocity = new THREE.Vector3();
 const cameraLookTarget = new THREE.Vector3();
 const touchMoveInput = new THREE.Vector2();
 const raycaster = new THREE.Raycaster();
-const citizens = createCitizens();
-seedCitizenKnowledge(citizens);
+const citizens = projectAuthorizedAgents<Citizen>({ status: "unavailable", reason: "not_configured" });
 let playerProfile: PlayerProfile = loadPlayerProfile() ?? createDefaultPlayerProfile();
 if (loadPlayerProfile()) characterModal.hidden = true;
 const presenceAdapter = await createPresenceAdapter();
@@ -293,7 +310,7 @@ let gridVisible = false;
 let zoomLevelIndex = 1;
 let lastZoomCycleAt = 0;
 let lastDebugToggleAt = 0;
-let activeDoorAction: DoorAction | null = null;
+let activeContextAction: ContextAction | null = null;
 let activeInteractionCitizen: Citizen | null = null;
 let activeSharedKnowledge: KnowledgeItem | null = null;
 let briefingAutoOpened = false;
@@ -411,6 +428,19 @@ function buildHeadquartersInterior(): void {
   addCollider(headquartersColliders, -6.4, 2.6, 3.6, 1.8);
   addCollider(headquartersColliders, 6.4, -2.9, 5.4, 2.2);
   addCollider(headquartersColliders, 6.4, 2.6, 3.8, 1.8);
+
+  const recordsTerminalMaterial = new THREE.MeshStandardMaterial({
+    color: 0x17323b,
+    emissive: 0x2d9bb3,
+    emissiveIntensity: 0.65,
+    roughness: 0.35
+  });
+  addBox(headquartersGroup, 1.35, 0.88, 0.18, 6.4, 0.82, 2.55, recordsTerminalMaterial);
+  addBox(headquartersGroup, 0.18, 0.32, 0.18, 6.4, 0.78, 2.55, wallMaterial);
+  const recordsTerminalLabel = createLabelSprite("Records Terminal", 512, 96, 28);
+  recordsTerminalLabel.position.set(6.4, 2.55, 3.2);
+  recordsTerminalLabel.scale.set(3.2, 0.78, 1);
+  headquartersGroup.add(recordsTerminalLabel);
 
   addBox(headquartersGroup, 0.22, 1.25, 8.8, 0, 0, -2.1, glassMaterial);
   addBox(headquartersGroup, 18, 1.1, 0.22, 0, 0, 0.5, glassMaterial);
@@ -1014,12 +1044,16 @@ function updateTouchControlVisibility(): void {
     cityEntered,
     mobileCapable: shouldShowTouchControls(),
     typing,
+    interactionBlocked: recordsTerminalDialog.open,
     transitionBlocked: sceneState.transitioning,
-    activeDoorAction: activeDoorAction !== null
+    activeContextAction: activeContextAction !== null
   });
   touchControls.classList.toggle("visible", state.containerVisible);
   touchActionButton.hidden = !state.actionVisible;
   touchActionButton.disabled = !state.actionVisible;
+  const inspectingRecords = activeContextAction === "inspect_records";
+  touchActionButton.textContent = inspectingRecords ? "Inspect" : "Action";
+  touchActionButton.setAttribute("aria-label", inspectingRecords ? "Inspect Records Terminal" : "Interact");
   if (!state.containerVisible) resetJoystick();
 }
 
@@ -1411,7 +1445,7 @@ function updateCitizenMeshes(): void {
 }
 
 function movePlayer(delta: number): void {
-  if (!cityEntered || sceneState.transitioning) {
+  if (!cityEntered || sceneState.transitioning || recordsTerminalDialog.open) {
     playerVelocity.lerp(new THREE.Vector3(), 1 - Math.pow(0.00003, delta));
     return;
   }
@@ -1493,14 +1527,22 @@ function updateSceneVisibility(): void {
   headquartersGroup.visible = sceneState.activeScene === "headquarters";
 }
 
+function canInspectRecordsTerminal(): boolean {
+  return (
+    sceneState.activeScene === "headquarters" &&
+    distance2D({ x: player.position.x, z: player.position.z }, RECORDS_TERMINAL_INTERACTION_POSITION) < 2.15
+  );
+}
+
 function updateNavigationContext(): void {
-  activeDoorAction = null;
+  activeContextAction = null;
   const playerPoint = { x: player.position.x, z: player.position.z };
 
   if (sceneState.activeScene === "outside") {
-    if (distance2D(playerPoint, headquartersPortal.exteriorPosition) < 2.8) activeDoorAction = "enter_headquarters";
+    if (distance2D(playerPoint, headquartersPortal.exteriorPosition) < 2.8) activeContextAction = "enter_headquarters";
   } else if (sceneState.activeScene === "headquarters") {
-    if (distance2D(playerPoint, headquartersPortal.interiorPosition) < 2.4) activeDoorAction = "leave_headquarters";
+    if (distance2D(playerPoint, headquartersPortal.interiorPosition) < 2.4) activeContextAction = "leave_headquarters";
+    else if (canInspectRecordsTerminal()) activeContextAction = "inspect_records";
   }
 
   updateTouchControlVisibility();
@@ -1704,10 +1746,12 @@ async function switchToScene(nextScene: ActiveSceneName, playerPosition: { x: nu
 
 function handleNavigationAction(): void {
   if (sceneState.transitioning) return;
-  if (activeDoorAction === "enter_headquarters") {
+  if (activeContextAction === "enter_headquarters") {
     void switchToScene("headquarters", { ...HEADQUARTERS_PLAYER_SPAWN });
-  } else if (activeDoorAction === "leave_headquarters") {
+  } else if (activeContextAction === "leave_headquarters") {
     void switchToScene("outside", { x: headquartersPortal.exteriorPosition.x, z: headquartersPortal.exteriorPosition.z + 1.1 });
+  } else if (activeContextAction === "inspect_records" && canInspectRecordsTerminal()) {
+    void recordsTerminal.open();
   }
 }
 
@@ -2009,7 +2053,7 @@ animate();
 
 function handleKeyDown(event: KeyboardEvent): void {
   const code = event.code.toLowerCase();
-  if (!cityEntered) return;
+  if (!cityEntered || recordsTerminalDialog.open) return;
   keys.add(code);
 
   if (event.repeat) return;

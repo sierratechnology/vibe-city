@@ -74,24 +74,26 @@ test("entry handler hides the landing and records city-entered state", () => {
   assert.match(main, /cityEntered[\s\S]*?shouldShowTouchControls\(\)/);
 });
 
-test("main synchronizes navigation-only Action hidden and disabled state", () => {
+test("main synchronizes contextual navigation and records Action state", () => {
   assert.match(main, /import\s+\{\s*computeMobileControlState\s*\}\s+from\s+["']\.\/mobileControlState["']/);
-  assert.match(main, /activeDoorAction:\s*activeDoorAction\s*!==\s*null/);
+  assert.match(main, /activeContextAction:\s*activeContextAction\s*!==\s*null/);
   const mobileState = between(main, "const state = computeMobileControlState({", "touchControls.classList.toggle");
   assert.doesNotMatch(mobileState, /modalBlocked|nearbyCitizen|activeHomeAction|popup|briefing|homePanel|phone|voice/i);
   assert.match(main, /touchActionButton\.hidden\s*=\s*!state\.actionVisible[\s\S]*?touchActionButton\.disabled\s*=\s*!state\.actionVisible/);
   const navigationContext = between(main, "function updateNavigationContext(): void {", "function openInteraction");
-  assert.match(navigationContext, /activeDoorAction\s*=\s*null/);
+  assert.match(navigationContext, /activeContextAction\s*=\s*null/);
   assert.match(navigationContext, /exteriorPosition/);
   assert.match(navigationContext, /interiorPosition/);
+  assert.match(navigationContext, /activeContextAction\s*=\s*["']inspect_records["']/);
   assert.match(navigationContext, /updateTouchControlVisibility\(\)/);
   assert.doesNotMatch(navigationContext, /nearbyCitizen|activeHomeAction|actionPrompt|selectedCitizen|popup|briefing|homePanel|phone|voice/i);
 });
 
-test("keyboard and touch Action share a navigation-only scene handler", () => {
+test("keyboard and touch Action share a bounded navigation and records handler", () => {
   const handler = between(main, "function handleNavigationAction(): void {", "function updateHud");
-  assert.match(handler, /activeDoorAction\s*===\s*["']enter_headquarters["'][\s\S]*?switchToScene\(["']headquarters["']/);
-  assert.match(handler, /activeDoorAction\s*===\s*["']leave_headquarters["'][\s\S]*?switchToScene\(["']outside["']/);
+  assert.match(handler, /activeContextAction\s*===\s*["']enter_headquarters["'][\s\S]*?switchToScene\(["']headquarters["']/);
+  assert.match(handler, /activeContextAction\s*===\s*["']leave_headquarters["'][\s\S]*?switchToScene\(["']outside["']/);
+  assert.match(handler, /activeContextAction\s*===\s*["']inspect_records["'][\s\S]*?recordsTerminal\.open\(\)/);
   assert.doesNotMatch(handler, /openInteraction|restAtHome|renderHomeProfile|showToast|openPhone|phone|voice/i);
   assert.match(main, /touchActionButton\.addEventListener\(["']click["'],\s*handleNavigationAction\)/);
   const keyboard = between(main, "function handleKeyDown(event: KeyboardEvent): void {", "function handleKeyUp");

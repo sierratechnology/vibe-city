@@ -1109,3 +1109,98 @@ body:not(.city-entered) #touch-controls {
     transition: none;
   }
 }
+
+#records-terminal-dialog {
+  box-sizing: border-box;
+  width: min(42rem, calc(100vw - 2rem));
+  max-height: calc(100vh - 2rem);
+  overflow: auto;
+  padding: 1.25rem;
+  border: 1px solid #58737c;
+  border-radius: 0.65rem;
+  background: #10191d;
+  color: #f4f7f8;
+  box-shadow: 0 1.5rem 5rem rgb(0 0 0 / 55%);
+}
+
+#records-terminal-dialog::backdrop {
+  background: rgb(3 8 10 / 78%);
+}
+
+.records-terminal-header,
+.records-terminal-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.records-terminal-kicker {
+  margin: 0 0 0.35rem;
+  color: #8fb3bd;
+  font-size: 0.75rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+#records-terminal-title {
+  margin: 0;
+}
+
+#records-terminal-state {
+  margin: 1rem 0;
+  padding: 0.75rem;
+  border-left: 3px solid #8fb3bd;
+  background: #172329;
+}
+
+.records-terminal-details {
+  display: grid;
+  gap: 0.65rem;
+  margin: 0 0 1rem;
+}
+
+.records-terminal-details > div {
+  display: grid;
+  grid-template-columns: minmax(7rem, 0.4fr) minmax(0, 1fr);
+  gap: 0.75rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid #2d424a;
+}
+
+.records-terminal-details dt {
+  color: #8fb3bd;
+}
+
+.records-terminal-details dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.records-terminal-actions a,
+.records-terminal-actions button,
+.records-terminal-header button {
+  padding: 0.65rem 0.85rem;
+  border: 1px solid #58737c;
+  border-radius: 0.35rem;
+  background: #1b2a30;
+  color: #f4f7f8;
+  font: inherit;
+}
+
+.records-terminal-actions a {
+  text-decoration: none;
+}
+
+@media (max-width: 520px) {
+  .records-terminal-header,
+  .records-terminal-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .records-terminal-details > div {
+    grid-template-columns: 1fr;
+    gap: 0.2rem;
+  }
+}

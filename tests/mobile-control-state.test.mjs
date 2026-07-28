@@ -18,8 +18,9 @@ const ready = {
   cityEntered: true,
   mobileCapable: true,
   typing: false,
+  interactionBlocked: false,
   transitionBlocked: false,
-  activeDoorAction: false
+  activeContextAction: false
 };
 
 test("container visibility requires entry, mobile capability, and no typing", () => {
@@ -31,7 +32,8 @@ test("container visibility requires entry, mobile capability, and no typing", ()
   for (const blocked of [
     { cityEntered: false },
     { mobileCapable: false },
-    { typing: true }
+    { typing: true },
+    { interactionBlocked: true }
   ]) {
     assert.deepEqual(computeMobileControlState({ ...ready, ...blocked }), {
       containerVisible: false,
@@ -40,17 +42,17 @@ test("container visibility requires entry, mobile capability, and no typing", ()
   }
 });
 
-test("Action is exposed only for an active door and is suppressed by transitions or a hidden container", () => {
-  assert.deepEqual(computeMobileControlState({ ...ready, activeDoorAction: true }), {
+test("Action is exposed only for an active context and is suppressed by transitions or a hidden container", () => {
+  assert.deepEqual(computeMobileControlState({ ...ready, activeContextAction: true }), {
     containerVisible: true,
     actionVisible: true
   });
   assert.equal(
-    computeMobileControlState({ ...ready, activeDoorAction: true, transitionBlocked: true }).actionVisible,
+    computeMobileControlState({ ...ready, activeContextAction: true, transitionBlocked: true }).actionVisible,
     false
   );
   assert.equal(
-    computeMobileControlState({ ...ready, activeDoorAction: true, typing: true }).actionVisible,
+    computeMobileControlState({ ...ready, activeContextAction: true, typing: true }).actionVisible,
     false
   );
 });
