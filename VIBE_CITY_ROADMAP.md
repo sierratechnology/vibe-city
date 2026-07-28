@@ -48,8 +48,8 @@ Every milestone must preserve these rules:
 | Legacy HUD, phone, operations, debug, character, and voice panels | Retired from visible product | Compatibility DOM remains inert and hidden pending replacement |
 | Mixed-version multiplayer scene protocol | Working | Old/new scene values normalized only at the wire boundary |
 | Realtime multiplayer service | Degraded | Local protocol works; production Supabase configuration is invalid |
-| Lazy realtime bundle boundary | Candidate | Corrected candidate tests offline and valid-config startup; release gate pending |
-| Real agent/work/records world loop | Planned | Milestone 1 |
+| Lazy realtime bundle boundary | Working | Released and publicly verified; optional Realtime remains outside the offline-critical entry path |
+| Public identity/operations/records world loop | Working | Milestone 1 released through PR #6 and publicly verified at `https://vibe-city.net/` |
 | Multi-tenant skyscraper | Planned | Requires identity and authorization architecture |
 | Credits and financial transactions | Blocked | Requires pricing, consent, accounting, legal, refund, and payment decisions |
 
@@ -79,7 +79,9 @@ Every milestone must preserve these rules:
 
 ### Milestone 1 — World Zero Operating Loop
 
-**Purpose:** Prove the central product promise with one real agent, one real workplace, and one real records source.
+**Status:** Working — released through PR #6 at production commit `4c9af1e144d0ebd75a12bb534eaac6e623ff258e` and publicly verified on desktop and mobile.
+
+**Purpose:** Prove the central product promise with one real public identity, one real workplace, and one real records source. Static identity remains categorically separate from hosted-agent state.
 
 **World slice**
 
