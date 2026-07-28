@@ -68,4 +68,4 @@ This progression is a product-design concept, not an implementation sequence or 
 
 ## Documentation Boundary
 
-This file owns customer experience and progression. It should not define STG's internal operations, the world's complete branding system, technical architecture, or implementation phases. Implementation sequencing remains reserved for the future `VIBE_CITY_ROADMAP.md`, which has not been created.
+This file owns customer experience and progression. It should not define STG's internal operations, the world's complete branding system, technical architecture, or implementation phases. The explicitly authorized implementation sequence is maintained in `VIBE_CITY_ROADMAP.md`.

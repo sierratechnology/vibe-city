@@ -1153,9 +1153,9 @@ The Vibe City Design Bible is organized around the following information archite
 | `STG_TOWER_OPERATIONS.md` | STG's internal operating model inside Vibe City | Departments, reporting structure, agent authority, meetings, approvals, internal workflows, and cross-department coordination | Reserved companion document |
 | `VIBE_CITY_LORE.md` | World identity and visual-language reference | Branding, naming conventions, terminology, architectural style, signage, office aesthetics, identity, and atmosphere | Reserved companion document |
 | `VIBE_CITY_GAMEPLAY.md` | Customer experience and progression reference | Signup, office leasing, first-agent experience, creating work, hiring agents, capacity limits, suite expansion, floor ownership, and long-term customer progression | Reserved companion document |
-| `VIBE_CITY_ROADMAP.md` | Future implementation-planning reference | Implementation phases, milestones, dependencies, validation criteria, and development priorities | Filename reserved only; do not create until explicitly authorized |
+| `VIBE_CITY_ROADMAP.md` | Implementation-planning reference | Implementation phases, milestones, dependencies, validation criteria, and development priorities | Active; explicitly authorized 2026-07-27 |
 
-The companion documents should remain consistent with this master design while giving their subject areas room to develop. Operational procedures belong in `STG_TOWER_OPERATIONS.md`; terminology and atmosphere belong in `VIBE_CITY_LORE.md`; customer progression and interaction concepts belong in `VIBE_CITY_GAMEPLAY.md`; and implementation sequencing belongs only in the future `VIBE_CITY_ROADMAP.md`.
+The companion documents should remain consistent with this master design while giving their subject areas room to develop. Operational procedures belong in `STG_TOWER_OPERATIONS.md`; terminology and atmosphere belong in `VIBE_CITY_LORE.md`; customer progression and interaction concepts belong in `VIBE_CITY_GAMEPLAY.md`; and implementation sequencing belongs only in the explicitly authorized `VIBE_CITY_ROADMAP.md`.
 
 ### 23.3 Current Planning Conclusions
 

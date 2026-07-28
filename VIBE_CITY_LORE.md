@@ -41,4 +41,4 @@ Future revisions should define:
 
 ## Documentation Boundary
 
-This file owns world identity and aesthetic language. Product rules remain in `VIBE_CITY_MASTER_DESIGN.md`; customer progression belongs in `VIBE_CITY_GAMEPLAY.md`; STG operations belong in `STG_TOWER_OPERATIONS.md`; and implementation sequencing is reserved for the future `VIBE_CITY_ROADMAP.md`.
+This file owns world identity and aesthetic language. Product rules remain in `VIBE_CITY_MASTER_DESIGN.md`; customer progression belongs in `VIBE_CITY_GAMEPLAY.md`; STG operations belong in `STG_TOWER_OPERATIONS.md`; and implementation sequencing belongs in the explicitly authorized `VIBE_CITY_ROADMAP.md`.
