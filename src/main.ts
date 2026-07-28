@@ -281,7 +281,7 @@ const citizens = createCitizens();
 seedCitizenKnowledge(citizens);
 let playerProfile: PlayerProfile = loadPlayerProfile() ?? createDefaultPlayerProfile();
 if (loadPlayerProfile()) characterModal.hidden = true;
-const presenceAdapter = createPresenceAdapter();
+const presenceAdapter = await createPresenceAdapter();
 const remotePlayerRuntimes = new Map<string, RemotePlayerRuntime>();
 let multiplayerHudStatus = "Offline / Missing Env";
 let multiplayerDebug: PresenceDebugState | null = null;

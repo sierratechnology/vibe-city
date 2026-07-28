@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readdir, readFile } from "node:fs/promises";
 import test from "node:test";
+import ts from "typescript";
 
 const projectRoot = new URL("../", import.meta.url);
 const legacySceneTerm = ["apart", "ment"].join("");
@@ -35,9 +36,44 @@ test("STG Headquarters terminology replaces the legacy residential scene name", 
 });
 
 test("multiplayer preserves mixed-version visibility at the protocol boundary", async () => {
-  const presence = await readFile(new URL("src/multiplayer/presence.ts", projectRoot), "utf8");
-  assert.match(presence, /const LEGACY_WIRE_HEADQUARTERS_SCENE = \["apart", "ment"\]\.join\(""\)/);
-  assert.match(presence, /currentSceneV2\?: PresenceScene/);
-  assert.match(presence, /normalizePresenceScene\(latest\.currentSceneV2 \?\? latest\.currentScene\)/);
-  assert.match(presence, /currentSceneV2: publicPayload\.currentScene/);
+  const source = await readFile(new URL("src/multiplayer/presenceSceneProtocol.ts", projectRoot), "utf8");
+  const javascript = ts.transpileModule(source, {
+    compilerOptions: { module: ts.ModuleKind.ES2022, target: ts.ScriptTarget.ES2022 }
+  }).outputText;
+  const protocol = await import(`data:text/javascript;base64,${Buffer.from(javascript).toString("base64")}`);
+
+  const oldClientPayload = { currentScene: legacySceneTerm };
+  assert.equal(protocol.normalizePresenceScene(oldClientPayload.currentScene), "headquarters");
+
+  const newClientPayload = {
+    currentScene: protocol.legacyCompatibleWireScene("headquarters"),
+    currentSceneV2: "headquarters"
+  };
+  assert.equal(newClientPayload.currentScene, legacySceneTerm, "old clients must recognize the compatibility field");
+  assert.equal(
+    protocol.normalizePresenceScene(newClientPayload.currentSceneV2 ?? newClientPayload.currentScene),
+    "headquarters",
+    "new clients must prefer the current scene field"
+  );
+  assert.equal(protocol.normalizePresenceScene("outside"), "outside");
+  assert.equal(protocol.normalizePresenceScene("invalid-scene"), null);
+});
+
+test("offline presence distinguishes configuration errors from realtime load failures", async () => {
+  const source = await readFile(new URL("src/multiplayer/presenceOfflineStatus.ts", projectRoot), "utf8");
+  const javascript = ts.transpileModule(source, {
+    compilerOptions: { module: ts.ModuleKind.ES2022, target: ts.ScriptTarget.ES2022 }
+  }).outputText;
+  const status = await import(`data:text/javascript;base64,${Buffer.from(javascript).toString("base64")}`);
+
+  assert.deepEqual(status.offlinePresenceStatus("configuration"), {
+    hudStatus: "Offline / Missing Env",
+    channelStatus: "offline",
+    subscribeStatus: "offline"
+  });
+  assert.deepEqual(status.offlinePresenceStatus("load_failure"), {
+    hudStatus: "Offline / Realtime Unavailable",
+    channelStatus: "load_failed",
+    subscribeStatus: "load_failed"
+  });
 });
