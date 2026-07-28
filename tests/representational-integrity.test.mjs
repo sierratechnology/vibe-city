@@ -88,6 +88,30 @@ test("public project record adapter rejects a durable-source URL that does not e
   });
 });
 
+test("public project record adapter rejects a source timestamp later than its observation", async () => {
+  const source = await readFile(new URL("../src/records/publicProjectRecord.ts", import.meta.url), "utf8");
+  const transpiled = ts.transpileModule(source, {
+    compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 }
+  }).outputText;
+  const module = await import(`data:text/javascript;base64,${Buffer.from(transpiled).toString("base64")}#future-source-time`);
+  const sha = "d".repeat(40);
+  const state = await module.loadLatestPublicProjectRecord({
+    force: true,
+    now: () => Date.parse("2026-07-28T14:00:00Z"),
+    fetcher: async () => new Response(JSON.stringify([{
+      sha,
+      html_url: `https://github.com/sierratechnology/vibe-city/commit/${sha}`,
+      commit: { message: "Future source", committer: { date: "2026-07-28T15:00:00Z" } }
+    }]), { status: 200 })
+  });
+  assert.deepEqual(state, {
+    status: "unavailable",
+    freshness: "unavailable",
+    reason: "invalid_record",
+    checkedAt: "2026-07-28T14:00:00.000Z"
+  });
+});
+
 test("public project record adapter deduplicates concurrent loads", async () => {
   const source = await readFile(new URL("../src/records/publicProjectRecord.ts", import.meta.url), "utf8");
   const transpiled = ts.transpileModule(source, {
@@ -189,6 +213,9 @@ test("records terminal controller loads only from an explicit open or refresh ac
   assert.doesNotMatch(source, /innerHTML/);
   assert.match(source, /async function open/);
   assert.match(source, /async function refresh/);
+  assert.match(source, /state\.status === "unavailable"/);
+  assert.match(source, /No record is being claimed/);
+  assert.match(source, /elements\.source\.hidden = true/);
   assert.doesNotMatch(source, /elements\.access|access:\s*HTMLButtonElement/);
   assert.match(main, /createRecordsTerminalController\(/);
 });

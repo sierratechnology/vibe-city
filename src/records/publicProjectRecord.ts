@@ -100,6 +100,8 @@ async function performLoad(options: LoadOptions): Promise<PublicProjectRecordSta
 
   const candidate = Array.isArray(payload) ? payload[0] : null;
   if (!isGitHubCommitPayload(candidate)) return unavailable("invalid_record", checkedAt);
+  const sourceUpdatedAt = new Date(candidate.commit.committer!.date).toISOString();
+  if (Date.parse(sourceUpdatedAt) > Date.parse(checkedAt)) return unavailable("invalid_record", checkedAt);
 
   cachedRecord = {
     status: "available",
@@ -107,7 +109,7 @@ async function performLoad(options: LoadOptions): Promise<PublicProjectRecordSta
     title: safeTitle(candidate.commit.message),
     source: "GitHub public repository",
     sourceId: candidate.sha,
-    sourceUpdatedAt: new Date(candidate.commit.committer!.date).toISOString(),
+    sourceUpdatedAt,
     observedAt: checkedAt,
     checkedAt,
     url: candidate.html_url

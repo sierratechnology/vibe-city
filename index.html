@@ -149,6 +149,34 @@
       </div>
     </section>
     <!-- End touch controls -->
+    <button id="operations-directory-access" class="operations-directory-access" type="button">Operations Directory</button>
+    <dialog id="operations-directory-dialog" aria-labelledby="operations-directory-title" aria-describedby="operations-directory-state">
+      <header class="operations-directory-header">
+        <div>
+          <p class="operations-directory-kicker">STG Headquarters / Public Operations</p>
+          <h2 id="operations-directory-title">Operations Directory</h2>
+        </div>
+        <button id="operations-directory-close" type="button" aria-label="Close Operations Directory">Close</button>
+      </header>
+      <p id="operations-directory-state" aria-live="polite">Public runtime snapshot not opened.</p>
+      <section aria-labelledby="operations-directory-services-title">
+        <h3 id="operations-directory-services-title">Reception Status</h3>
+        <ul id="operations-directory-services"></ul>
+      </section>
+      <section aria-labelledby="operations-directory-record-title">
+        <h3 id="operations-directory-record-title">Observed Public Record</h3>
+        <div id="operations-directory-record"><p>No validated public record observed in this browser session.</p></div>
+      </section>
+      <section aria-labelledby="operations-directory-identity-title">
+        <h3 id="operations-directory-identity-title">Chief Agent Office</h3>
+        <p id="operations-directory-identity">Identity not loaded.</p>
+      </section>
+      <section aria-labelledby="operations-directory-authority-title">
+        <h3 id="operations-directory-authority-title">Executive Authority</h3>
+        <p id="operations-directory-authority">Authority boundary not loaded.</p>
+      </section>
+      <p class="operations-directory-records-note">This directory mirrors only validated public record data already observed through the contextual Records Terminal. Opening this directory does not contact GitHub.</p>
+    </dialog>
     <dialog id="records-terminal-dialog" aria-labelledby="records-terminal-title" aria-describedby="records-terminal-state">
       <header class="records-terminal-header">
         <div>
