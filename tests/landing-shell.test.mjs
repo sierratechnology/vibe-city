@@ -131,9 +131,9 @@ test("headquarters player spawn is outside the expanded reception-desk collider"
   assert.match(main, /switchToScene\("headquarters", \{ \.\.\.HEADQUARTERS_PLAYER_SPAWN \}\)/);
 });
 
-test("package exposes the focused Node test without dependency changes", () => {
+test("package keeps build tooling out of production dependencies", () => {
   const pkg = JSON.parse(packageJson);
   assert.equal(pkg.scripts.test, "node --test tests/*.test.mjs");
-  assert.deepEqual(Object.keys(pkg.dependencies).sort(), ["@supabase/supabase-js", "three", "typescript", "vite"].sort());
-  assert.deepEqual(Object.keys(pkg.devDependencies).sort(), ["@types/three"]);
+  assert.deepEqual(Object.keys(pkg.dependencies).sort(), ["@supabase/supabase-js", "three"].sort());
+  assert.deepEqual(Object.keys(pkg.devDependencies).sort(), ["@types/three", "esbuild", "typescript", "vite"].sort());
 });

@@ -5,17 +5,19 @@
   "type": "module",
   "scripts": {
     "test": "node --test tests/*.test.mjs",
-    "dev": "vite",
+    "dev": "node --disable-warning=ExperimentalWarning server/index.mjs --dev",
     "build": "tsc && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "start": "node --disable-warning=ExperimentalWarning server/index.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.107.0",
-    "three": "^0.181.2",
-    "typescript": "^5.9.3",
-    "vite": "^7.2.6"
+    "three": "^0.181.2"
   },
   "devDependencies": {
-    "@types/three": "^0.184.1"
+    "@types/three": "^0.184.1",
+    "esbuild": "^0.28.1",
+    "typescript": "^5.9.3",
+    "vite": "^8.1.5"
   }
 }
