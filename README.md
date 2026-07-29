@@ -29,6 +29,8 @@ npm run dev
 npm run build
 ```
 
+Milestone 3 local authenticated work records use the combined local server rather than a static Vite process. See [`docs/WORK_RECORDS_LOCAL_PROTOTYPE.md`](docs/WORK_RECORDS_LOCAL_PROTOTYPE.md) for the versioned privacy-safe event contract, runtime-only bearer token setup, SQLite persistence, ingestion helper, and verification steps.
+
 ## Multiplayer Environment
 
 World Zero uses Supabase Realtime presence for multiplayer visibility.
@@ -62,9 +64,10 @@ Multiplayer: Connected
 
 ## Scripts
 
-- `npm run dev` starts the local Vite dev server.
+- `npm run dev` starts the combined local Vite development server and loopback work-record API.
 - `npm run build` type-checks and builds the production bundle.
 - `npm run preview` serves the production build locally.
+- `npm start` serves the production bundle and loopback work-record API.
 
 ## World Zero Refactor Notes
 

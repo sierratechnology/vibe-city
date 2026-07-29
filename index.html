@@ -192,6 +192,17 @@
         <button id="records-terminal-close" type="button" aria-label="Close Records Terminal">Close</button>
       </header>
       <p id="records-terminal-state" aria-live="polite">Record not loaded.</p>
+      <section class="work-records-panel" aria-labelledby="work-records-title">
+        <h3 id="work-records-title">Authenticated Local Work Records</h3>
+        <p id="work-records-state" aria-live="polite">Work records not checked.</p>
+        <dl class="records-terminal-details">
+          <div><dt>Freshness</dt><dd id="work-records-freshness">Not checked</dd></div>
+          <div><dt>Source</dt><dd id="work-records-source">Authenticated local Hermes/Kanban ingestion</dd></div>
+        </dl>
+        <ol id="work-records-list" class="work-records-list"></ol>
+      </section>
+      <section aria-labelledby="public-repository-record-title">
+      <h3 id="public-repository-record-title">Public Repository Record</h3>
       <dl class="records-terminal-details">
         <div><dt>Record</dt><dd id="records-terminal-record">Unavailable</dd></div>
         <div><dt>Status</dt><dd id="records-terminal-status">Unavailable</dd></div>
@@ -204,6 +215,7 @@
         <a id="records-terminal-source" target="_blank" rel="noreferrer" hidden>Open durable source</a>
         <button id="records-terminal-refresh" type="button">Refresh record</button>
       </div>
+      </section>
     </dialog>
     <script type="module" src="/src/main.ts"></script>
   </body>

@@ -27,6 +27,8 @@ import { PlayerPresence, PresenceDebugState, createPresenceAdapter } from "./mul
 import { createOperationsDirectoryController } from "./operations/operationsDirectory";
 import { createWorldOperationsSnapshot, deriveRealtimeObservation, type RecordsObservation } from "./operations/worldOperationsSnapshot";
 import { createRecordsTerminalController } from "./records/recordsTerminal";
+import { loadWorkEventRecords } from "./records/workEventRecords";
+import { createWorkRecordsPanelController } from "./records/workRecordsPanel";
 import {
   PlayerProfile,
   addContact,
@@ -293,6 +295,12 @@ const operationsDirectory = createOperationsDirectoryController(
   })
 );
 const recordsTerminalDialog = document.querySelector<HTMLDialogElement>("#records-terminal-dialog")!;
+const workRecordsPanel = createWorkRecordsPanelController({
+  state: document.querySelector<HTMLElement>("#work-records-state")!,
+  freshness: document.querySelector<HTMLElement>("#work-records-freshness")!,
+  source: document.querySelector<HTMLElement>("#work-records-source")!,
+  list: document.querySelector<HTMLElement>("#work-records-list")!
+}, loadWorkEventRecords);
 const recordsTerminal = createRecordsTerminalController({
   dialog: recordsTerminalDialog,
   close: document.querySelector<HTMLButtonElement>("#records-terminal-close")!,
@@ -324,7 +332,7 @@ const recordsTerminal = createRecordsTerminalController({
           }
         };
   }
-});
+}, undefined, workRecordsPanel.load);
 
 declare global {
   interface Window {
