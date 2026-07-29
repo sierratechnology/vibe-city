@@ -150,6 +150,9 @@ const ISO_CAMERA_OFFSET = new THREE.Vector3(24, 24, 24);
 const ISO_FORWARD = new THREE.Vector3(0, 0, -1).normalize();
 const ISO_RIGHT = new THREE.Vector3(1, 0, 0).normalize();
 const ZOOM_LEVELS = [24, 30, 38];
+const kioskPerformanceMode = new URLSearchParams(window.location.search).get("performance") === "kiosk";
+const KIOSK_PIXEL_RATIO = 0.65;
+const KIOSK_TARGET_FPS = 30;
 
 const app = document.querySelector<HTMLDivElement>("#app")!;
 const landingShell = document.querySelector<HTMLElement>("#landing-shell")!;
@@ -348,10 +351,10 @@ scene.fog = new THREE.Fog(0x92a8b7, 42, 76);
 const camera = new THREE.OrthographicCamera(-24, 24, 13.5, -13.5, 0.1, 160);
 camera.position.copy(ISO_CAMERA_OFFSET);
 
-const renderer = new THREE.WebGLRenderer({ antialias: true });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+const renderer = new THREE.WebGLRenderer({ antialias: !kioskPerformanceMode, powerPreference: "high-performance" });
+renderer.setPixelRatio(kioskPerformanceMode ? KIOSK_PIXEL_RATIO : Math.min(window.devicePixelRatio, 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.shadowMap.enabled = true;
+renderer.shadowMap.enabled = !kioskPerformanceMode;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.domElement.tabIndex = 0;
 renderer.domElement.setAttribute("aria-label", "Vibe City world viewport");
@@ -1859,6 +1862,7 @@ function enterWorld(): void {
 }
 
 enterWorldButton.addEventListener("click", enterWorld);
+if (kioskPerformanceMode) enterWorld();
 
 async function switchToScene(nextScene: ActiveSceneName, playerPosition: { x: number; z: number }): Promise<void> {
   await fadeToScene(sceneState, fadeOverlay, nextScene, () => {
@@ -2181,8 +2185,17 @@ function animate(): void {
   cameraModeLabel.textContent = "Isometric";
 }
 
-window.setInterval(animate, 1000 / 60);
-animate();
+const kioskFrameInterval = 1000 / KIOSK_TARGET_FPS;
+let lastKioskFrameAt = -kioskFrameInterval;
+
+function renderLoop(now: number): void {
+  requestAnimationFrame(renderLoop);
+  if (kioskPerformanceMode && now - lastKioskFrameAt < kioskFrameInterval) return;
+  lastKioskFrameAt = now;
+  animate();
+}
+
+requestAnimationFrame(renderLoop);
 
 function handleKeyDown(event: KeyboardEvent): void {
   const code = event.code.toLowerCase();

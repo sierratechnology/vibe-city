@@ -102,7 +102,7 @@ test("keyboard and touch Action share a bounded navigation and records handler",
 });
 
 test("animation updates navigation context without hidden legacy GUI work", () => {
-  const animate = between(main, "function animate(): void {", "window.setInterval(animate");
+  const animate = between(main, "function animate(): void {", "const kioskFrameInterval");
   assert.match(animate, /updateNavigationContext\(\)/);
   assert.doesNotMatch(animate, /maybeOpenReceptionBriefing|updateHud|updateOpsPanel|renderPhone|updateVoiceState/);
 });
