@@ -75,13 +75,15 @@ function parseRoute(rawUrl) {
   const parts = url.pathname.split("/").filter(Boolean);
   if (![5, 6, 7, 8].includes(parts.length)) return null;
   if (parts[0] !== "api" || parts[1] !== "private" || parts[2] !== "tenants" || parts[4] !== "records") return null;
-  if (parts.length >= 7 && parts[6] !== "history") return null;
+  if (parts.length === 7 && !new Set(["history", "trace"]).has(parts[6])) return null;
+  if (parts.length === 8 && !new Set(["history", "evidence"]).has(parts[6])) return null;
   return {
     tenantId: parts[3],
     recordId: parts[5] ?? null,
     mode: parts.length === 5 ? "collection" : parts.length === 6 ? "record" :
-      parts.length === 7 ? "history" : "audit",
-    auditEventId: parts[7] ?? null
+      parts.length === 7 ? parts[6] : parts[6] === "history" ? "audit" : "evidence",
+    auditEventId: parts[6] === "history" ? parts[7] ?? null : null,
+    evidenceId: parts[6] === "evidence" ? parts[7] ?? null : null
   };
 }
 
@@ -188,6 +190,41 @@ export function validateActionSpecificMutationAudit(audit, action, current, next
     audit.policyRevision === authorization.policyRevision &&
     audit.priorRevision === current.revision && audit.newRevision === next.revision &&
     audit.eventKind === expected[0] && canonicalJson(audit.changedFields) === canonicalJson(expected[1]);
+}
+
+export function validateTraceCompletionAudit(audit, current, next, trace, authorization) {
+  const expectedChanges = [
+    { field: "assignees", before: canonicalJson(current.assignees), after: canonicalJson(next.assignees) },
+    { field: "evidenceLinks", before: canonicalJson(current.evidenceLinks), after: canonicalJson(next.evidenceLinks) },
+    { field: "state", before: current.state, after: "completed" },
+    { field: "completedAt", before: current.completedAt, after: next.completedAt }
+  ];
+  return audit.tenantId === current.tenantId && audit.recordId === current.recordId &&
+    audit.eventKind === "outcome_acceptance" && audit.actor?.tenantId === current.tenantId &&
+    audit.actor?.subjectId === authorization.authentication.subjectId && audit.onBehalfOf === null &&
+    audit.authorizationRef === authorization.authorizationRef &&
+    audit.policyRevision === authorization.policyRevision && audit.priorRevision === current.revision &&
+    audit.newRevision === next.revision && audit.occurredAt === trace.outcome.acceptedAt &&
+    audit.recordedAt === next.updatedAt && audit.reasonRef === trace.direction.directionId &&
+    canonicalJson(audit.source) === canonicalJson(trace.assignment.source) &&
+    canonicalJson(audit.changedFields) === canonicalJson(expectedChanges);
+}
+
+export function validateEvidenceAvailabilityAudit(audit, current, next, authorization) {
+  const expectedChanges = [{
+    field: "evidenceLinks",
+    before: canonicalJson(current.evidenceLinks),
+    after: canonicalJson(next.evidenceLinks)
+  }];
+  return audit.tenantId === current.tenantId && audit.recordId === current.recordId &&
+    audit.eventKind === "evidence_detach" && audit.actor?.tenantId === current.tenantId &&
+    audit.actor?.subjectId === authorization.authentication.subjectId && audit.onBehalfOf === null &&
+    audit.authorizationRef === authorization.authorizationRef &&
+    audit.policyRevision === authorization.policyRevision && audit.priorRevision === current.revision &&
+    audit.newRevision === next.revision && audit.occurredAt === next.updatedAt &&
+    audit.recordedAt === next.updatedAt && audit.reasonRef === null &&
+    canonicalJson(audit.source) === canonicalJson(current.source) &&
+    canonicalJson(audit.changedFields) === canonicalJson(expectedChanges);
 }
 
 function materialMutation(body, record, authorization, recordedAt, auditEventId) {
@@ -333,11 +370,13 @@ export function createPrivateWorkRecordsApiHandler({
   domain,
   resolveTrustedIdentity,
   resolveTrustedReferences,
+  resolveTracePolicy,
   now = Date.now,
   generateId
 }) {
   if (!store || !domain || typeof resolveTrustedIdentity !== "function" ||
-      typeof resolveTrustedReferences !== "function" || typeof generateId !== "function") {
+      typeof resolveTrustedReferences !== "function" || typeof resolveTracePolicy !== "function" ||
+      typeof generateId !== "function") {
     throw new TypeError("private work-record dependencies are required");
   }
   return async function privateWorkRecordsApiHandler(request, response) {
@@ -351,6 +390,269 @@ export function createPrivateWorkRecordsApiHandler({
         return deny(response);
       }
       const authorization = trusted.value;
+
+      if (route.mode === "evidence" && request.method === "GET") {
+        const record = store.read(route.tenantId, route.recordId);
+        const trace = store.readTrace(route.tenantId, route.recordId);
+        const evidence = trace?.evidence.find((item) => item.evidenceId === route.evidenceId);
+        if (record === null || trace === null || evidence === undefined) return deny(response);
+        const decision = domain.authorizeAction({
+          authorization, action: "resolve_evidence", tenantId: route.tenantId, record
+        });
+        if (!decision.allowed || await resolveTracePolicy({
+          tenantId: route.tenantId, principalId: authorization.authentication.subjectId,
+          policyRevision: authorization.policyRevision, action: "read", link: "evidence", value: evidence,
+          recordSensitivity: record.sensitivity, authorizationScope: record.recordId,
+          evidenceSensitivity: evidence.sensitivity,
+          locatorClass: evidence.locator.startsWith("internal:") ? "internal_object" : "https_repository_artifact",
+          availability: evidence.availability, relation: evidence.relation
+        }) !== true) return deny(response);
+        const inspectable = new Set(["available", "stale"]).has(evidence.availability);
+        if (inspectable) {
+          return sendJson(response, 200, {
+            state: evidence.availability, inspectable: true,
+            decision: { allowed: true, code: "allowed" }, evidence
+          });
+        }
+        const { locator: _hiddenLocator, ...citation } = evidence;
+        return sendJson(response, 200, {
+          state: evidence.availability, inspectable: false,
+          decision: { allowed: true, code: "allowed" }, evidence: citation
+        });
+      }
+
+      if (route.mode === "evidence" && request.method === "PATCH") {
+        if (request.headers["content-type"]?.split(";", 1)[0].trim().toLowerCase() !== "application/json") {
+          return deny(response);
+        }
+        const current = store.read(route.tenantId, route.recordId);
+        const trace = store.readTrace(route.tenantId, route.recordId);
+        if (current === null || trace === null) return deny(response);
+        const body = await readJsonBody(request);
+        if (!hasExactKeys(body, ["availability", "expectedRevision", "requestId"]) ||
+            !new Set(["unavailable", "withdrawn"]).has(body.availability) ||
+            !Number.isSafeInteger(body.expectedRevision) || !REQUEST_ID.test(body.requestId)) return deny(response);
+        const decision = domain.authorizeAction({
+          authorization, action: "update_evidence_availability", tenantId: route.tenantId, record: current
+        });
+        if (!decision.allowed) return deny(response);
+        const requestIdentity = {
+          tenantId: route.tenantId, recordId: route.recordId,
+          principalId: authorization.authentication.subjectId,
+          authorizationRef: authorization.authorizationRef, policyRevision: authorization.policyRevision,
+          requestId: body.requestId,
+          requestSemantics: canonicalJson({
+            recordId: route.recordId, evidenceId: route.evidenceId,
+            availability: body.availability, expectedRevision: body.expectedRevision
+          })
+        };
+        const replay = store.replayMutation(requestIdentity);
+        if (replay !== null) {
+          if (!replay.ok) return sendJson(response, 409, { error: "conflict" });
+          return sendJson(response, 200, { record: replay.record });
+        }
+        const evidenceIndex = trace.evidence.findIndex((item) => item.evidenceId === route.evidenceId);
+        if (evidenceIndex < 0) return deny(response);
+        const currentEvidence = trace.evidence[evidenceIndex];
+        if (currentEvidence.availability === body.availability ||
+            (currentEvidence.availability === "withdrawn" && body.availability === "unavailable")) return deny(response);
+        if (await resolveTracePolicy({
+          tenantId: route.tenantId, principalId: authorization.authentication.subjectId,
+          policyRevision: authorization.policyRevision, action: "write", link: "evidence", value: currentEvidence,
+          recordSensitivity: current.sensitivity, authorizationScope: current.recordId,
+          evidenceSensitivity: currentEvidence.sensitivity,
+          locatorClass: currentEvidence.locator.startsWith("internal:") ? "internal_object" : "https_repository_artifact",
+          availability: currentEvidence.availability, relation: currentEvidence.relation
+        }) !== true) return deny(response);
+        let recordedAt;
+        try {
+          const timestamp = now();
+          if (!Number.isFinite(timestamp)) return deny(response);
+          recordedAt = new Date(timestamp).toISOString();
+        } catch {
+          return deny(response);
+        }
+        const nextEvidence = { ...currentEvidence, availability: body.availability };
+        const nextEvidenceLinks = current.evidenceLinks.map((item) =>
+          item.evidenceId === route.evidenceId ? nextEvidence : item);
+        const nextTrace = {
+          ...trace,
+          evidence: trace.evidence.map((item) => item.evidenceId === route.evidenceId ? nextEvidence : item)
+        };
+        const nextRecord = {
+          ...current, evidenceLinks: nextEvidenceLinks, updatedAt: recordedAt, revision: current.revision + 1
+        };
+        const recordValidation = domain.validateWorkRecord(nextRecord);
+        if (!recordValidation.ok) return deny(response);
+        const auditEvent = {
+          auditEventId: generateId("audit"), tenantId: route.tenantId, recordId: route.recordId,
+          eventKind: "evidence_detach",
+          actor: { tenantId: route.tenantId, subjectId: authorization.authentication.subjectId },
+          onBehalfOf: null, authorizationRef: authorization.authorizationRef,
+          policyRevision: authorization.policyRevision, occurredAt: recordedAt, recordedAt,
+          priorRevision: current.revision, newRevision: current.revision + 1,
+          changedFields: [{
+            field: "evidenceLinks", before: canonicalJson(current.evidenceLinks), after: canonicalJson(nextEvidenceLinks)
+          }],
+          reasonRef: null, source: current.source
+        };
+        const auditValidation = domain.validateMaterialAuditEvent(auditEvent, current, authorization);
+        if (!auditValidation.ok || !validateEvidenceAvailabilityAudit(
+          auditValidation.value, current, recordValidation.value, authorization
+        )) return deny(response);
+        const result = store.mutateEvidence(
+          recordValidation.value, auditValidation.value, nextTrace, body.expectedRevision, requestIdentity
+        );
+        if (!result.ok) return sendJson(response, 409, { error: "conflict" });
+        return sendJson(response, 200, { record: result.record });
+      }
+
+      if (route.mode === "trace" && request.method === "POST") {
+        if (request.headers["content-type"]?.split(";", 1)[0].trim().toLowerCase() !== "application/json") {
+          return deny(response);
+        }
+        const current = store.read(route.tenantId, route.recordId);
+        if (current === null) return deny(response);
+        const decision = domain.authorizeAction({
+          authorization, action: "write_trace", tenantId: route.tenantId, record: current
+        });
+        if (!decision.allowed) return deny(response);
+        const body = await readJsonBody(request);
+        if (!hasExactKeys(body, ["expectedRevision", "requestId", "trace"]) ||
+            !Number.isSafeInteger(body.expectedRevision) || !REQUEST_ID.test(body.requestId)) return deny(response);
+        const requestIdentity = {
+          tenantId: route.tenantId, recordId: route.recordId,
+          principalId: authorization.authentication.subjectId,
+          authorizationRef: authorization.authorizationRef, policyRevision: authorization.policyRevision,
+          requestId: body.requestId,
+          requestSemantics: canonicalJson({ recordId: route.recordId, trace: body.trace, expectedRevision: body.expectedRevision })
+        };
+        const replay = store.replayMutation(requestIdentity);
+        if (replay !== null) {
+          if (!replay.ok) return sendJson(response, 409, { error: "conflict" });
+          return sendJson(response, 200, { record: replay.record });
+        }
+        if (new Set(["archived", "deleted_tombstone", "completed"]).has(current.state)) return deny(response);
+        const traceValidation = domain.validateTraceBundle(body.trace);
+        if (!traceValidation.ok || traceValidation.value.tenantId !== route.tenantId ||
+            traceValidation.value.recordId !== route.recordId ||
+            traceValidation.value.assignment.acceptedRevision !== body.expectedRevision ||
+            traceValidation.value.assignment.owner.subjectId !== current.owner.subjectId ||
+            traceValidation.value.outcome.acceptanceActor.subjectId !== authorization.authentication.subjectId ||
+            traceValidation.value.authorization.authorizationId !== authorization.authorizationRef ||
+            traceValidation.value.authorization.policyRevision !== authorization.policyRevision) return deny(response);
+        for (const [link, value] of [
+          ["direction", traceValidation.value.direction],
+          ["authorization", traceValidation.value.authorization],
+          ["assignment", traceValidation.value.assignment],
+          ["activity", traceValidation.value.activities],
+          ...traceValidation.value.evidence.map((evidence) => ["evidence", evidence]),
+          ["outcome", traceValidation.value.outcome]
+        ]) {
+          const evidenceInputs = link === "evidence" ? {
+            evidenceSensitivity: value.sensitivity,
+            locatorClass: value.locator.startsWith("internal:")
+              ? "internal_object" : "https_repository_artifact",
+            availability: value.availability,
+            relation: value.relation
+          } : {};
+          if (await resolveTracePolicy({
+            tenantId: route.tenantId, principalId: authorization.authentication.subjectId,
+            policyRevision: authorization.policyRevision, action: "write", link, value,
+            recordSensitivity: current.sensitivity, authorizationScope: current.recordId,
+            ...evidenceInputs
+          }) !== true) return deny(response);
+        }
+        let recordedAt;
+        try {
+          const timestamp = now();
+          if (!Number.isFinite(timestamp)) return deny(response);
+          recordedAt = new Date(timestamp).toISOString();
+        } catch {
+          return deny(response);
+        }
+        const nextRecord = {
+          ...current,
+          assignees: traceValidation.value.assignment.assignees,
+          evidenceLinks: traceValidation.value.evidence,
+          state: "completed",
+          stateChangedAt: recordedAt,
+          completedAt: recordedAt,
+          updatedAt: recordedAt,
+          revision: current.revision + 1
+        };
+        const nextValidation = domain.validateWorkRecord(nextRecord);
+        if (!nextValidation.ok) return deny(response);
+        const auditEvent = {
+          auditEventId: generateId("audit"), tenantId: route.tenantId, recordId: route.recordId,
+          eventKind: "outcome_acceptance",
+          actor: { tenantId: route.tenantId, subjectId: authorization.authentication.subjectId },
+          onBehalfOf: null, authorizationRef: authorization.authorizationRef,
+          policyRevision: authorization.policyRevision, occurredAt: traceValidation.value.outcome.acceptedAt,
+          recordedAt, priorRevision: current.revision, newRevision: current.revision + 1,
+          changedFields: [
+            { field: "assignees", before: canonicalJson(current.assignees), after: canonicalJson(nextRecord.assignees) },
+            { field: "evidenceLinks", before: canonicalJson(current.evidenceLinks), after: canonicalJson(nextRecord.evidenceLinks) },
+            { field: "state", before: current.state, after: "completed" },
+            { field: "completedAt", before: current.completedAt, after: recordedAt }
+          ],
+          reasonRef: traceValidation.value.direction.directionId,
+          source: traceValidation.value.assignment.source
+        };
+        const auditValidation = domain.validateMaterialAuditEvent(auditEvent, current, authorization);
+        if (!auditValidation.ok || !validateTraceCompletionAudit(
+          auditValidation.value, current, nextValidation.value, traceValidation.value, authorization
+        )) return deny(response);
+        const result = store.completeTrace(
+          nextValidation.value, auditValidation.value, traceValidation.value, body.expectedRevision, requestIdentity
+        );
+        if (!result.ok) return sendJson(response, 409, { error: "conflict" });
+        return sendJson(response, result.replayed ? 200 : 201, { record: result.record });
+      }
+
+      if (route.mode === "trace" && request.method === "GET") {
+        const record = store.read(route.tenantId, route.recordId);
+        const trace = store.readTrace(route.tenantId, route.recordId);
+        if (record === null || trace === null) return deny(response);
+        const decision = domain.authorizeAction({
+          authorization, action: "read_trace", tenantId: route.tenantId, record
+        });
+        if (!decision.allowed) return deny(response);
+        const edges = [];
+        for (const [link, value] of [
+          ["direction", trace.direction], ["authorization", trace.authorization],
+          ["assignment", trace.assignment], ["activity", trace.activities],
+          ...trace.evidence.map((evidence) => ["evidence", evidence]), ["outcome", trace.outcome]
+        ]) {
+          const evidenceInputs = link === "evidence" ? {
+            evidenceSensitivity: value.sensitivity,
+            locatorClass: value.locator.startsWith("internal:")
+              ? "internal_object" : "https_repository_artifact",
+            availability: value.availability,
+            relation: value.relation
+          } : {};
+          const allowed = await resolveTracePolicy({
+            tenantId: route.tenantId, principalId: authorization.authentication.subjectId,
+            policyRevision: authorization.policyRevision, action: "read", link, value,
+            recordSensitivity: record.sensitivity, authorizationScope: record.recordId,
+            ...evidenceInputs
+          }) === true;
+          const state = link === "evidence" ? value.availability : "available";
+          const projectedValue = link === "evidence"
+            ? (() => {
+              if (new Set(["available", "stale"]).has(value.availability)) return value;
+              const { locator: _hiddenLocator, ...citation } = value;
+              return citation;
+            })()
+            : value;
+          edges.push(allowed
+            ? { link, state, decision: { allowed: true, code: "allowed" }, value: projectedValue }
+            : { link, state: "not_authorized", decision: { allowed: false, code: "not_authorized" } });
+        }
+        return sendJson(response, 200, {
+          trace: { tenantId: route.tenantId, recordId: route.recordId, edges }
+        });
+      }
 
       if (request.method === "GET" && (route.mode === "history" || route.mode === "audit")) {
         const record = store.read(route.tenantId, route.recordId);

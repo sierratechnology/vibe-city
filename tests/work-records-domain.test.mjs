@@ -32,6 +32,9 @@ const OBSERVED_AT = "2026-07-28T20:01:00.000Z";
 const RECORDED_AT = "2026-07-28T20:02:00.000Z";
 const UPDATED_AT = "2026-07-28T20:03:00.000Z";
 const MUTATION_AT = "2026-07-28T20:04:00.000Z";
+const DIRECTION_ID = "id_aaaaaaaaaaaaaaaa";
+const ACTIVITY_ID = "id_bbbbbbbbbbbbbbbb";
+const OUTCOME_ID = "id_cccccccccccccccc";
 
 function subject(subjectId = SUBJECT_ID, tenantId = TENANT_ID) {
   return { tenantId, subjectId };
@@ -186,6 +189,116 @@ function tenantIdentity(overrides = {}) {
     ...overrides
   };
 }
+
+function traceBundle(overrides = {}) {
+  return {
+    tenantId: TENANT_ID,
+    recordId: RECORD_ID,
+    direction: {
+      directionId: DIRECTION_ID,
+      tenantId: TENANT_ID,
+      directingSubject: subject(),
+      source: source(),
+      occurredAt: OCCURRED_AT,
+      sensitivity: "tenant_private"
+    },
+    authorization: {
+      authorizationId: AUTHORIZATION_ID,
+      tenantId: TENANT_ID,
+      directionId: DIRECTION_ID,
+      action: "assign",
+      scope: RECORD_ID,
+      authorizer: subject(),
+      beneficiary: subject(ASSIGNEE_ID),
+      constraints: ["synthetic-only"],
+      policyRevision: 7,
+      effectiveAt: OBSERVED_AT
+    },
+    assignment: {
+      tenantId: TENANT_ID,
+      recordId: RECORD_ID,
+      authorizationId: AUTHORIZATION_ID,
+      owner: subject(),
+      assignees: [subject(ASSIGNEE_ID)],
+      acceptedRevision: 3,
+      source: source(),
+      occurredAt: RECORDED_AT
+    },
+    activities: [{
+      activityId: ACTIVITY_ID,
+      tenantId: TENANT_ID,
+      recordId: RECORD_ID,
+      actor: subject(ASSIGNEE_ID),
+      source: source(),
+      eventKind: "work_performed",
+      occurredAt: OCCURRED_AT,
+      observedAt: OBSERVED_AT,
+      recordedAt: RECORDED_AT
+    }],
+    evidence: [evidence()],
+    outcome: {
+      outcomeId: OUTCOME_ID,
+      tenantId: TENANT_ID,
+      recordId: RECORD_ID,
+      acceptanceActor: subject(),
+      acceptanceAuthorizationId: AUTHORIZATION_ID,
+      requiredEvidenceIds: [EVIDENCE_ID],
+      acceptedAt: MUTATION_AT
+    },
+    ...overrides
+  };
+}
+
+test("trace rejects assignment without matching authorization activity identity gaps and incomplete outcomes", async () => {
+  const { validateTraceBundle } = await loadDomain();
+  assert.deepEqual(validateTraceBundle(traceBundle()), { ok: true, value: traceBundle() });
+  assert.deepEqual(validateTraceBundle(traceBundle({ authorization: null })), {
+    ok: false,
+    code: "missing_assignment_authorization"
+  });
+  assert.deepEqual(validateTraceBundle(traceBundle({
+    activities: [{ ...traceBundle().activities[0], actor: null }]
+  })), { ok: false, code: "invalid_activity_actor" });
+  assert.deepEqual(validateTraceBundle(traceBundle({ outcome: null })), {
+    ok: false,
+    code: "missing_outcome"
+  });
+  assert.deepEqual(validateTraceBundle(traceBundle({ evidence: [] })), {
+    ok: false,
+    code: "missing_required_evidence"
+  });
+  assert.equal(validateTraceBundle(traceBundle({
+    activities: [traceBundle().activities[0], traceBundle().activities[0]]
+  })).ok, false);
+  assert.equal(validateTraceBundle(traceBundle({
+    evidence: [traceBundle().evidence[0], traceBundle().evidence[0]]
+  })).ok, false);
+  assert.equal(validateTraceBundle(traceBundle({
+    outcome: {
+      ...traceBundle().outcome,
+      requiredEvidenceIds: [EVIDENCE_ID, EVIDENCE_ID]
+    }
+  })).ok, false);
+});
+
+test("evidence locator classes allow only internal objects and closed safe HTTPS repository artifacts", async () => {
+  const { validateEvidenceReference } = await loadDomain();
+  assert.equal(validateEvidenceReference({
+    ...evidence(), locator: "https://github.com/synthetic-owner/synthetic-repo/commit/abcdef1"
+  }, TENANT_ID).ok, true);
+  for (const locator of [
+    "https://github.com.evil.invalid/synthetic-owner/synthetic-repo/commit/abcdef1",
+    "https://user:secret@github.com/synthetic-owner/synthetic-repo/commit/abcdef1",
+    "https://github.com/synthetic-owner/synthetic-repo/raw/main/payload.html",
+    "https://github.com/synthetic-owner/synthetic-repo/commit/abcdef1?token=synthetic",
+    "http://github.com/synthetic-owner/synthetic-repo/commit/abcdef1"
+  ]) {
+    assert.deepEqual(validateEvidenceReference({ ...evidence(), locator }, TENANT_ID), {
+      ok: false,
+      code: "invalid_evidence_locator"
+    });
+  }
+});
 
 test("work record validation rejects missing or mismatched tenant, owner, source, sensitivity, and durable timestamps", async () => {
   const { validateWorkRecord } = await loadDomain();

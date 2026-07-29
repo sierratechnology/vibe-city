@@ -84,6 +84,53 @@ function mutationBody(action, expectedRevision, changes, requestId = "id_aaaaaaa
   return { action, expectedRevision, requestId, changes };
 }
 
+function traceBody(recordId, overrides = {}) {
+  const evidence = {
+    evidenceId: "id_cccccccccccccccc", tenantId: TENANT_A, relation: "result",
+    locator: "internal:synthetic-result", label: "Synthetic result", sensitivity: "tenant_private",
+    integrity: null, sourceOccurredAt: OCCURRED_AT, observedAt: OBSERVED_AT,
+    recordedAt: NOW, availability: "available"
+  };
+  return {
+    expectedRevision: 1,
+    requestId: "id_bbbbbbbbbbbbbbbb",
+    trace: {
+      tenantId: TENANT_A,
+      recordId,
+      direction: {
+        directionId: "id_dddddddddddddddd", tenantId: TENANT_A,
+        directingSubject: { tenantId: TENANT_A, subjectId: SUBJECT_A },
+        source: createBody().record.source, occurredAt: OCCURRED_AT, sensitivity: "tenant_private"
+      },
+      authorization: {
+        authorizationId: AUTHORIZATION_ID, tenantId: TENANT_A, directionId: "id_dddddddddddddddd",
+        action: "assign", scope: recordId,
+        authorizer: { tenantId: TENANT_A, subjectId: SUBJECT_A },
+        beneficiary: { tenantId: TENANT_A, subjectId: SUBJECT_B },
+        constraints: ["synthetic-only"], policyRevision: 1, effectiveAt: OBSERVED_AT
+      },
+      assignment: {
+        tenantId: TENANT_A, recordId, authorizationId: AUTHORIZATION_ID,
+        owner: { tenantId: TENANT_A, subjectId: SUBJECT_A },
+        assignees: [{ tenantId: TENANT_A, subjectId: SUBJECT_B }], acceptedRevision: 1,
+        source: createBody().record.source, occurredAt: NOW
+      },
+      activities: [{
+        activityId: "id_eeeeeeeeeeeeeeee", tenantId: TENANT_A, recordId,
+        actor: { tenantId: TENANT_A, subjectId: SUBJECT_B }, source: createBody().record.source,
+        eventKind: "work_performed", occurredAt: OCCURRED_AT, observedAt: OBSERVED_AT, recordedAt: NOW
+      }],
+      evidence: [evidence],
+      outcome: {
+        outcomeId: "id_ffffffffffffffff", tenantId: TENANT_A, recordId,
+        acceptanceActor: { tenantId: TENANT_A, subjectId: SUBJECT_A },
+        acceptanceAuthorizationId: AUTHORIZATION_ID, requiredEvidenceIds: [evidence.evidenceId], acceptedAt: NOW
+      },
+      ...overrides
+    }
+  };
+}
+
 function canonicalJson(value) {
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
   if (value !== null && typeof value === "object") {
@@ -108,7 +155,9 @@ function seedLifecycleStateForTest(store, tenantId, recordId, state) {
   `).run(JSON.stringify(seeded), tenantId, recordId);
 }
 
-async function fixture({ identities = {}, ids, resolveTrustedReferences, transformValidatedMutationAudit } = {}) {
+async function fixture({
+  identities = {}, ids, resolveTrustedReferences, resolveTracePolicy, transformValidatedMutationAudit
+} = {}) {
   const [{ createPrivateWorkRecordsApiHandler }, { PrivateWorkRecordsStore }, domain] = await Promise.all([
     import("../server/privateWorkRecordsApi.mjs"),
     import("../server/privateWorkRecordsStore.mjs"),
@@ -139,7 +188,8 @@ async function fixture({ identities = {}, ids, resolveTrustedReferences, transfo
       record.owner.subjectId === (tenantId === TENANT_A ? SUBJECT_A : SUBJECT_B) &&
       record.assignees.length === 0 && record.evidenceLinks.length === 0 &&
       record.source.tenantId === tenantId && record.source.sourceId === SOURCE_ID &&
-      record.supersedes === null)
+      record.supersedes === null),
+    resolveTracePolicy: resolveTracePolicy ?? (async () => true)
   });
   const server = createServer(handler);
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -161,6 +211,542 @@ async function json(response) {
   const resolved = await response;
   return { status: resolved.status, headers: Object.fromEntries(resolved.headers), body: await resolved.json() };
 }
+
+test("authorized trace completion atomically persists all six links and returns a policy decision for every edge", async () => {
+  const policyCalls = [];
+  const context = await fixture({
+    identities: { "Bearer tracer": facts({
+      permissions: ["read", "create", "write_trace", "read_trace", "resolve_evidence"]
+    }) },
+    resolveTracePolicy: async (input) => { policyCalls.push(input); return true; }
+  });
+  try {
+    const created = await json(fetch(`${context.base}/api/private/tenants/${TENANT_A}/records`, {
+      method: "POST",
+      headers: { authorization: "Bearer tracer", "content-type": "application/json" },
+      body: JSON.stringify(createBody())
+    }));
+    const recordId = created.body.record.recordId;
+    const completed = await json(fetch(
+      `${context.base}/api/private/tenants/${TENANT_A}/records/${recordId}/trace`,
+      {
+        method: "POST",
+        headers: { authorization: "Bearer tracer", "content-type": "application/json" },
+        body: JSON.stringify(traceBody(recordId))
+      }
+    ));
+    assert.equal(completed.status, 201);
+    assert.equal(completed.body.record.state, "completed");
+    assert.equal(completed.body.record.revision, 2);
+    assert.equal(context.store.countTraces(TENANT_A), 1);
+    assert.equal(context.store.countAudits(TENANT_A), 2);
+
+    const traversed = await json(fetch(
+      `${context.base}/api/private/tenants/${TENANT_A}/records/${recordId}/trace`,
+      { headers: { authorization: "Bearer tracer" } }
+    ));
+    assert.equal(traversed.status, 200);
+    assert.deepEqual(traversed.body.trace.edges.map(({ link, decision }) => [link, decision]), [
+      ["direction", { allowed: true, code: "allowed" }],
+      ["authorization", { allowed: true, code: "allowed" }],
+      ["assignment", { allowed: true, code: "allowed" }],
+      ["activity", { allowed: true, code: "allowed" }],
+      ["evidence", { allowed: true, code: "allowed" }],
+      ["outcome", { allowed: true, code: "allowed" }]
+    ]);
+    assert.equal(traversed.headers["cache-control"], "private, no-store");
+    const evidenceReadPolicy = policyCalls.find(({ action, link }) => action === "read" && link === "evidence");
+    assert.deepEqual(evidenceReadPolicy, {
+      tenantId: TENANT_A,
+      principalId: SUBJECT_A,
+      policyRevision: 1,
+      action: "read",
+      link: "evidence",
+      value: traceBody(recordId).trace.evidence[0],
+      recordSensitivity: "tenant_private",
+      authorizationScope: recordId,
+      evidenceSensitivity: "tenant_private",
+      locatorClass: "internal_object",
+      availability: "available",
+      relation: "result"
+    });
+    const evidenceWritePolicy = policyCalls.find(({ action, link }) => action === "write" && link === "evidence");
+    assert.deepEqual(evidenceWritePolicy, {
+      tenantId: TENANT_A,
+      principalId: SUBJECT_A,
+      policyRevision: 1,
+      action: "write",
+      link: "evidence",
+      value: traceBody(recordId).trace.evidence[0],
+      recordSensitivity: "tenant_private",
+      authorizationScope: recordId,
+      evidenceSensitivity: "tenant_private",
+      locatorClass: "internal_object",
+      availability: "available",
+      relation: "result"
+    });
+    console.log(`TRACE_FIXTURE ${JSON.stringify(traversed.body)}`);
+  } finally {
+    await context.close();
+  }
+});
+
+test("trace and acceptance audit survive clean restart and isolated SQLite restore", async () => {
+  const context = await fixture({
+    identities: { "Bearer tracer": facts({ permissions: ["read", "create", "write_trace"] }) }
+  });
+  let contextClosed = false;
+  let reopened;
+  let restored;
+  try {
+    const created = await json(fetch(`${context.base}/api/private/tenants/${TENANT_A}/records`, {
+      method: "POST",
+      headers: { authorization: "Bearer tracer", "content-type": "application/json" },
+      body: JSON.stringify(createBody())
+    }));
+    const recordId = created.body.record.recordId;
+    const completion = traceBody(recordId);
+    assert.equal((await json(fetch(
+      `${context.base}/api/private/tenants/${TENANT_A}/records/${recordId}/trace`,
+      {
+        method: "POST",
+        headers: { authorization: "Bearer tracer", "content-type": "application/json" },
+        body: JSON.stringify(completion)
+      }
+    ))).status, 201);
+    const expectedRecord = context.store.read(TENANT_A, recordId);
+    const expectedHistory = context.store.history(TENANT_A, recordId);
+    await context.close({ remove: false });
+    contextClosed = true;
+
+    const { PrivateWorkRecordsStore } = await import("../server/privateWorkRecordsStore.mjs");
+    const databasePath = join(context.directory, "records.sqlite");
+    reopened = new PrivateWorkRecordsStore(databasePath);
+    assert.deepEqual(reopened.read(TENANT_A, recordId), expectedRecord);
+    assert.deepEqual(reopened.readTrace(TENANT_A, recordId), completion.trace);
+    assert.deepEqual(reopened.history(TENANT_A, recordId), expectedHistory);
+
+    const restoredPath = join(context.directory, "restored.sqlite");
+    await backup(reopened.database, restoredPath);
+    restored = new PrivateWorkRecordsStore(restoredPath);
+    assert.deepEqual(restored.read(TENANT_A, recordId), expectedRecord);
+    assert.deepEqual(restored.readTrace(TENANT_A, recordId), completion.trace);
+    assert.deepEqual(restored.history(TENANT_A, recordId), expectedHistory);
+  } finally {
+    restored?.close();
+    reopened?.close();
+    if (!contextClosed) await context.close({ remove: false });
+    rmSync(context.directory, { recursive: true, force: true });
+  }
+});
+
+test("evidence resolution distinguishes unavailable withdrawn missing and not-authorized without locator bypass", async () => {
+  let denyEvidenceRead = false;
+  const context = await fixture({
+    identities: {
+      "Bearer tracer": facts({
+        permissions: [
+          "read", "create", "write_trace", "read_trace", "resolve_evidence", "update_evidence_availability"
+        ]
+      }),
+      "Bearer locator-holder": facts({ permissions: ["read", "read_trace"] })
+    },
+    resolveTracePolicy: async ({ action, link }) => !(action === "read" && link === "evidence" && denyEvidenceRead)
+  });
+  try {
+    const created = await json(fetch(`${context.base}/api/private/tenants/${TENANT_A}/records`, {
+      method: "POST",
+      headers: { authorization: "Bearer tracer", "content-type": "application/json" },
+      body: JSON.stringify(createBody())
+    }));
+    const recordId = created.body.record.recordId;
+    const completion = traceBody(recordId);
+    const secondEvidence = {
+      ...completion.trace.evidence[0],
+      evidenceId: "id_bbbbbbbbbbbbbbbb",
+      locator: "internal:second-result",
+      label: "Second synthetic result"
+    };
+    completion.trace = {
+      ...completion.trace,
+      evidence: [...completion.trace.evidence, secondEvidence],
+      outcome: {
+        ...completion.trace.outcome,
+        requiredEvidenceIds: [...completion.trace.outcome.requiredEvidenceIds, secondEvidence.evidenceId]
+      }
+    };
+    assert.equal((await json(fetch(`${context.base}/api/private/tenants/${TENANT_A}/records/${recordId}/trace`, {
+      method: "POST",
+      headers: { authorization: "Bearer tracer", "content-type": "application/json" },
+      body: JSON.stringify(completion)
+    }))).status, 201);
+    const evidenceId = completion.trace.evidence[0].evidenceId;
+    const evidenceUrl = `${context.base}/api/private/tenants/${TENANT_A}/records/${recordId}/evidence/${evidenceId}`;
+
+    const available = await json(fetch(evidenceUrl, { headers: { authorization: "Bearer tracer" } }));
+    assert.equal(available.status, 200);
+    assert.equal(available.body.state, "available");
+    assert.equal(available.body.inspectable, true);
+    assert.equal(available.body.evidence.locator, "internal:synthetic-result");
+
+    denyEvidenceRead = true;
+    const traceDenied = await json(fetch(
+      `${context.base}/api/private/tenants/${TENANT_A}/records/${recordId}/trace`,
+      { headers: { authorization: "Bearer tracer" } }
+    ));
+    const deniedEdge = traceDenied.body.trace.edges.find(({ link }) => link === "evidence");
+    assert.deepEqual(deniedEdge, {
+      link: "evidence", state: "not_authorized", decision: { allowed: false, code: "not_authorized" }
+    });
+    assert.equal((await json(fetch(evidenceUrl, {
+      headers: { authorization: "Bearer locator-holder" }
+    }))).status, 404);
+    denyEvidenceRead = false;
+
+    const patchAvailability = (availability, revision, requestId) => json(fetch(evidenceUrl, {
+      method: "PATCH",
+      headers: { authorization: "Bearer tracer", "content-type": "application/json" },
+      body: JSON.stringify({ availability, expectedRevision: revision, requestId })
+    }));
+    assert.equal((await patchAvailability("unavailable", 2, "id_1111111111111111")).status, 200);
+    const unavailable = await json(fetch(evidenceUrl, { headers: { authorization: "Bearer tracer" } }));
+    assert.equal(unavailable.body.state, "unavailable");
+    assert.equal(unavailable.body.inspectable, false);
+    assert.equal(Object.hasOwn(unavailable.body.evidence, "locator"), false);
+    const unavailableTrace = await json(fetch(
+      `${context.base}/api/private/tenants/${TENANT_A}/records/${recordId}/trace`,
+      { headers: { authorization: "Bearer tracer" } }
+    ));
+    const evidenceEdges = unavailableTrace.body.trace.edges.filter(({ link }) => link === "evidence");
+    assert.equal(evidenceEdges.length, 2);
+    assert.equal(evidenceEdges[0].state, "unavailable");
+    assert.equal(evidenceEdges[0].value.availability, "unavailable");
+    assert.equal(Object.hasOwn(evidenceEdges[0].value, "locator"), false);
+    assert.equal(evidenceEdges[1].state, "available");
+    assert.equal(evidenceEdges[1].value.locator, "internal:second-result");
+    assert.equal((await patchAvailability("withdrawn", 3, "id_2222222222222222")).status, 200);
+    const withdrawn = await json(fetch(evidenceUrl, { headers: { authorization: "Bearer tracer" } }));
+    assert.equal(withdrawn.body.state, "withdrawn");
+    assert.equal(withdrawn.body.inspectable, false);
+    assert.equal(context.store.history(TENANT_A, recordId).length, 4);
+    assert.equal(context.store.readTrace(TENANT_A, recordId).evidence[0].locator, "internal:synthetic-result");
+
+    const missing = await json(fetch(
+      `${context.base}/api/private/tenants/${TENANT_A}/records/${recordId}/evidence/id_aaaaaaaaaaaaaaaa`,
+      { headers: { authorization: "Bearer tracer" } }
+    ));
+    assert.equal(missing.status, 404);
+    assert.equal((await json(fetch(
+      `${context.base}/api/private/tenants/${TENANT_B}/records/${recordId}/evidence/${evidenceId}`,
+      { headers: { authorization: "Bearer tracer" } }
+    ))).status, 404);
+    console.log(`EVIDENCE_STATE_MATRIX ${JSON.stringify({
+      available: available.body, notAuthorized: deniedEdge, unavailable: unavailable.body,
+      withdrawn: withdrawn.body, missing: missing.body
+    })}`);
+  } finally {
+    await context.close();
+  }
+});
+
+test("evidence GET and PATCH policy receive only the canonical record authorization scope", async () => {
+  const policyCalls = [];
+  let requiredScope = null;
+  const context = await fixture({
+    identities: { "Bearer tracer": facts({
+      permissions: ["read", "create", "write_trace", "resolve_evidence", "update_evidence_availability"]
+    }) },
+    resolveTracePolicy: async (input) => {
+      policyCalls.push(input);
+      return requiredScope === null || input.authorizationScope === requiredScope;
+    }
+  });
+  try {
+    const created = await json(fetch(`${context.base}/api/private/tenants/${TENANT_A}/records`, {
+      method: "POST",
+      headers: { authorization: "Bearer tracer", "content-type": "application/json" },
+      body: JSON.stringify(createBody())
+    }));
+    const recordId = created.body.record.recordId;
+    const completion = traceBody(recordId);
+    assert.equal((await json(fetch(
+      `${context.base}/api/private/tenants/${TENANT_A}/records/${recordId}/trace`,
+      {
+        method: "POST",
+        headers: { authorization: "Bearer tracer", "content-type": "application/json" },
+        body: JSON.stringify(completion)
+      }
+    ))).status, 201);
+    const evidenceId = completion.trace.evidence[0].evidenceId;
+    const evidenceUrl = `${context.base}/api/private/tenants/${TENANT_A}/records/${recordId}/evidence/${evidenceId}`;
+
+    policyCalls.length = 0;
+    requiredScope = recordId;
+    assert.equal((await json(fetch(evidenceUrl, {
+      headers: { authorization: "Bearer tracer" }
+    }))).status, 200);
+    assert.equal(policyCalls.length, 1);
+    assert.equal(policyCalls[0].action, "read");
+    assert.equal(policyCalls[0].authorizationScope, recordId);
+    assert.notEqual(policyCalls[0].authorizationScope, evidenceId);
+
+    policyCalls.length = 0;
+    requiredScope = evidenceId;
+    const substitutedScopeDenied = await json(fetch(evidenceUrl, {
+      headers: { authorization: "Bearer tracer" }
+    }));
+    assert.equal(substitutedScopeDenied.status, 404);
+    assert.deepEqual(substitutedScopeDenied.body, { error: "not_found" });
+    assert.equal(policyCalls.length, 1);
+    assert.equal(policyCalls[0].authorizationScope, recordId);
+
+    policyCalls.length = 0;
+    requiredScope = recordId;
+    assert.equal((await json(fetch(evidenceUrl, {
+      method: "PATCH",
+      headers: { authorization: "Bearer tracer", "content-type": "application/json" },
+      body: JSON.stringify({
+        availability: "unavailable", expectedRevision: 2, requestId: "id_1111111111111111"
+      })
+    }))).status, 200);
+    assert.equal(policyCalls.length, 1);
+    assert.equal(policyCalls[0].action, "write");
+    assert.equal(policyCalls[0].authorizationScope, recordId);
+    assert.notEqual(policyCalls[0].authorizationScope, evidenceId);
+  } finally {
+    await context.close();
+  }
+});
+
+test("trace attack matrix leaves canonical record trace audit and replay unchanged on every rejected or failed completion", async () => {
+  const context = await fixture({
+    identities: { "Bearer tracer": facts({
+      permissions: ["read", "create", "write_trace", "read_trace", "resolve_evidence"]
+    }) }
+  });
+  const postTrace = (recordId, body) => json(fetch(
+    `${context.base}/api/private/tenants/${TENANT_A}/records/${recordId}/trace`,
+    {
+      method: "POST",
+      headers: { authorization: "Bearer tracer", "content-type": "application/json" },
+      body: JSON.stringify(body)
+    }
+  ));
+  const replayCount = () => Number(context.store.database.prepare(
+    "SELECT COUNT(*) AS count FROM private_mutation_requests"
+  ).get().count);
+  try {
+    const created = await json(fetch(`${context.base}/api/private/tenants/${TENANT_A}/records`, {
+      method: "POST",
+      headers: { authorization: "Bearer tracer", "content-type": "application/json" },
+      body: JSON.stringify(createBody())
+    }));
+    const recordId = created.body.record.recordId;
+    const base = traceBody(recordId);
+    const foreignSubject = { tenantId: TENANT_B, subjectId: SUBJECT_B };
+    const attacks = [
+      ["assignment-without-authorization", { ...base.trace, authorization: null }],
+      ["activity-without-actor", {
+        ...base.trace, activities: [{ ...base.trace.activities[0], actor: null }]
+      }],
+      ["activity-without-source", {
+        ...base.trace, activities: [{ ...base.trace.activities[0], source: null }]
+      }],
+      ["completion-without-outcome", { ...base.trace, outcome: null }],
+      ["completion-without-evidence", { ...base.trace, evidence: [] }],
+      ["foreign-direction", {
+        ...base.trace,
+        direction: { ...base.trace.direction, tenantId: TENANT_B, directingSubject: foreignSubject }
+      }],
+      ["foreign-authorization", {
+        ...base.trace,
+        authorization: { ...base.trace.authorization, tenantId: TENANT_B, authorizer: foreignSubject }
+      }],
+      ["foreign-activity", {
+        ...base.trace,
+        activities: [{ ...base.trace.activities[0], tenantId: TENANT_B, actor: foreignSubject }]
+      }],
+      ["foreign-evidence", {
+        ...base.trace,
+        evidence: [{ ...base.trace.evidence[0], tenantId: TENANT_B }]
+      }],
+      ["foreign-outcome", {
+        ...base.trace,
+        outcome: { ...base.trace.outcome, tenantId: TENANT_B, acceptanceActor: foreignSubject }
+      }]
+    ];
+    const matrix = [];
+    for (let index = 0; index < attacks.length; index += 1) {
+      const [name, trace] = attacks[index];
+      const result = await postTrace(recordId, {
+        ...base, requestId: `id_${String(index + 1).repeat(16)}`, trace
+      });
+      matrix.push({ name, status: result.status, body: result.body });
+      assert.equal(result.status, 404, name);
+      assert.deepEqual(context.store.read(TENANT_A, recordId), created.body.record);
+      assert.equal(context.store.countAudits(TENANT_A), 1);
+      assert.equal(context.store.countTraces(TENANT_A), 0);
+      assert.equal(replayCount(), 0);
+    }
+    assert.equal((await postTrace(recordId, {
+      ...base,
+      expectedRevision: 2,
+      trace: { ...base.trace, assignment: { ...base.trace.assignment, acceptedRevision: 2 } }
+    })).status, 409);
+    assert.equal(context.store.countAudits(TENANT_A), 1);
+    assert.equal(context.store.countTraces(TENANT_A), 0);
+    assert.equal(replayCount(), 0);
+
+    const accepted = await postTrace(recordId, base);
+    assert.equal(accepted.status, 201);
+    assert.deepEqual((await postTrace(recordId, base)).body, accepted.body);
+    const conflicting = await postTrace(recordId, {
+      ...base,
+      trace: { ...base.trace, direction: { ...base.trace.direction, occurredAt: OBSERVED_AT } }
+    });
+    assert.equal(conflicting.status, 409);
+    assert.equal(context.store.countAudits(TENANT_A), 2);
+    assert.equal(context.store.countTraces(TENANT_A), 1);
+    assert.equal(replayCount(), 1);
+
+    const second = await json(fetch(`${context.base}/api/private/tenants/${TENANT_A}/records`, {
+      method: "POST",
+      headers: { authorization: "Bearer tracer", "content-type": "application/json" },
+      body: JSON.stringify({ ...createBody({ title: "Storage failure target" }), requestId: "id_aaaaaaaaaaaaaaaa" })
+    }));
+    const beforeSecond = structuredClone(second.body.record);
+    const originalRun = context.store.insertTraceStatement.run.bind(context.store.insertTraceStatement);
+    context.store.insertTraceStatement.run = () => { throw new Error("synthetic trace storage failure"); };
+    const failed = await postTrace(second.body.record.recordId, {
+      ...traceBody(second.body.record.recordId), requestId: "id_cccccccccccccccc"
+    });
+    context.store.insertTraceStatement.run = originalRun;
+    assert.equal(failed.status, 500);
+    assert.deepEqual(context.store.read(TENANT_A, second.body.record.recordId), beforeSecond);
+    assert.equal(context.store.readTrace(TENANT_A, second.body.record.recordId), null);
+    assert.equal(context.store.history(TENANT_A, second.body.record.recordId).length, 1);
+    assert.equal(replayCount(), 1);
+    console.log(`TRACE_ATTACK_MATRIX ${JSON.stringify(matrix)}`);
+  } finally {
+    await context.close();
+  }
+});
+
+test("malformed server-authored trace audit is rejected before record trace audit or replay persistence", async () => {
+  const context = await fixture({
+    identities: { "Bearer tracer": facts({ permissions: ["read", "create", "write_trace"] }) },
+    transformValidatedMutationAudit: (audit) => ({
+      ...audit,
+      actor: { tenantId: TENANT_A, subjectId: SUBJECT_B }
+    })
+  });
+  try {
+    const created = await json(fetch(`${context.base}/api/private/tenants/${TENANT_A}/records`, {
+      method: "POST",
+      headers: { authorization: "Bearer tracer", "content-type": "application/json" },
+      body: JSON.stringify(createBody())
+    }));
+    const denied = await json(fetch(
+      `${context.base}/api/private/tenants/${TENANT_A}/records/${created.body.record.recordId}/trace`,
+      {
+        method: "POST",
+        headers: { authorization: "Bearer tracer", "content-type": "application/json" },
+        body: JSON.stringify(traceBody(created.body.record.recordId))
+      }
+    ));
+    assert.equal(denied.status, 404);
+    assert.deepEqual(context.store.read(TENANT_A, created.body.record.recordId), created.body.record);
+    assert.equal(context.store.countTraces(TENANT_A), 0);
+    assert.equal(context.store.countAudits(TENANT_A), 1);
+    assert.equal(Number(context.store.database.prepare(
+      "SELECT COUNT(*) AS count FROM private_mutation_requests"
+    ).get().count), 0);
+  } finally {
+    await context.close();
+  }
+});
+
+test("evidence-detach audit binding rejects every transformed actor authority scope revision and delta atomically", async () => {
+  const transforms = [
+    ["actor-subject", (audit) => ({
+      ...audit, actor: { tenantId: TENANT_A, subjectId: SUBJECT_B }
+    })],
+    ["actor-tenant", (audit) => ({
+      ...audit, actor: { tenantId: TENANT_B, subjectId: SUBJECT_A }
+    })],
+    ["authorization-ref", (audit) => ({ ...audit, authorizationRef: "id_aaaaaaaaaaaaaaaa" })],
+    ["policy-revision", (audit) => ({ ...audit, policyRevision: 2 })],
+    ["event-kind", (audit) => ({ ...audit, eventKind: "state_transition" })],
+    ["tenant-id", (audit) => ({ ...audit, tenantId: TENANT_B })],
+    ["record-id", (audit) => ({ ...audit, recordId: "id_aaaaaaaaaaaaaaaa" })],
+    ["prior-revision", (audit) => ({ ...audit, priorRevision: 1 })],
+    ["new-revision", (audit) => ({ ...audit, newRevision: 4 })],
+    ["before-delta", (audit) => ({
+      ...audit,
+      changedFields: [{ ...audit.changedFields[0], before: canonicalJson([]) }]
+    })],
+    ["after-delta", (audit) => ({
+      ...audit,
+      changedFields: [{ ...audit.changedFields[0], after: canonicalJson([]) }]
+    })]
+  ];
+  let transformIndex = 0;
+  const context = await fixture({
+    identities: { "Bearer tracer": facts({
+      permissions: ["read", "create", "write_trace", "update_evidence_availability"]
+    }) },
+    transformValidatedMutationAudit: (audit) => audit.eventKind === "evidence_detach"
+      ? transforms[transformIndex++][1](audit)
+      : audit
+  });
+  try {
+    const created = await json(fetch(`${context.base}/api/private/tenants/${TENANT_A}/records`, {
+      method: "POST",
+      headers: { authorization: "Bearer tracer", "content-type": "application/json" },
+      body: JSON.stringify(createBody())
+    }));
+    const recordId = created.body.record.recordId;
+    const completion = traceBody(recordId);
+    assert.equal((await json(fetch(
+      `${context.base}/api/private/tenants/${TENANT_A}/records/${recordId}/trace`,
+      {
+        method: "POST",
+        headers: { authorization: "Bearer tracer", "content-type": "application/json" },
+        body: JSON.stringify(completion)
+      }
+    ))).status, 201);
+    const evidenceId = completion.trace.evidence[0].evidenceId;
+    const evidenceUrl = `${context.base}/api/private/tenants/${TENANT_A}/records/${recordId}/evidence/${evidenceId}`;
+    const beforeRecord = structuredClone(context.store.read(TENANT_A, recordId));
+    const beforeTrace = structuredClone(context.store.readTrace(TENANT_A, recordId));
+    const beforeHistory = structuredClone(context.store.history(TENANT_A, recordId));
+    const replayCount = () => Number(context.store.database.prepare(
+      "SELECT COUNT(*) AS count FROM private_mutation_requests"
+    ).get().count);
+    const beforeReplay = replayCount();
+
+    for (let index = 0; index < transforms.length; index += 1) {
+      const [name] = transforms[index];
+      const denied = await json(fetch(evidenceUrl, {
+        method: "PATCH",
+        headers: { authorization: "Bearer tracer", "content-type": "application/json" },
+        body: JSON.stringify({
+          availability: "unavailable",
+          expectedRevision: 2,
+          requestId: `id_${String(index + 1).repeat(16)}`
+        })
+      }));
+      assert.equal(denied.status, 404, name);
+      assert.deepEqual(denied.body, { error: "not_found" }, name);
+      assert.deepEqual(context.store.read(TENANT_A, recordId), beforeRecord, name);
+      assert.deepEqual(context.store.readTrace(TENANT_A, recordId), beforeTrace, name);
+      assert.deepEqual(context.store.history(TENANT_A, recordId), beforeHistory, name);
+      assert.equal(replayCount(), beforeReplay, name);
+    }
+  } finally {
+    await context.close();
+  }
+});
 
 test("private routes deny unauthenticated and malformed trusted identity contexts without enumeration", async () => {
   const context = await fixture({ identities: { "Bearer malformed": { authentication: {} } } });

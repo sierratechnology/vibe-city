@@ -117,6 +117,72 @@ export interface MaterialFieldChange {
   after: string | null;
 }
 
+export interface DirectionRecord {
+  directionId: OpaqueId;
+  tenantId: OpaqueId;
+  directingSubject: TenantScopedSubject;
+  source: SourceReference;
+  occurredAt: string;
+  sensitivity: Sensitivity;
+}
+
+export interface AuthorizationRecord {
+  authorizationId: OpaqueId;
+  tenantId: OpaqueId;
+  directionId: OpaqueId;
+  action: "assign";
+  scope: OpaqueId;
+  authorizer: TenantScopedSubject;
+  beneficiary: TenantScopedSubject;
+  constraints: string[];
+  policyRevision: number;
+  effectiveAt: string;
+}
+
+export interface AssignmentRecord {
+  tenantId: OpaqueId;
+  recordId: OpaqueId;
+  authorizationId: OpaqueId;
+  owner: TenantScopedSubject;
+  assignees: TenantScopedSubject[];
+  acceptedRevision: number;
+  source: SourceReference;
+  occurredAt: string;
+}
+
+export interface ActivityRecord {
+  activityId: OpaqueId;
+  tenantId: OpaqueId;
+  recordId: OpaqueId;
+  actor: TenantScopedSubject;
+  source: SourceReference;
+  eventKind: "work_started" | "work_performed" | "review_requested";
+  occurredAt: string;
+  observedAt: string;
+  recordedAt: string;
+}
+
+export interface OutcomeRecord {
+  outcomeId: OpaqueId;
+  tenantId: OpaqueId;
+  recordId: OpaqueId;
+  acceptanceActor: TenantScopedSubject;
+  acceptanceAuthorizationId: OpaqueId;
+  requiredEvidenceIds: OpaqueId[];
+  acceptedAt: string;
+}
+
+export interface TraceBundle {
+  tenantId: OpaqueId;
+  recordId: OpaqueId;
+  direction: DirectionRecord;
+  authorization: AuthorizationRecord;
+  assignment: AssignmentRecord;
+  activities: ActivityRecord[];
+  evidence: EvidenceReference[];
+  outcome: OutcomeRecord;
+}
+
 export type ValidationResult<T> = { ok: true; value: T } | { ok: false; code: string };
 export type AuthorizationDecision = { allowed: true; code: "allowed" } | { allowed: false; code: string };
 
@@ -196,7 +262,8 @@ const LIFECYCLE_TRANSITIONS: Readonly<Record<LifecycleState, ReadonlySet<Lifecyc
 const LIFECYCLES = new Set<LifecycleState>(Object.keys(LIFECYCLE_TRANSITIONS) as LifecycleState[]);
 const FRESHNESS_STATES = new Set<Freshness>(["live", "recent", "stale", "degraded", "unavailable"]);
 const AUTHORIZED_ACTIONS = new Set([
-  "create", "read", "read_history", "assign", "transition", "update", "archive", "delete", "project_public"
+  "create", "read", "read_history", "assign", "transition", "update", "archive", "delete", "project_public",
+  "write_trace", "read_trace", "resolve_evidence", "update_evidence_availability"
 ]);
 const AUDIT_EVENT_KINDS = new Set([
   "creation", "authorization", "assignment", "reassignment", "state_transition", "block", "unblock",
@@ -222,6 +289,27 @@ const FRESHNESS_FACT_KEYS = [
   "sourceAvailability"
 ];
 const trustedAuthorizationContexts = new WeakSet<object>();
+const TRACE_KEYS = [
+  "activities", "assignment", "authorization", "direction", "evidence", "outcome", "recordId", "tenantId"
+].sort();
+const DIRECTION_KEYS = [
+  "directionId", "directingSubject", "occurredAt", "sensitivity", "source", "tenantId"
+].sort();
+const TRACE_AUTHORIZATION_KEYS = [
+  "action", "authorizationId", "authorizer", "beneficiary", "constraints", "directionId", "effectiveAt",
+  "policyRevision", "scope", "tenantId"
+].sort();
+const ASSIGNMENT_KEYS = [
+  "acceptedRevision", "assignees", "authorizationId", "occurredAt", "owner", "recordId", "source", "tenantId"
+].sort();
+const ACTIVITY_KEYS = [
+  "activityId", "actor", "eventKind", "observedAt", "occurredAt", "recordId", "recordedAt", "source", "tenantId"
+].sort();
+const OUTCOME_KEYS = [
+  "acceptanceActor", "acceptanceAuthorizationId", "acceptedAt", "outcomeId", "recordId", "requiredEvidenceIds",
+  "tenantId"
+].sort();
+const ACTIVITY_KINDS = new Set(["work_started", "work_performed", "review_requested"]);
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -246,6 +334,23 @@ function hasExactKeys(value: Record<string, unknown>, expected: string[]): boole
 
 function hasExactFields(actual: MaterialFieldChange[], expected: string[]): boolean {
   return actual.length === expected.length && expected.every((field) => actual.some((change) => change.field === field));
+}
+
+function isApprovedEvidenceLocator(value: string): boolean {
+  if (value.startsWith("internal:")) return /^internal:[A-Za-z0-9._:/-]{1,491}$/.test(value);
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "https:" || url.hostname !== "github.com" || url.port !== "" ||
+        url.username !== "" || url.password !== "" || url.search !== "" || url.hash !== "") return false;
+    const parts = url.pathname.split("/").filter(Boolean);
+    if (parts.length !== 4 || parts.slice(0, 2).some((part) => !/^[A-Za-z0-9_.-]{1,100}$/.test(part))) {
+      return false;
+    }
+    if (parts[2] === "commit") return /^[a-f0-9]{7,64}$/.test(parts[3]);
+    return new Set(["pull", "issues"]).has(parts[2]) && /^[1-9][0-9]{0,19}$/.test(parts[3]);
+  } catch {
+    return false;
+  }
 }
 
 export function materialBlockReasonAuditValue(reason: BlockReason | null): string | null {
@@ -370,7 +475,7 @@ export function validateEvidenceReference(
   if (!EVIDENCE_AVAILABILITY.has(value.availability as string)) {
     return { ok: false, code: "invalid_evidence_availability" };
   }
-  if (!(value.locator as string).startsWith("internal:")) {
+  if (!isApprovedEvidenceLocator(value.locator as string)) {
     return { ok: false, code: "invalid_evidence_locator" };
   }
   if (value.integrity !== null && (!isObject(value.integrity) || !hasExactKeys(value.integrity, INTEGRITY_KEYS) ||
@@ -387,6 +492,117 @@ export function validateEvidenceReference(
     return { ok: false, code: "invalid_evidence_chronology" };
   }
   return { ok: true, value: value as unknown as EvidenceReference };
+}
+
+export function validateTraceBundle(value: unknown): ValidationResult<TraceBundle> {
+  if (!isObject(value) || !hasExactKeys(value, TRACE_KEYS) || !isOpaqueId(value.tenantId) ||
+      !isOpaqueId(value.recordId)) return { ok: false, code: "invalid_trace" };
+  const tenantId = value.tenantId;
+  const recordId = value.recordId;
+  if (!isObject(value.direction) || !hasExactKeys(value.direction, DIRECTION_KEYS) ||
+      value.direction.tenantId !== tenantId || !isOpaqueId(value.direction.directionId) ||
+      !isObject(value.direction.directingSubject) ||
+      !hasExactKeys(value.direction.directingSubject, SUBJECT_KEYS) ||
+      !hasTenant(value.direction.directingSubject, tenantId) ||
+      !isOpaqueId(value.direction.directingSubject.subjectId) ||
+      !SENSITIVITIES.has(value.direction.sensitivity as Sensitivity) ||
+      !isCanonicalTimestamp(value.direction.occurredAt) ||
+      !validateSourceReference(value.direction.source, tenantId).ok) {
+    return { ok: false, code: "invalid_direction" };
+  }
+  if (!isObject(value.authorization)) return { ok: false, code: "missing_assignment_authorization" };
+  if (!hasExactKeys(value.authorization, TRACE_AUTHORIZATION_KEYS) ||
+      value.authorization.tenantId !== tenantId || value.authorization.action !== "assign" ||
+      value.authorization.scope !== recordId ||
+      value.authorization.directionId !== value.direction.directionId ||
+      !isOpaqueId(value.authorization.authorizationId) ||
+      !isObject(value.authorization.authorizer) || !hasExactKeys(value.authorization.authorizer, SUBJECT_KEYS) ||
+      !hasTenant(value.authorization.authorizer, tenantId) || !isOpaqueId(value.authorization.authorizer.subjectId) ||
+      !isObject(value.authorization.beneficiary) ||
+      !hasExactKeys(value.authorization.beneficiary, SUBJECT_KEYS) ||
+      !hasTenant(value.authorization.beneficiary, tenantId) ||
+      !isOpaqueId(value.authorization.beneficiary.subjectId) ||
+      !Array.isArray(value.authorization.constraints) ||
+      value.authorization.constraints.some((constraint) => typeof constraint !== "string" ||
+        constraint.length === 0 || constraint.length > 200) ||
+      typeof value.authorization.policyRevision !== "number" ||
+      !Number.isSafeInteger(value.authorization.policyRevision) || value.authorization.policyRevision < 1 ||
+      !isCanonicalTimestamp(value.authorization.effectiveAt)) {
+    return { ok: false, code: "invalid_assignment_authorization" };
+  }
+  const traceAuthorization = value.authorization as unknown as AuthorizationRecord;
+  if (!isObject(value.assignment) || !hasExactKeys(value.assignment, ASSIGNMENT_KEYS) ||
+      value.assignment.tenantId !== tenantId || value.assignment.recordId !== recordId ||
+      value.assignment.authorizationId !== traceAuthorization.authorizationId ||
+      !isObject(value.assignment.owner) || !hasExactKeys(value.assignment.owner, SUBJECT_KEYS) ||
+      !hasTenant(value.assignment.owner, tenantId) || !isOpaqueId(value.assignment.owner.subjectId) ||
+      !Array.isArray(value.assignment.assignees) || value.assignment.assignees.length === 0 ||
+      value.assignment.assignees.some((assignee) => !isObject(assignee) ||
+        !hasExactKeys(assignee, SUBJECT_KEYS) || !hasTenant(assignee, tenantId) || !isOpaqueId(assignee.subjectId)) ||
+      !value.assignment.assignees.some((assignee) =>
+        assignee.subjectId === traceAuthorization.beneficiary.subjectId) ||
+      typeof value.assignment.acceptedRevision !== "number" ||
+      !Number.isSafeInteger(value.assignment.acceptedRevision) || value.assignment.acceptedRevision < 1 ||
+      !isCanonicalTimestamp(value.assignment.occurredAt) ||
+      !validateSourceReference(value.assignment.source, tenantId).ok) {
+    return { ok: false, code: "invalid_assignment" };
+  }
+  if (!Array.isArray(value.activities) || value.activities.length === 0) {
+    return { ok: false, code: "missing_activity" };
+  }
+  const activityIds = new Set<string>();
+  for (const activity of value.activities) {
+    if (!isObject(activity) || !hasExactKeys(activity, ACTIVITY_KEYS) || activity.tenantId !== tenantId ||
+        activity.recordId !== recordId || !isOpaqueId(activity.activityId)) {
+      return { ok: false, code: "invalid_activity" };
+    }
+    if (activityIds.has(activity.activityId as string)) return { ok: false, code: "duplicate_activity" };
+    activityIds.add(activity.activityId as string);
+    if (!isObject(activity.actor) || !hasExactKeys(activity.actor, SUBJECT_KEYS) ||
+        !hasTenant(activity.actor, tenantId) || !isOpaqueId(activity.actor.subjectId)) {
+      return { ok: false, code: "invalid_activity_actor" };
+    }
+    if (!validateSourceReference(activity.source, tenantId).ok) {
+      return { ok: false, code: "invalid_activity_source" };
+    }
+    if (!ACTIVITY_KINDS.has(activity.eventKind as string) || !isCanonicalTimestamp(activity.occurredAt) ||
+        !isCanonicalTimestamp(activity.observedAt) || !isCanonicalTimestamp(activity.recordedAt) ||
+        Date.parse(activity.occurredAt as string) > Date.parse(activity.observedAt as string) ||
+        Date.parse(activity.observedAt as string) > Date.parse(activity.recordedAt as string)) {
+      return { ok: false, code: "invalid_activity_chronology" };
+    }
+  }
+  if (!Array.isArray(value.evidence)) return { ok: false, code: "invalid_trace_evidence" };
+  const evidenceIds = new Set<string>();
+  for (const evidence of value.evidence) {
+    const validation = validateEvidenceReference(evidence, tenantId);
+    if (!validation.ok) return { ok: false, code: validation.code };
+    if (evidenceIds.has(validation.value.evidenceId)) return { ok: false, code: "duplicate_evidence" };
+    evidenceIds.add(validation.value.evidenceId);
+  }
+  if (!isObject(value.outcome)) return { ok: false, code: "missing_outcome" };
+  if (!hasExactKeys(value.outcome, OUTCOME_KEYS) || value.outcome.tenantId !== tenantId ||
+      value.outcome.recordId !== recordId || !isOpaqueId(value.outcome.outcomeId) ||
+      !isObject(value.outcome.acceptanceActor) ||
+      !hasExactKeys(value.outcome.acceptanceActor, SUBJECT_KEYS) ||
+      !hasTenant(value.outcome.acceptanceActor, tenantId) ||
+      !isOpaqueId(value.outcome.acceptanceActor.subjectId) ||
+      value.outcome.acceptanceAuthorizationId !== value.authorization.authorizationId ||
+      !Array.isArray(value.outcome.requiredEvidenceIds) || value.outcome.requiredEvidenceIds.length === 0 ||
+      value.outcome.requiredEvidenceIds.some((evidenceId) => !isOpaqueId(evidenceId)) ||
+      !isCanonicalTimestamp(value.outcome.acceptedAt)) {
+    return { ok: false, code: "invalid_outcome" };
+  }
+  const usableEvidenceIds = new Set(value.evidence
+    .filter((item) => isObject(item) && new Set(["available", "stale"]).has(item.availability as string))
+    .map((item) => (item as Record<string, unknown>).evidenceId));
+  if (value.outcome.requiredEvidenceIds.some((evidenceId) => !usableEvidenceIds.has(evidenceId))) {
+    return { ok: false, code: "missing_required_evidence" };
+  }
+  if (new Set(value.outcome.requiredEvidenceIds).size !== value.outcome.requiredEvidenceIds.length) {
+    return { ok: false, code: "duplicate_required_evidence" };
+  }
+  return { ok: true, value: value as unknown as TraceBundle };
 }
 
 export function validateTenantIdentity(value: unknown): ValidationResult<TenantIdentity> {
