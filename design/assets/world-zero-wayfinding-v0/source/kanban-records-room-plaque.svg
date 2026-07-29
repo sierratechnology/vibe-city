@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="768" height="192" viewBox="0 0 768 192" role="img" aria-label="Kanban Records Room plaque" aria-description="A graphite room plaque reading Kanban Records Room, with a cyan orientation rail and an ivory three-column records symbol.">
+  <title id="title">Kanban Records Room plaque</title>
+  <desc id="desc">A graphite room plaque reading Kanban Records Room, with a cyan orientation rail and an ivory three-column records symbol.</desc>
+  <path fill="#111820" d="M18 0h732l18 18v156l-18 18H18L0 174V18z"/>
+  <path fill="#1C2933" stroke="#40515D" stroke-width="4" d="M29 18h710l11 11v134l-11 11H29l-11-11V29z"/>
+  <path fill="#63D9E6" d="M42 42h10v108H42z"/>
+  <g fill="none" stroke="#F3EBD8" stroke-width="7" stroke-linejoin="round">
+    <path d="M78 54h120v92H78zM118 54v92m40-92v92"/>
+    <path d="M87 70h22v22H87zm40 0h22v45h-22zm40 0h22v30h-22z"/>
+  </g>
+  <path fill="#40515D" d="M230 42h4v108h-4z"/>
+  <text x="270" y="84" fill="#F3EBD8" font-family="Arial, Helvetica, sans-serif" font-size="39" font-weight="700" letter-spacing="2">KANBAN RECORDS</text>
+  <text x="270" y="136" fill="#C9C1AD" font-family="Arial, Helvetica, sans-serif" font-size="35" font-weight="700" letter-spacing="7">ROOM</text>
+  <path fill="#63D9E6" d="M680 74h28l18 22-18 22h-28l18-22z"/>
+</svg>

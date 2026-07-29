@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1536" viewBox="0 0 1024 1536" role="img" aria-label="World Zero public orientation directory" aria-description="A tall graphite public orientation directory for World Zero listing Reception, Chief Agent Office, Kanban Records Room, and Executive Office only.">
+  <title id="title">World Zero public orientation directory</title>
+  <desc id="desc">A tall graphite public orientation directory for World Zero listing Reception, Chief Agent Office, Kanban Records Room, and Executive Office only.</desc>
+  <path fill="#111820" d="M48 0h928l48 48v1440l-48 48H48l-48-48V48z"/>
+  <path fill="#1C2933" stroke="#40515D" stroke-width="6" d="M76 32h872l44 44v1384l-44 44H76l-44-44V76z"/>
+  <path fill="#0B1117" d="M72 72h880v276H72z"/>
+  <path fill="#63D9E6" d="M72 72h880v14H72zM72 334h880v14H72z"/>
+  <text x="104" y="156" fill="#63D9E6" font-family="Arial, Helvetica, sans-serif" font-size="32" font-weight="700" letter-spacing="8">PUBLIC ORIENTATION</text>
+  <text x="104" y="252" fill="#F3EBD8" font-family="Arial, Helvetica, sans-serif" font-size="88" font-weight="700" letter-spacing="7">WORLD ZERO</text>
+  <path fill="#F3EBD8" d="M810 140h82v82h-82z"/>
+  <path fill="#0B1117" d="M832 202v-40h38v40m-52 0h66v12h-66z"/>
+
+  <g font-family="Arial, Helvetica, sans-serif">
+    <g>
+      <path fill="#18242D" stroke="#40515D" stroke-width="4" d="M72 396h880v228H72z"/>
+      <path fill="#63D9E6" d="M72 396h12v228H72z"/>
+      <text x="114" y="485" fill="#63D9E6" font-size="36" font-weight="700">01</text>
+      <g fill="none" stroke="#F3EBD8" stroke-width="10" stroke-linejoin="round"><path d="M206 464h112v72H206zM190 536h144"/><path d="M234 464v-24h56v24"/></g>
+      <text x="382" y="532" fill="#F3EBD8" font-size="54" font-weight="700" letter-spacing="3">RECEPTION</text>
+      <path fill="#63D9E6" d="M860 470h30l28 40-28 40h-30l28-40z"/>
+    </g>
+    <g>
+      <path fill="#18242D" stroke="#40515D" stroke-width="4" d="M72 654h880v228H72z"/>
+      <path fill="#63D9E6" d="M72 654h12v228H72z"/>
+      <text x="114" y="743" fill="#63D9E6" font-size="36" font-weight="700">02</text>
+      <g fill="none" stroke="#F3EBD8" stroke-width="9"><circle cx="262" cy="762" r="25"/><circle cx="210" cy="724" r="13"/><circle cx="314" cy="724" r="13"/><circle cx="262" cy="818" r="13"/><path d="m224 734 21 15m55-15-21 15m-17 38v18"/></g>
+      <text x="382" y="749" fill="#F3EBD8" font-size="45" font-weight="700" letter-spacing="2">CHIEF AGENT</text>
+      <text x="382" y="810" fill="#C9C1AD" font-size="34" font-weight="700" letter-spacing="7">OFFICE</text>
+      <path fill="#63D9E6" d="M860 728h30l28 40-28 40h-30l28-40z"/>
+    </g>
+    <g>
+      <path fill="#18242D" stroke="#40515D" stroke-width="4" d="M72 912h880v228H72z"/>
+      <path fill="#63D9E6" d="M72 912h12v228H72z"/>
+      <text x="114" y="1001" fill="#63D9E6" font-size="36" font-weight="700">03</text>
+      <g fill="none" stroke="#F3EBD8" stroke-width="8" stroke-linejoin="round"><path d="M198 962h128v112H198zM241 962v112m42-112v112"/><path d="M208 977h22v25h-22zm43 0h22v56h-22zm42 0h23v38h-23z"/></g>
+      <text x="382" y="1001" fill="#F3EBD8" font-size="39" font-weight="700" letter-spacing="1">KANBAN RECORDS</text>
+      <text x="382" y="1061" fill="#C9C1AD" font-size="34" font-weight="700" letter-spacing="7">ROOM</text>
+      <path fill="#63D9E6" d="M860 986h30l28 40-28 40h-30l28-40z"/>
+    </g>
+    <g>
+      <path fill="#18242D" stroke="#40515D" stroke-width="4" d="M72 1170h880v228H72z"/>
+      <path fill="#63D9E6" d="M72 1170h12v228H72z"/>
+      <text x="114" y="1259" fill="#63D9E6" font-size="36" font-weight="700">04</text>
+      <g fill="none" stroke="#F3EBD8" stroke-width="9" stroke-linejoin="round"><path d="M198 1296h128v32H198zM216 1328v18m92-18v18"/><path d="M238 1296v-52h48v52m-34-52v-20h20v20"/></g>
+      <text x="382" y="1265" fill="#F3EBD8" font-size="43" font-weight="700" letter-spacing="2">EXECUTIVE</text>
+      <text x="382" y="1326" fill="#C9C1AD" font-size="34" font-weight="700" letter-spacing="7">OFFICE</text>
+      <path fill="#63D9E6" d="M860 1244h30l28 40-28 40h-30l28-40z"/>
+    </g>
+  </g>
+  <path fill="#40515D" d="M72 1438h880v4H72z"/>
+  <path fill="#63D9E6" d="M104 1468h96l-18 18h-96z"/>
+</svg>

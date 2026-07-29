@@ -1,0 +1,62 @@
+{
+  "packetId": "world-zero-wayfinding-v0",
+  "version": "0.1.0",
+  "status": "verified",
+  "license": "Proprietary - Sierra Technology Group",
+  "provenance": "Original deterministic SVG artwork authored for Vibe City Working World Zero / Sierra Technology Group Headquarters; no third-party logos, fonts, images, or generated assets used.",
+  "assets": [
+    {
+      "id": "stg-headquarters-entry",
+      "source": "source/stg-headquarters-entry.svg",
+      "export": "exports/stg-headquarters-entry.svg",
+      "preview": "previews/stg-headquarters-entry.png",
+      "dimensions": { "width": 1024, "height": 256, "unit": "px", "viewBox": "0 0 1024 256" },
+      "previewWidth": 1024
+    },
+    {
+      "id": "reception-plaque",
+      "source": "source/reception-plaque.svg",
+      "export": "exports/reception-plaque.svg",
+      "preview": "previews/reception-plaque.png",
+      "dimensions": { "width": 768, "height": 192, "unit": "px", "viewBox": "0 0 768 192" },
+      "previewWidth": 768
+    },
+    {
+      "id": "chief-agent-office-plaque",
+      "source": "source/chief-agent-office-plaque.svg",
+      "export": "exports/chief-agent-office-plaque.svg",
+      "preview": "previews/chief-agent-office-plaque.png",
+      "dimensions": { "width": 768, "height": 192, "unit": "px", "viewBox": "0 0 768 192" },
+      "previewWidth": 768
+    },
+    {
+      "id": "kanban-records-room-plaque",
+      "source": "source/kanban-records-room-plaque.svg",
+      "export": "exports/kanban-records-room-plaque.svg",
+      "preview": "previews/kanban-records-room-plaque.png",
+      "dimensions": { "width": 768, "height": 192, "unit": "px", "viewBox": "0 0 768 192" },
+      "previewWidth": 768
+    },
+    {
+      "id": "executive-office-plaque",
+      "source": "source/executive-office-plaque.svg",
+      "export": "exports/executive-office-plaque.svg",
+      "preview": "previews/executive-office-plaque.png",
+      "dimensions": { "width": 768, "height": 192, "unit": "px", "viewBox": "0 0 768 192" },
+      "previewWidth": 768
+    },
+    {
+      "id": "world-zero-directory",
+      "source": "source/world-zero-directory.svg",
+      "export": "exports/world-zero-directory.svg",
+      "preview": "previews/world-zero-directory.png",
+      "dimensions": { "width": 1024, "height": 1536, "unit": "px", "viewBox": "0 0 1024 1536" },
+      "previewWidth": 1024
+    }
+  ],
+  "validation": [
+    "cd design/tools && npm run export -- ../assets/world-zero-wayfinding-v0",
+    "cd design/tools && npm run validate -- ../assets/world-zero-wayfinding-v0",
+    "npm run build"
+  ]
+}
