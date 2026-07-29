@@ -194,7 +194,9 @@ const LIFECYCLE_TRANSITIONS: Readonly<Record<LifecycleState, ReadonlySet<Lifecyc
 };
 const LIFECYCLES = new Set<LifecycleState>(Object.keys(LIFECYCLE_TRANSITIONS) as LifecycleState[]);
 const FRESHNESS_STATES = new Set<Freshness>(["live", "recent", "stale", "degraded", "unavailable"]);
-const AUTHORIZED_ACTIONS = new Set(["read", "assign", "transition", "update", "archive", "delete", "project_public"]);
+const AUTHORIZED_ACTIONS = new Set([
+  "create", "read", "assign", "transition", "update", "archive", "delete", "project_public"
+]);
 const AUDIT_EVENT_KINDS = new Set([
   "creation", "authorization", "assignment", "reassignment", "state_transition", "block", "unblock",
   "evidence_attach", "evidence_detach", "sensitivity_change", "rename", "archive", "delete_tombstone",
@@ -565,10 +567,11 @@ export function validateWorkRecord(value: unknown): ValidationResult<WorkRecord>
   return { ok: true, value: value as unknown as WorkRecord };
 }
 
-export function validateMaterialAuditEvent(
+function validateMaterialAuditEventContract(
   value: unknown,
   record: WorkRecord,
-  authorization?: TrustedAuthorizationInput
+  authorization?: TrustedAuthorizationInput,
+  allowInitialCreation = false
 ): ValidationResult<MaterialAuditEvent> {
   const recordValidation = validateWorkRecord(record);
   if (!recordValidation.ok) return { ok: false, code: "invalid_audit_record" };
@@ -608,7 +611,10 @@ export function validateMaterialAuditEvent(
   if (Date.parse(sourceValidation.value.observedAt) > Date.parse(value.occurredAt as string)) {
     return { ok: false, code: "invalid_audit_source_chronology" };
   }
-  if (value.priorRevision !== record.revision || value.newRevision !== record.revision + 1) {
+  const isInitialCreation = allowInitialCreation && value.eventKind === "creation" && record.revision === 1 &&
+    value.priorRevision === 0 && value.newRevision === 1;
+  if (!isInitialCreation &&
+      (value.priorRevision !== record.revision || value.newRevision !== record.revision + 1)) {
     return { ok: false, code: "invalid_audit_revision" };
   }
   if (!Array.isArray(value.changedFields) || value.changedFields.length === 0 ||
@@ -622,6 +628,39 @@ export function validateMaterialAuditEvent(
     return { ok: false, code: "invalid_audit_changed_fields" };
   }
   return { ok: true, value: value as unknown as MaterialAuditEvent };
+}
+
+export function validateMaterialAuditEvent(
+  value: unknown,
+  record: WorkRecord,
+  authorization?: TrustedAuthorizationInput
+): ValidationResult<MaterialAuditEvent> {
+  return validateMaterialAuditEventContract(value, record, authorization);
+}
+
+export function validateCreationAuditEvent(
+  value: unknown,
+  record: WorkRecord,
+  authorization: TrustedAuthorizationInput
+): ValidationResult<MaterialAuditEvent> {
+  if (!isTrustedAuthorizationContext(authorization)) {
+    return { ok: false, code: "untrusted_authorization_input" };
+  }
+  const validation = validateMaterialAuditEventContract(value, record, authorization, true);
+  if (!validation.ok) return validation;
+  const audit = validation.value;
+  if (record.revision !== 1 || record.state !== "proposed" || record.stateChangedAt !== null ||
+      record.recordedAt !== record.updatedAt || audit.eventKind !== "creation" ||
+      audit.priorRevision !== 0 || audit.newRevision !== 1 || audit.onBehalfOf !== null ||
+      audit.reasonRef !== null || audit.actor.subjectId !== authorization.authentication.subjectId ||
+      audit.authorizationRef !== authorization.authorizationRef ||
+      audit.occurredAt !== record.recordedAt || audit.recordedAt !== record.recordedAt ||
+      JSON.stringify(audit.source) !== JSON.stringify(record.source) ||
+      !hasExactFields(audit.changedFields, ["recordId"]) ||
+      audit.changedFields[0].before !== null || audit.changedFields[0].after !== record.recordId) {
+    return { ok: false, code: "invalid_creation_audit_contract" };
+  }
+  return validation;
 }
 
 export function transitionWorkRecord(input: {
