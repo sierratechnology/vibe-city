@@ -222,7 +222,10 @@ test("records terminal controller loads only from an explicit open or refresh ac
 
 test("Projects & Updates contains a physical contextual records terminal", () => {
   assert.match(main, /const RECORDS_TERMINAL_INTERACTION_POSITION/);
-  assert.match(main, /createLabelSprite\("Records Terminal"/);
+  assert.match(main, /addBox\(headquartersGroup, 1\.35, 0\.88, 0\.18, 6\.4, 0\.82, 2\.55, recordsTerminalMaterial\)/);
+  assert.match(main, /function canInspectRecordsTerminal\(\): boolean/);
+  assert.match(main, /computeContextActionStatusState\(\{/);
+  assert.doesNotMatch(main, /createLabelSprite\("Records Terminal"/);
   assert.match(main, /"inspect_records"/);
   assert.match(main, /recordsTerminal\.open\(\)/);
   assert.match(main, /activeContextAction/);

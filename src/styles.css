@@ -1115,21 +1115,41 @@ body:not(.city-entered) .operations-directory-access {
   display: none;
 }
 
+#context-action-status {
+  position: fixed;
+  left: 50%;
+  bottom: max(1.5rem, env(safe-area-inset-bottom));
+  z-index: 3;
+  max-width: calc(100vw - 2rem);
+  margin: 0;
+  padding: 0.7rem 1rem;
+  transform: translateX(-50%);
+  border: 1px solid rgb(143 179 189 / 72%);
+  border-radius: 0.35rem;
+  background: rgb(16 25 29 / 92%);
+  color: #f4f7f8;
+  font-size: 18px;
+  font-weight: 800;
+  text-align: center;
+  pointer-events: none;
+}
+
 body.city-entered .operations-directory-access {
   position: fixed;
   top: max(1rem, env(safe-area-inset-top));
   right: max(1rem, env(safe-area-inset-right));
   z-index: 3;
   display: block;
-  min-height: 2.75rem;
+  min-height: 56px;
   padding: 0.65rem 0.85rem;
   border: 1px solid rgb(143 179 189 / 72%);
   border-radius: 0.35rem;
   background: rgb(16 25 29 / 88%);
   color: #f4f7f8;
   font: inherit;
+  font-size: 22px;
   font-weight: 700;
-  opacity: 0.72;
+  opacity: 1;
 }
 
 body.city-entered .operations-directory-access:hover,
@@ -1338,7 +1358,11 @@ body.city-entered .operations-directory-access:focus-visible {
   body.city-entered .operations-directory-access {
     top: max(0.5rem, env(safe-area-inset-top));
     right: max(0.5rem, env(safe-area-inset-right));
-    min-height: 2.75rem;
+    min-height: 56px;
+  }
+
+  #context-action-status {
+    bottom: calc(7.5rem + env(safe-area-inset-bottom));
   }
 
   .records-terminal-header,

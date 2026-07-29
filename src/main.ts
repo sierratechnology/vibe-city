@@ -21,6 +21,7 @@ import {
   shareKnowledge
 } from "./knowledgeSystem";
 import { computeMobileControlState } from "./mobileControlState";
+import { computeContextActionStatusState } from "./contextActionStatusState";
 import { HEADQUARTERS_OFFICES, officeAccessText, officeSignText, type HeadquartersOfficeId } from "./headquarters/officeSchema";
 import { PlayerPresence, PresenceDebugState, createPresenceAdapter } from "./multiplayer/presence";
 import { createOperationsDirectoryController } from "./operations/operationsDirectory";
@@ -91,7 +92,7 @@ const PLAYER_RADIUS = 0.55;
 const HEADQUARTERS_PLAYER_SPAWN = { x: 0, z: 8.2 } as const;
 const CHIEF_AGENT_OFFICE_SIGN_ANCHOR = ["Chief Agent Office", -6.4, 4.1] as const;
 const HEADQUARTERS_SIGN_POSITIONS: Record<HeadquartersOfficeId, { readonly x: number; readonly z: number }> = {
-  reception: { x: 0, z: 6.1 },
+  reception: { x: 2.8, z: 6.1 },
   "executive-office": { x: 6.4, z: -1.1 },
   "chief-agent-office": { x: CHIEF_AGENT_OFFICE_SIGN_ANCHOR[1], z: CHIEF_AGENT_OFFICE_SIGN_ANCHOR[2] },
   "records-room": { x: 6.4, z: 4.1 },
@@ -247,6 +248,7 @@ const touchControls = document.querySelector<HTMLElement>("#touch-controls")!;
 const touchJoystick = document.querySelector<HTMLElement>("#touch-joystick")!;
 const touchJoystickKnob = document.querySelector<HTMLElement>("#touch-joystick-knob")!;
 const touchActionButton = document.querySelector<HTMLButtonElement>("#touch-action")!;
+const contextActionStatus = document.querySelector<HTMLElement>("#context-action-status")!;
 let recordsObservation: RecordsObservation = { state: "not_checked", asOf: null };
 const operationsDirectoryDialog = document.querySelector<HTMLDialogElement>("#operations-directory-dialog")!;
 const headquartersOfficeDirectoryList = document.querySelector<HTMLUListElement>("#headquarters-office-directory-list")!;
@@ -567,10 +569,6 @@ function buildHeadquartersInterior(): void {
   });
   addBox(headquartersGroup, 1.35, 0.88, 0.18, 6.4, 0.82, 2.55, recordsTerminalMaterial);
   addBox(headquartersGroup, 0.18, 0.32, 0.18, 6.4, 0.78, 2.55, wallMaterial);
-  const recordsTerminalLabel = createLabelSprite("Records Terminal", 512, 96, 28);
-  recordsTerminalLabel.position.set(6.4, 2.55, 3.2);
-  recordsTerminalLabel.scale.set(3.2, 0.78, 1);
-  headquartersGroup.add(recordsTerminalLabel);
 
   const operationsMaterial = new THREE.MeshStandardMaterial({
     color: 0x243f47,
@@ -581,31 +579,27 @@ function buildHeadquartersInterior(): void {
   for (const fixture of OPERATIONS_FIXTURES) {
     addBox(headquartersGroup, 0.95, 0.78, 0.2, fixture.position.x, 0.08, fixture.position.z, operationsMaterial);
     addCollider(headquartersColliders, fixture.position.x, fixture.position.z, 0.95, 0.2);
-    const operationsLabel = createLabelSprite(fixture.label, 512, 96, 28);
-    operationsLabel.position.set(fixture.position.x, 1.9, fixture.position.z);
-    operationsLabel.scale.set(3.25, 0.78, 1);
-    headquartersGroup.add(operationsLabel);
   }
 
   addBox(headquartersGroup, 0.22, 1.25, 8.8, 0, 0, -2.1, glassMaterial);
   addBox(headquartersGroup, 18, 1.1, 0.22, 0, 0, 0.5, glassMaterial);
 
-  const title = createLabelSprite("STG Headquarters", 512, 128, 42);
-  title.position.set(0, 2.8, -7.2);
+  const title = createLabelSprite("STG Headquarters", 512, 128, 56, true);
+  title.position.set(0, 3.6, -9.4);
   title.scale.set(6.5, 1.5, 1);
   headquartersGroup.add(title);
 
   for (const office of HEADQUARTERS_OFFICES) {
     const position = HEADQUARTERS_SIGN_POSITIONS[office.id];
-    const roomSign = createLabelSprite(officeSignText(office), 768, 96, 32, true);
+    const roomSign = createLabelSprite(officeSignText(office), 768, 96, 64, true);
     roomSign.position.set(position.x, 2.15, position.z);
     roomSign.scale.set(5.2, 0.9, 1);
     roomSign.userData.officeId = office.id;
     headquartersGroup.add(roomSign);
   }
 
-  const exitSign = createLabelSprite("Exit", 256, 96, 28);
-  exitSign.position.set(0, 2.15, 8.3);
+  const exitSign = createLabelSprite("Exit", 256, 96, 56, true);
+  exitSign.position.set(0, 1.2, 9.1);
   exitSign.scale.set(2.4, 0.9, 1);
   headquartersGroup.add(exitSign);
 
@@ -635,7 +629,7 @@ const playerRing = new THREE.Mesh(
 playerRing.rotation.x = -Math.PI / 2;
 playerRing.position.y = 0.06;
 playerRing.renderOrder = 10;
-const playerName = createLabelSprite("You", 256, 96, 34);
+const playerName = createLabelSprite("You", 256, 96, 56, true);
 playerName.position.y = 3.25;
 playerName.scale.set(2.6, 1, 1);
 playerName.renderOrder = 11;
@@ -1209,6 +1203,8 @@ function contextActionLabel(action: ContextAction | null): string {
 }
 
 function contextActionAriaLabel(action: ContextAction | null): string {
+  if (action === "enter_headquarters") return "Enter STG Headquarters";
+  if (action === "leave_headquarters") return "Exit STG Headquarters";
   if (action === "inspect_records") return "Inspect Records Terminal";
   const operationsFixture = OPERATIONS_FIXTURES.find((fixture) => fixture.action === action);
   if (operationsFixture) return operationsFixture.ariaLabel;
@@ -1713,6 +1709,16 @@ function updateNavigationContext(): void {
       if (operationsFixture) activeContextAction = operationsFixture.action;
     }
   }
+
+  const contextStatusState = computeContextActionStatusState({
+    cityEntered,
+    transitionBlocked: sceneState.transitioning,
+    recordsTerminalOpen: recordsTerminalDialog.open,
+    operationsDirectoryOpen: operationsDirectoryDialog.open,
+    activeContextLabel: activeContextAction === null ? null : contextActionAriaLabel(activeContextAction)
+  });
+  contextActionStatus.hidden = contextStatusState.hidden;
+  contextActionStatus.textContent = contextStatusState.text;
 
   updateTouchControlVisibility();
 }
