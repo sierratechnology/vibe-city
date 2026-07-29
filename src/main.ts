@@ -27,6 +27,7 @@ import { PlayerPresence, PresenceDebugState, createPresenceAdapter } from "./mul
 import { createOperationsDirectoryController } from "./operations/operationsDirectory";
 import { createWorldOperationsSnapshot, deriveRealtimeObservation, type RecordsObservation } from "./operations/worldOperationsSnapshot";
 import { createRecordsTerminalController } from "./records/recordsTerminal";
+import { createPrivateRecordsInterfaceController } from "./records/privateRecordsInterface";
 import { loadWorkEventRecords } from "./records/workEventRecords";
 import { createWorkRecordsPanelController } from "./records/workRecordsPanel";
 import {
@@ -295,6 +296,23 @@ const operationsDirectory = createOperationsDirectoryController(
   })
 );
 const recordsTerminalDialog = document.querySelector<HTMLDialogElement>("#records-terminal-dialog")!;
+const privateRecordsDialog = document.querySelector<HTMLDialogElement>("#private-records-dialog")!;
+const privateRecordsAccess = document.querySelector<HTMLButtonElement>("#private-records-access")!;
+const privateRecordsWorldOpen = document.querySelector<HTMLButtonElement>("#private-records-world-open")!;
+const privateRecords = createPrivateRecordsInterfaceController({
+  dialog: privateRecordsDialog,
+  status: document.querySelector<HTMLElement>("#private-records-status")!,
+  summary: document.querySelector<HTMLElement>("#private-records-summary")!,
+  trace: document.querySelector<HTMLElement>("#private-records-trace")!,
+  refresh: document.querySelector<HTMLButtonElement>("#private-records-refresh")!,
+  close: document.querySelector<HTMLButtonElement>("#private-records-close")!
+}, {
+  getTrustedSession: () => null,
+  readAuthorizedModel: async () => { throw new Error("Private Records adapter is not configured."); }
+});
+privateRecordsWorldOpen.addEventListener("click", () => void privateRecords.open(privateRecordsWorldOpen, ""));
+privateRecordsAccess.addEventListener("click", () => void privateRecords.open(privateRecordsAccess, ""));
+privateRecordsDialog.addEventListener("close", updateTouchControlVisibility);
 const workRecordsPanel = createWorkRecordsPanelController({
   state: document.querySelector<HTMLElement>("#work-records-state")!,
   freshness: document.querySelector<HTMLElement>("#work-records-freshness")!,
@@ -1191,7 +1209,7 @@ function updateTouchControlVisibility(): void {
     cityEntered,
     mobileCapable: shouldShowTouchControls(),
     typing,
-    interactionBlocked: recordsTerminalDialog.open || operationsDirectoryDialog.open,
+    interactionBlocked: recordsTerminalDialog.open || operationsDirectoryDialog.open || privateRecordsDialog.open,
     transitionBlocked: sceneState.transitioning,
     activeContextAction: activeContextAction !== null
   });
@@ -1607,7 +1625,7 @@ function updateCitizenMeshes(): void {
 }
 
 function movePlayer(delta: number): void {
-  if (!cityEntered || sceneState.transitioning || recordsTerminalDialog.open || operationsDirectoryDialog.open) {
+  if (!cityEntered || sceneState.transitioning || recordsTerminalDialog.open || operationsDirectoryDialog.open || privateRecordsDialog.open) {
     playerVelocity.lerp(new THREE.Vector3(), 1 - Math.pow(0.00003, delta));
     return;
   }

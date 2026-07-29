@@ -151,6 +151,7 @@
     <!-- End touch controls -->
     <p id="context-action-status" role="status" aria-live="polite" hidden></p>
     <button id="operations-directory-access" class="operations-directory-access" type="button">Headquarters Office Directory</button>
+    <button id="private-records-access" class="private-records-access" type="button">Private Records</button>
     <dialog id="operations-directory-dialog" aria-labelledby="operations-directory-title" aria-describedby="operations-directory-state">
       <header class="operations-directory-header">
         <div>
@@ -200,6 +201,7 @@
           <div><dt>Source</dt><dd id="work-records-source">Authenticated local Hermes/Kanban ingestion</dd></div>
         </dl>
         <ol id="work-records-list" class="work-records-list"></ol>
+        <button id="private-records-world-open" type="button">Open authorization-aware private Records</button>
       </section>
       <section aria-labelledby="public-repository-record-title">
       <h3 id="public-repository-record-title">Public Repository Record</h3>
@@ -216,6 +218,23 @@
         <button id="records-terminal-refresh" type="button">Refresh record</button>
       </div>
       </section>
+    </dialog>
+    <dialog id="private-records-dialog" aria-labelledby="private-records-title" aria-describedby="private-records-status">
+      <header class="records-terminal-header">
+        <div>
+          <p class="records-terminal-kicker">STG Headquarters / Private Records</p>
+          <h2 id="private-records-title">Authorization-aware Records</h2>
+        </div>
+        <button id="private-records-close" type="button" aria-label="Close private Records">Close</button>
+      </header>
+      <p id="private-records-status" role="status" aria-live="polite">Private records locked. Authenticated tenant access is required.</p>
+      <p id="private-records-summary"></p>
+      <h3>Authorized direction-to-outcome trace</h3>
+      <ol id="private-records-trace" class="private-records-trace"></ol>
+      <div class="records-terminal-actions">
+        <button id="private-records-refresh" type="button">Refresh private record</button>
+      </div>
+      <p class="private-records-note">Private fields remain unavailable unless a trusted authenticated session supplies an authorized tenant-scoped read model. This interface does not grant access.</p>
     </dialog>
     <script type="module" src="/src/main.ts"></script>
   </body>

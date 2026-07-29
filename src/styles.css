@@ -1374,6 +1374,115 @@ body.city-entered .operations-directory-access:focus-visible {
   text-decoration: none;
 }
 
+.private-records-access,
+body:not(.city-entered) .private-records-access {
+  display: none;
+}
+
+body.city-entered .private-records-access {
+  position: fixed;
+  top: max(5.75rem, calc(env(safe-area-inset-top) + 5.75rem));
+  right: max(1rem, env(safe-area-inset-right));
+  z-index: 3;
+  display: block;
+  min-height: 48px;
+  padding: 0.65rem 0.85rem;
+  border: 1px solid #58737c;
+  border-radius: 0.35rem;
+  background: #10191d;
+  color: #f4f7f8;
+  font: inherit;
+  font-weight: 700;
+}
+
+#private-records-dialog {
+  box-sizing: border-box;
+  width: min(44rem, calc(100vw - 2rem));
+  max-height: calc(100vh - 2rem);
+  overflow: auto;
+  padding: 1.25rem;
+  border: 1px solid #58737c;
+  border-radius: 0.65rem;
+  background: #10191d;
+  color: #f4f7f8;
+  box-shadow: 0 1.5rem 5rem rgb(0 0 0 / 55%);
+}
+
+#private-records-dialog::backdrop {
+  background: rgb(3 8 10 / 78%);
+}
+
+#private-records-status {
+  margin: 1rem 0;
+  padding: 0.75rem;
+  border-left: 3px solid #8fb3bd;
+  background: #172329;
+  line-height: 1.5;
+}
+
+.private-records-trace {
+  display: grid;
+  gap: 0.65rem;
+  margin: 0 0 1rem;
+  padding: 0;
+  list-style: none;
+}
+
+.private-records-trace li {
+  display: grid;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  border: 1px solid #3f5962;
+  border-left: 4px solid #8fb3bd;
+  border-radius: 0.35rem;
+  background: #172329;
+  overflow-wrap: anywhere;
+}
+
+.private-records-trace button,
+#private-records-world-open {
+  min-height: 44px;
+  padding: 0.65rem 0.85rem;
+  border: 1px solid #58737c;
+  border-radius: 0.35rem;
+  background: #1b2a30;
+  color: #f4f7f8;
+  font: inherit;
+}
+
+.private-records-note {
+  color: #c9d8dc;
+  line-height: 1.5;
+}
+
+@media (max-width: 640px) {
+  #private-records-dialog {
+    width: calc(100vw - 1rem);
+    max-height: calc(100vh - 1rem);
+    padding: 1rem;
+  }
+
+  body.city-entered .private-records-access {
+    top: auto;
+    right: max(0.75rem, env(safe-area-inset-right));
+    bottom: calc(8.5rem + env(safe-area-inset-bottom));
+    min-height: 48px;
+  }
+
+  #private-records-dialog button {
+    min-height: 48px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #private-records-dialog,
+  #private-records-dialog * {
+    scroll-behavior: auto;
+    transition: none;
+    animation: none;
+  }
+}
+
 @media (max-width: 520px) {
   #operations-directory-dialog {
     width: calc(100vw - 1rem);
