@@ -21,6 +21,7 @@ import {
   shareKnowledge
 } from "./knowledgeSystem";
 import { computeMobileControlState } from "./mobileControlState";
+import { HEADQUARTERS_OFFICES, officeAccessText, officeSignText, type HeadquartersOfficeId } from "./headquarters/officeSchema";
 import { PlayerPresence, PresenceDebugState, createPresenceAdapter } from "./multiplayer/presence";
 import { createOperationsDirectoryController } from "./operations/operationsDirectory";
 import { createWorldOperationsSnapshot, deriveRealtimeObservation, type RecordsObservation } from "./operations/worldOperationsSnapshot";
@@ -88,6 +89,18 @@ type AudioZone = {
 
 const PLAYER_RADIUS = 0.55;
 const HEADQUARTERS_PLAYER_SPAWN = { x: 0, z: 8.2 } as const;
+const CHIEF_AGENT_OFFICE_SIGN_ANCHOR = ["Chief Agent Office", -6.4, 4.1] as const;
+const HEADQUARTERS_SIGN_POSITIONS: Record<HeadquartersOfficeId, { readonly x: number; readonly z: number }> = {
+  reception: { x: 0, z: 6.1 },
+  "executive-office": { x: 6.4, z: -1.1 },
+  "chief-agent-office": { x: CHIEF_AGENT_OFFICE_SIGN_ANCHOR[1], z: CHIEF_AGENT_OFFICE_SIGN_ANCHOR[2] },
+  "records-room": { x: 6.4, z: 4.1 },
+  finance: { x: -7.2, z: -7.6 },
+  boardroom: { x: -6.4, z: -1.1 },
+  "small-meeting-room": { x: -2.4, z: -7.6 },
+  infrastructure: { x: 2.4, z: -7.6 },
+  "reserved-departments": { x: 7.2, z: -7.6 }
+};
 const RECORDS_TERMINAL_INTERACTION_POSITION = { x: 6.4, z: 4.65 } as const;
 const RECEPTION_STATUS_INTERACTION_POSITION = { x: 3.25, z: 6.3 } as const;
 const CHIEF_AGENT_IDENTITY_INTERACTION_POSITION = { x: -6.4, z: 5.0 } as const;
@@ -236,6 +249,27 @@ const touchJoystickKnob = document.querySelector<HTMLElement>("#touch-joystick-k
 const touchActionButton = document.querySelector<HTMLButtonElement>("#touch-action")!;
 let recordsObservation: RecordsObservation = { state: "not_checked", asOf: null };
 const operationsDirectoryDialog = document.querySelector<HTMLDialogElement>("#operations-directory-dialog")!;
+const headquartersOfficeDirectoryList = document.querySelector<HTMLUListElement>("#headquarters-office-directory-list")!;
+
+function renderHeadquartersOfficeDirectory(): void {
+  const directoryItems: HTMLLIElement[] = [];
+  for (const office of HEADQUARTERS_OFFICES) {
+    const directoryItem = document.createElement("li");
+    const directoryName = document.createElement("h4");
+    const directoryAccess = document.createElement("p");
+    const directoryDetail = document.createElement("p");
+    directoryItem.dataset.officeId = office.id;
+    directoryItem.dataset.access = office.access;
+    directoryName.textContent = office.displayName;
+    directoryAccess.textContent = officeAccessText(office);
+    directoryDetail.textContent = `${office.definition} Access reason: ${office.accessReason}`;
+    directoryItem.replaceChildren(directoryName, directoryAccess, directoryDetail);
+    directoryItems.push(directoryItem);
+  }
+  headquartersOfficeDirectoryList.replaceChildren(...directoryItems);
+}
+
+renderHeadquartersOfficeDirectory();
 const operationsDirectory = createOperationsDirectoryController(
   {
     access: document.querySelector<HTMLButtonElement>("#operations-directory-access")!,
@@ -468,11 +502,18 @@ function addCollider(target: Collider[], x: number, z: number, width: number, de
   });
 }
 
-function createLabelSprite(text: string, width = 512, height = 128, fontSize = 42): THREE.Sprite {
+function createLabelSprite(text: string, width = 512, height = 128, fontSize = 42, backed = false): THREE.Sprite {
   const canvas = document.createElement("canvas");
   canvas.width = width;
   canvas.height = height;
   const context = canvas.getContext("2d")!;
+  if (backed) {
+    context.fillStyle = "rgba(10, 24, 29, 0.84)";
+    context.fillRect(8, 8, width - 16, height - 16);
+    context.strokeStyle = "rgba(121, 213, 231, 0.92)";
+    context.lineWidth = 3;
+    context.strokeRect(9.5, 9.5, width - 19, height - 19);
+  }
   context.fillStyle = "#f8f4ea";
   context.font = `700 ${fontSize}px Arial`;
   context.textAlign = "center";
@@ -554,19 +595,19 @@ function buildHeadquartersInterior(): void {
   title.scale.set(6.5, 1.5, 1);
   headquartersGroup.add(title);
 
-  for (const [text, x, z] of [
-    ["Reception Area", 0, 6.1],
-    ["Meeting / Boardroom", -6.6, -1.1],
-    ["Chief Agent Office", -6.4, 4.1],
-    ["Devon Executive Office", 6.4, -1.1],
-    ["Projects & Updates", 6.4, 4.1],
-    ["Exit", 0, 8.3]
-  ] as const) {
-    const label = createLabelSprite(text, 512, 96, 28);
-    label.position.set(x, 2.15, z);
-    label.scale.set(4.2, 1, 1);
-    headquartersGroup.add(label);
+  for (const office of HEADQUARTERS_OFFICES) {
+    const position = HEADQUARTERS_SIGN_POSITIONS[office.id];
+    const roomSign = createLabelSprite(officeSignText(office), 768, 96, 32, true);
+    roomSign.position.set(position.x, 2.15, position.z);
+    roomSign.scale.set(5.2, 0.9, 1);
+    roomSign.userData.officeId = office.id;
+    headquartersGroup.add(roomSign);
   }
+
+  const exitSign = createLabelSprite("Exit", 256, 96, 28);
+  exitSign.position.set(0, 2.15, 8.3);
+  exitSign.scale.set(2.4, 0.9, 1);
+  headquartersGroup.add(exitSign);
 
   addPlaneBox(headquartersGroup, 4.4, 1.8, 0.14, headquartersPortal.interiorPosition.x, headquartersPortal.interiorPosition.z, entryPadMaterial);
 }

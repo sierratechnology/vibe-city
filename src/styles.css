@@ -1193,8 +1193,33 @@ body.city-entered .operations-directory-access:focus-visible {
 #operations-directory-services {
   display: grid;
   gap: 0.55rem;
+  padding: 0;
+  list-style: none;
+}
+
+#headquarters-office-directory-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr));
+  gap: 0.75rem;
   margin: 0;
-  padding-left: 1.25rem;
+  padding: 0;
+  list-style: none;
+}
+
+#headquarters-office-directory-list li {
+  padding: 0.75rem;
+  border: 1px solid rgb(143 179 189 / 35%);
+  border-radius: 0.35rem;
+  background: rgb(20 35 40 / 72%);
+}
+
+#headquarters-office-directory-list li[data-access="unavailable"] {
+  border-style: dashed;
+}
+
+#headquarters-office-directory-list h4,
+#headquarters-office-directory-list p {
+  margin: 0 0 0.4rem;
 }
 
 #operations-directory-dialog p,
