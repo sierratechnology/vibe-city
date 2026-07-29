@@ -128,6 +128,29 @@ function auditEvent(overrides = {}) {
   };
 }
 
+function initialRecord(overrides = {}) {
+  return record({
+    state: "proposed",
+    revision: 1,
+    recordedAt: RECORDED_AT,
+    updatedAt: RECORDED_AT,
+    stateChangedAt: null,
+    ...overrides
+  });
+}
+
+function creationAuditEvent(overrides = {}) {
+  return auditEvent({
+    eventKind: "creation",
+    occurredAt: RECORDED_AT,
+    recordedAt: RECORDED_AT,
+    priorRevision: 0,
+    newRevision: 1,
+    changedFields: [fieldChange("recordId", null, RECORD_ID)],
+    ...overrides
+  });
+}
+
 function fieldChange(field, before, after) {
   return { field, before, after };
 }
@@ -225,6 +248,44 @@ test("read permission does not grant assignment, transition, archive, delete, or
       tenantId: TENANT_ID,
       record: record()
     }), { allowed: false, code: "missing_permission" });
+  }
+});
+
+test("create authorization is distinct from update authorization", async () => {
+  const { authorizeAction } = await loadDomain();
+  assert.deepEqual(authorizeAction({
+    authorization: authorization({ permissions: ["create"] }),
+    action: "create",
+    tenantId: TENANT_ID,
+    record: initialRecord()
+  }), { allowed: true, code: "allowed" });
+  assert.deepEqual(authorizeAction({
+    authorization: authorization({ permissions: ["update"] }),
+    action: "create",
+    tenantId: TENANT_ID,
+    record: initialRecord()
+  }), { allowed: false, code: "missing_permission" });
+});
+
+test("creation audit contract binds actor authority source chronology and zero-to-one revision", async () => {
+  const { validateCreationAuditEvent, validateMaterialAuditEvent } = await loadDomain();
+  const trusted = authorization({ permissions: ["create"] });
+  assert.equal(validateCreationAuditEvent(creationAuditEvent(), initialRecord(), trusted).ok, true);
+  assert.deepEqual(validateMaterialAuditEvent(creationAuditEvent(), initialRecord(), trusted), {
+    ok: false,
+    code: "invalid_audit_revision"
+  });
+  const malformed = [
+    creationAuditEvent({ actor: subject(ASSIGNEE_ID) }),
+    creationAuditEvent({ authorizationRef: "id_aaaaaaaaaaaaaaaa" }),
+    creationAuditEvent({ policyRevision: 8 }),
+    creationAuditEvent({ source: { ...source(), sourceRecordId: "substituted" } }),
+    creationAuditEvent({ occurredAt: OCCURRED_AT }),
+    creationAuditEvent({ priorRevision: 1 }),
+    creationAuditEvent({ changedFields: [fieldChange("title", null, "fabricated")] })
+  ];
+  for (const candidate of malformed) {
+    assert.equal(validateCreationAuditEvent(candidate, initialRecord(), trusted).ok, false);
   }
 });
 
