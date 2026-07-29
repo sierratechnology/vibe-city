@@ -62,6 +62,10 @@ node scripts/ingest-current-kanban-event.mjs
 
 The helper records the verified current worker as `running`, derives a deterministic event ID from task/profile/state, and emits only the approved `Work is in progress.` label. It refuses non-HTTP, non-loopback, credential-bearing, query-bearing, or alternate-path endpoints before attaching the bearer token. It is intentionally unsuitable for arbitrary user-entered task descriptions.
 
+## Database schema and migration
+
+Fresh databases use SQLite `user_version = 2`. Version 2 records a server-generated `accepted_at` timestamp alongside each validated event. Opening a version-1 database performs a single transaction that copies every existing event into the version-2 table, preserves all public event fields, derives `accepted_at` from the prior `observed_at`, replaces the old table, and advances `user_version` only when the transaction succeeds. Unsupported future schema versions are rejected rather than guessed or rewritten.
+
 ## Verify persistence and read projection
 
 ```sh
@@ -69,7 +73,7 @@ curl --fail --silent --show-error \
   "http://127.0.0.1:${VIBE_WORK_RECORD_PORT}/api/work-events?limit=20"
 ```
 
-The read endpoint returns at most 50 allowlisted events ordered by observation time, total accepted count, newest source timestamps, generation time, and `recent`, `stale`, or `empty` freshness. Freshness uses the newest observation across the durable store. It never returns the bearer token, prompts, tool arguments, raw logs, task bodies, filesystem paths, email addresses, or raw Kanban task IDs.
+The read endpoint returns at most 50 allowlisted events ordered by observation time, total accepted count, newest source timestamps, generation time, and `recent`, `stale`, or `empty` freshness. Before reporting counts, timestamps, freshness, or any event, it revalidates every persisted row that contributes to those aggregate claims. One invalid stored row makes the entire projection fail closed. Freshness uses the newest validated observation across the durable store. It never returns the bearer token, prompts, tool arguments, raw logs, task bodies, filesystem paths, email addresses, or raw Kanban task IDs.
 
 Stop and restart `npm start` with the same `VIBE_WORK_RECORD_DB`, then repeat the GET to verify durable SQLite persistence.
 
@@ -81,7 +85,7 @@ Stop and restart `npm start` with the same `VIBE_WORK_RECORD_DB`, then repeat th
 4. Confirm **Authenticated Local Work Records** shows the event, source, and freshness.
 5. Confirm the existing **Public Repository Record** remains present.
 
-The interface explicitly renders empty, offline, invalid/error, recent, and stale states. It creates event rows with `textContent`; untrusted summaries are never interpreted as markup.
+The interface explicitly renders empty, offline, invalid/error, clock-error, recent, and stale states. An unavailable or invalid client clock produces `clock_error` with no fabricated observation timestamp. Event rows are created with `textContent`; untrusted summaries are never interpreted as markup.
 
 ## Automated verification
 

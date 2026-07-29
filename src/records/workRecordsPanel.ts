@@ -12,7 +12,8 @@ type LoadWorkRecords = (options?: { force?: boolean }) => Promise<WorkEventRecor
 const UNAVAILABLE_LABELS = {
   network: "Local work-record service is offline.",
   source_error: "Local work-record service returned an error.",
-  invalid_record: "Local work-record service returned an invalid privacy-safe projection."
+  invalid_record: "Local work-record service returned an invalid privacy-safe projection.",
+  clock_error: "Local clock is unavailable; work records were not evaluated."
 } as const;
 
 function displayToken(value: string): string {
@@ -56,7 +57,7 @@ export function createWorkRecordsPanelController(
     try {
       state = await loadRecords(options);
     } catch {
-      state = { status: "unavailable", reason: "network", checkedAt: new Date().toISOString() };
+      state = { status: "unavailable", reason: "network", checkedAt: null };
     }
     render(state);
     return state;

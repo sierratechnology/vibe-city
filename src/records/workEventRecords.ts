@@ -28,8 +28,8 @@ export type WorkEventsAvailable = {
 
 export type WorkEventsUnavailable = {
   status: "unavailable";
-  reason: "network" | "source_error" | "invalid_record";
-  checkedAt: string;
+  reason: "network" | "source_error" | "invalid_record" | "clock_error";
+  checkedAt: string | null;
 };
 
 export type WorkEventRecordsState = WorkEventsAvailable | WorkEventsUnavailable;
@@ -168,11 +168,13 @@ function normalizePayload(value: unknown, checkedAt: string): Omit<WorkEventsAva
   };
 }
 
-function observeNow(now: () => number): string {
+function observeNow(now: () => number): string | null {
   try {
-    return new Date(now()).toISOString();
+    const current = now();
+    if (!Number.isFinite(current)) return null;
+    return new Date(current).toISOString();
   } catch {
-    return "1970-01-01T00:00:00.000Z";
+    return null;
   }
 }
 
@@ -187,9 +189,13 @@ export async function loadWorkEventRecords(options: LoadOptions = {}): Promise<W
       signal: AbortSignal.timeout(5_000)
     });
   } catch {
-    return { status: "unavailable", reason: "network", checkedAt: observeNow(now) };
+    const checkedAt = observeNow(now);
+    return checkedAt === null
+      ? { status: "unavailable", reason: "clock_error", checkedAt: null }
+      : { status: "unavailable", reason: "network", checkedAt };
   }
   const checkedAt = observeNow(now);
+  if (checkedAt === null) return { status: "unavailable", reason: "clock_error", checkedAt: null };
   if (!response.ok) return { status: "unavailable", reason: "source_error", checkedAt };
   let payload: unknown;
   try {

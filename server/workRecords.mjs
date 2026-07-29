@@ -3,6 +3,7 @@ import { chmodSync, closeSync, openSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 
 const SCHEMA_VERSION = "1.0";
+const DATABASE_SCHEMA_VERSION = 2;
 const EVENT_KEYS = Object.freeze([
   "eventId",
   "eventKind",
@@ -84,45 +85,94 @@ export class WorkRecordStore {
       chmodSync(databasePath, 0o600);
     }
     this.database = new DatabaseSync(databasePath);
-    this.database.exec("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;");
-    const version = this.database.prepare("PRAGMA user_version").get().user_version;
-    if (version === 0) {
-      this.database.exec(`
-        BEGIN;
-        CREATE TABLE work_events (
-          event_id TEXT PRIMARY KEY,
-          version TEXT NOT NULL,
-          source_type TEXT NOT NULL,
-          work_ref TEXT NOT NULL,
-          profile_id TEXT NOT NULL,
-          event_kind TEXT NOT NULL,
-          status TEXT NOT NULL,
-          occurred_at TEXT NOT NULL,
-          observed_at TEXT NOT NULL,
-          summary TEXT NOT NULL
-        ) STRICT;
-        CREATE INDEX work_events_occurred_at ON work_events(occurred_at DESC, event_id DESC);
-        PRAGMA user_version = 1;
-        COMMIT;
+    try {
+      this.database.exec("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;");
+      const version = this.database.prepare("PRAGMA user_version").get().user_version;
+      if (version === 0) {
+        this.database.exec(`
+          BEGIN;
+          CREATE TABLE work_events (
+            event_id TEXT PRIMARY KEY,
+            version TEXT NOT NULL,
+            source_type TEXT NOT NULL,
+            work_ref TEXT NOT NULL,
+            profile_id TEXT NOT NULL,
+            event_kind TEXT NOT NULL,
+            status TEXT NOT NULL,
+            occurred_at TEXT NOT NULL,
+            observed_at TEXT NOT NULL,
+            summary TEXT NOT NULL,
+            accepted_at TEXT NOT NULL
+          ) STRICT;
+          CREATE INDEX work_events_occurred_at ON work_events(occurred_at DESC, event_id DESC);
+          PRAGMA user_version = 2;
+          COMMIT;
+        `);
+      } else if (version === 1) {
+        this.database.exec(`
+          BEGIN IMMEDIATE;
+          CREATE TABLE work_events_v2 (
+            event_id TEXT PRIMARY KEY,
+            version TEXT NOT NULL,
+            source_type TEXT NOT NULL,
+            work_ref TEXT NOT NULL,
+            profile_id TEXT NOT NULL,
+            event_kind TEXT NOT NULL,
+            status TEXT NOT NULL,
+            occurred_at TEXT NOT NULL,
+            observed_at TEXT NOT NULL,
+            summary TEXT NOT NULL,
+            accepted_at TEXT NOT NULL
+          ) STRICT;
+          INSERT INTO work_events_v2 (
+            event_id, version, source_type, work_ref, profile_id, event_kind, status,
+            occurred_at, observed_at, summary, accepted_at
+          )
+          SELECT
+            event_id, version, source_type, work_ref, profile_id, event_kind, status,
+            occurred_at, observed_at, summary, observed_at
+          FROM work_events;
+          DROP TABLE work_events;
+          ALTER TABLE work_events_v2 RENAME TO work_events;
+          CREATE INDEX work_events_occurred_at ON work_events(occurred_at DESC, event_id DESC);
+          PRAGMA user_version = 2;
+          COMMIT;
+        `);
+      } else if (version !== DATABASE_SCHEMA_VERSION) {
+        throw new Error("Unsupported work-record database schema");
+      }
+      this.insertStatement = this.database.prepare(`
+        INSERT OR IGNORE INTO work_events (
+          event_id, version, source_type, work_ref, profile_id, event_kind, status,
+          occurred_at, observed_at, summary, accepted_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
-    } else if (version !== 1) {
-      this.database.close();
-      throw new Error("Unsupported work-record database schema");
+      this.listStatement = this.database.prepare(`
+        SELECT event_id, version, source_type, work_ref, profile_id, event_kind, status, occurred_at, observed_at, summary
+        FROM work_events ORDER BY observed_at DESC, occurred_at DESC, event_id DESC LIMIT ?
+      `);
+      this.scanStatement = this.database.prepare(`
+        SELECT event_id, version, source_type, work_ref, profile_id, event_kind, status, occurred_at, observed_at, summary
+        FROM work_events ORDER BY observed_at DESC, occurred_at DESC, event_id DESC
+      `);
+      this.countStatement = this.database.prepare("SELECT COUNT(*) AS count FROM work_events");
+      this.boundsStatement = this.database.prepare("SELECT MAX(occurred_at) AS newest_occurred_at, MAX(observed_at) AS newest_observed_at FROM work_events");
+    } catch (error) {
+      try {
+        this.database.exec("ROLLBACK;");
+      } catch {
+        // No active migration transaction remains.
+      }
+      try {
+        this.database.close();
+      } catch {
+        // Preserve the initialization failure that made the store unusable.
+      }
+      throw error;
     }
-    this.insertStatement = this.database.prepare(`
-      INSERT OR IGNORE INTO work_events (
-        event_id, version, source_type, work_ref, profile_id, event_kind, status, occurred_at, observed_at, summary
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-    this.listStatement = this.database.prepare(`
-      SELECT event_id, version, source_type, work_ref, profile_id, event_kind, status, occurred_at, observed_at, summary
-      FROM work_events ORDER BY observed_at DESC, occurred_at DESC, event_id DESC LIMIT ?
-    `);
-    this.countStatement = this.database.prepare("SELECT COUNT(*) AS count FROM work_events");
-    this.boundsStatement = this.database.prepare("SELECT MAX(occurred_at) AS newest_occurred_at, MAX(observed_at) AS newest_observed_at FROM work_events");
   }
 
-  insert(event) {
+  insert(event, acceptedAt = event.observedAt) {
     const result = this.insertStatement.run(
       event.eventId,
       event.version,
@@ -133,7 +183,8 @@ export class WorkRecordStore {
       event.status,
       event.occurredAt,
       event.observedAt,
-      event.summary
+      event.summary,
+      acceptedAt
     );
     return result.changes === 1;
   }
@@ -151,6 +202,23 @@ export class WorkRecordStore {
       observedAt: row.observed_at,
       summary: row.summary
     }));
+  }
+
+  *scan() {
+    for (const row of this.scanStatement.iterate()) {
+      yield {
+        version: row.version,
+        eventId: row.event_id,
+        sourceType: row.source_type,
+        workRef: row.work_ref,
+        profileId: row.profile_id,
+        eventKind: row.event_kind,
+        status: row.status,
+        occurredAt: row.occurred_at,
+        observedAt: row.observed_at,
+        summary: row.summary
+      };
+    }
   }
 
   count() {
@@ -182,44 +250,68 @@ export function isWorkRecordsAuthorizationValid(authorization, expectedToken) {
 
 export function ingestWorkEvent({ authorization, expectedToken, body, store, now = Date.now }) {
   if (!isWorkRecordsAuthorizationValid(authorization, expectedToken)) return { status: 401, body: { accepted: false, error: "unauthorized" } };
-  const validation = validateWorkEvent(body, { now });
+  let acceptedAt;
+  try {
+    const current = now();
+    if (!Number.isFinite(current)) throw new Error("invalid clock");
+    acceptedAt = new Date(current).toISOString();
+  } catch {
+    return { status: 400, body: { accepted: false, error: "invalid_clock" } };
+  }
+  const validation = validateWorkEvent(body, { now: () => Date.parse(acceptedAt) });
   if (!validation.ok) return { status: 400, body: { accepted: false, error: validation.code } };
-  if (!store.insert(validation.event)) return { status: 409, body: { accepted: false, error: "duplicate_event" } };
+  if (!store.insert(validation.event, acceptedAt)) return { status: 409, body: { accepted: false, error: "duplicate_event" } };
   return { status: 201, body: { accepted: true, eventId: validation.event.eventId } };
 }
 
 export function readWorkEvents({ store, now = Date.now, limit = 20 }) {
   const boundedLimit = Number.isSafeInteger(limit) ? Math.min(Math.max(limit, 1), 50) : 20;
-  const generatedAt = new Date(now()).toISOString();
-  const events = store.list(boundedLimit);
+  let generatedAt;
+  try {
+    const current = now();
+    if (!Number.isFinite(current)) throw new Error("invalid clock");
+    generatedAt = new Date(current).toISOString();
+  } catch {
+    return { status: 500, body: { error: "invalid_clock" } };
+  }
+
   const validatedEvents = [];
-  for (const event of events) {
+  let eventCount = 0;
+  let newestOccurredAt = null;
+  let newestObservedAt = null;
+  for (const event of store.scan()) {
     const validation = validateWorkEvent(event, { now: () => Date.parse(generatedAt) });
     if (!validation.ok) return { status: 500, body: { error: "invalid_persisted_record" } };
-    validatedEvents.push(validation.event);
+    const validated = validation.event;
+    eventCount += 1;
+    if (validatedEvents.length < boundedLimit) validatedEvents.push(validated);
+    if (newestOccurredAt === null || Date.parse(validated.occurredAt) > Date.parse(newestOccurredAt)) {
+      newestOccurredAt = validated.occurredAt;
+    }
+    if (newestObservedAt === null || Date.parse(validated.observedAt) > Date.parse(newestObservedAt)) {
+      newestObservedAt = validated.observedAt;
+    }
   }
-  const sourceBounds = store.bounds();
-  const eventCount = store.count();
-  const emptyBounds = sourceBounds.newestOccurredAt === null && sourceBounds.newestObservedAt === null;
-  const populatedBounds = isCanonicalIso(sourceBounds.newestOccurredAt) && isCanonicalIso(sourceBounds.newestObservedAt) &&
-    Date.parse(sourceBounds.newestOccurredAt) <= Date.parse(sourceBounds.newestObservedAt) &&
-    Date.parse(sourceBounds.newestObservedAt) <= Date.parse(generatedAt);
-  if (!Number.isSafeInteger(eventCount) || eventCount < 0 ||
-    (eventCount === 0 && (!emptyBounds || validatedEvents.length !== 0)) ||
-    (eventCount > 0 && (!populatedBounds || validatedEvents.length === 0))) {
+
+  if (!Number.isSafeInteger(eventCount) ||
+    (eventCount === 0 && (newestOccurredAt !== null || newestObservedAt !== null || validatedEvents.length !== 0)) ||
+    (eventCount > 0 && (newestOccurredAt === null || newestObservedAt === null || validatedEvents.length === 0)) ||
+    (newestOccurredAt !== null && newestObservedAt !== null &&
+      (Date.parse(newestOccurredAt) > Date.parse(newestObservedAt) || Date.parse(newestObservedAt) > Date.parse(generatedAt)))) {
     return { status: 500, body: { error: "invalid_persisted_record" } };
   }
+
   return {
     status: 200,
     body: {
       schemaVersion: SCHEMA_VERSION,
       generatedAt,
-      freshness: sourceBounds.newestObservedAt ? (Date.parse(generatedAt) - Date.parse(sourceBounds.newestObservedAt) <= STALE_AFTER_MS ? "recent" : "stale") : "empty",
+      freshness: newestObservedAt ? (Date.parse(generatedAt) - Date.parse(newestObservedAt) <= STALE_AFTER_MS ? "recent" : "stale") : "empty",
       source: {
         type: "authenticated_local_work_events",
         eventCount,
-        newestOccurredAt: sourceBounds.newestOccurredAt,
-        newestObservedAt: sourceBounds.newestObservedAt
+        newestOccurredAt,
+        newestObservedAt
       },
       events: validatedEvents
     }

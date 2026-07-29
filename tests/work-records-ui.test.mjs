@@ -93,6 +93,21 @@ test("work-event client checks server generation against the post-response obser
   assert.equal(state.checkedAt, "2026-07-28T22:00:06.000Z");
 });
 
+test("work-event client reports an explicit clock error without fabricating an epoch timestamp", async () => {
+  const module = await loadTypeScriptModule("../src/records/workEventRecords.ts", "clock-error");
+  for (const now of [
+    () => Number.NaN,
+    () => { throw new Error("clock unavailable"); }
+  ]) {
+    const state = await module.loadWorkEventRecords({
+      now,
+      fetcher: async () => new Response(JSON.stringify(PAYLOAD), { status: 200 })
+    });
+    assert.deepEqual(state, { status: "unavailable", reason: "clock_error", checkedAt: null });
+    assert.equal(JSON.stringify(state).includes("1970-01-01"), false);
+  }
+});
+
 test("authenticated source event renders through the Records interface with explicit fresh, stale, empty, and error states", async () => {
   const [loader, panel] = await Promise.all([
     loadTypeScriptModule("../src/records/workEventRecords.ts", "integration-loader"),

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, statSync } from "node:fs";
+import { mkdtempSync, readdirSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -184,7 +184,40 @@ test("read projection fails closed when persisted rows are no longer valid publi
   }
 });
 
-test("store creates schema version one and rejects unsupported future database versions", async () => {
+test("read projection fails closed when an invalid persisted row is outside the returned window", async () => {
+  const { WorkRecordStore, readWorkEvents } = await import("../server/workRecords.mjs");
+  const directory = mkdtempSync(join(tmpdir(), "vibe-work-hidden-tamper-"));
+  const store = new WorkRecordStore(join(directory, "records.sqlite"));
+  try {
+    for (let index = 0; index < 21; index += 1) {
+      const second = String(20 - index).padStart(2, "0");
+      store.insert({
+        ...EVENT,
+        eventId: `evt_${String(index + 1).padStart(32, "0")}`,
+        occurredAt: `2026-07-28T21:59:${second}.000Z`,
+        observedAt: FIXED_NOW
+      });
+    }
+    store.insert({
+      ...EVENT,
+      eventId: "evt_ffffffffffffffffffffffffffffffff",
+      occurredAt: "2026-07-28T20:00:00.000Z",
+      observedAt: "2026-07-28T20:00:05.000Z",
+      summary: "secret@example.com /Users/devon/private"
+    });
+    const projection = readWorkEvents({ store, now: () => Date.parse(FIXED_NOW), limit: 20 });
+    assert.deepEqual(projection, {
+      status: 500,
+      body: { error: "invalid_persisted_record" }
+    });
+    assert.equal(JSON.stringify(projection).includes("secret@example.com"), false);
+  } finally {
+    store.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("store creates schema version two and rejects unsupported future database versions", async () => {
   const { WorkRecordStore } = await import("../server/workRecords.mjs");
   const directory = mkdtempSync(join(tmpdir(), "vibe-work-schema-"));
   const databasePath = join(directory, "records.sqlite");
@@ -193,10 +226,93 @@ test("store creates schema version one and rejects unsupported future database v
     initial.close();
     assert.equal(statSync(databasePath).mode & 0o777, 0o600);
     const database = new DatabaseSync(databasePath);
-    assert.equal(database.prepare("PRAGMA user_version").get().user_version, 1);
+    assert.equal(database.prepare("PRAGMA user_version").get().user_version, 2);
     database.exec("PRAGMA user_version = 99");
     database.close();
     assert.throws(() => new WorkRecordStore(databasePath), /Unsupported work-record database schema/);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("failed schema migration closes all database descriptors before rethrowing", async () => {
+  const { WorkRecordStore } = await import("../server/workRecords.mjs");
+  const directory = mkdtempSync(join(tmpdir(), "vibe-work-migration-failure-"));
+  const databasePath = join(directory, "records.sqlite");
+  const countOpenDescriptors = () => readdirSync("/dev/fd").length;
+  try {
+    const malformed = new DatabaseSync(databasePath);
+    malformed.exec(`
+      CREATE TABLE work_events (event_id TEXT PRIMARY KEY) STRICT;
+      PRAGMA user_version = 1;
+    `);
+    malformed.close();
+
+    const descriptorsBefore = countOpenDescriptors();
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      assert.throws(() => new WorkRecordStore(databasePath));
+    }
+    const descriptorsAfter = countOpenDescriptors();
+
+    assert.ok(
+      descriptorsAfter <= descriptorsBefore + 2,
+      `failed migrations leaked ${descriptorsAfter - descriptorsBefore} descriptors`
+    );
+    const verified = new DatabaseSync(databasePath);
+    assert.equal(verified.prepare("PRAGMA user_version").get().user_version, 1);
+    assert.deepEqual(
+      verified.prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").all().map((row) => row.name),
+      ["work_events"]
+    );
+    verified.close();
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("store transactionally migrates a version-one database without losing accepted events", async () => {
+  const { WorkRecordStore, readWorkEvents } = await import("../server/workRecords.mjs");
+  const directory = mkdtempSync(join(tmpdir(), "vibe-work-migration-"));
+  const databasePath = join(directory, "records.sqlite");
+  try {
+    const legacy = new DatabaseSync(databasePath);
+    legacy.exec(`
+      CREATE TABLE work_events (
+        event_id TEXT PRIMARY KEY,
+        version TEXT NOT NULL,
+        source_type TEXT NOT NULL,
+        work_ref TEXT NOT NULL,
+        profile_id TEXT NOT NULL,
+        event_kind TEXT NOT NULL,
+        status TEXT NOT NULL,
+        occurred_at TEXT NOT NULL,
+        observed_at TEXT NOT NULL,
+        summary TEXT NOT NULL
+      ) STRICT;
+      CREATE INDEX work_events_occurred_at ON work_events(occurred_at DESC, event_id DESC);
+      PRAGMA user_version = 1;
+    `);
+    legacy.prepare(`
+      INSERT INTO work_events (
+        event_id, version, source_type, work_ref, profile_id, event_kind, status, occurred_at, observed_at, summary
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      EVENT.eventId, EVENT.version, EVENT.sourceType, EVENT.workRef, EVENT.profileId,
+      EVENT.eventKind, EVENT.status, EVENT.occurredAt, EVENT.observedAt, EVENT.summary
+    );
+    legacy.close();
+
+    const migrated = new WorkRecordStore(databasePath);
+    const projection = readWorkEvents({ store: migrated, now: () => Date.parse(FIXED_NOW), limit: 20 });
+    migrated.close();
+    assert.equal(projection.status, 200);
+    assert.deepEqual(projection.body.events, [EVENT]);
+
+    const verified = new DatabaseSync(databasePath);
+    assert.equal(verified.prepare("PRAGMA user_version").get().user_version, 2);
+    const row = verified.prepare("SELECT accepted_at FROM work_events WHERE event_id = ?").get(EVENT.eventId);
+    assert.equal(row.accepted_at, EVENT.observedAt);
+    verified.close();
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
