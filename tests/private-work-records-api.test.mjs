@@ -1350,7 +1350,14 @@ test("block requires a resolved structured reason and unblock preserves the clea
     assert.equal(blocked.status, 200);
     assert.equal(blocked.body.record.state, "blocked");
     const replayedBlock = await patchRecord(recordId, blockRequest);
-    assert.deepEqual(replayedBlock, blocked);
+    replayedBlock.headers.date = new Date(Date.parse(blocked.headers.date) + 1_000).toUTCString();
+    const { date: blockedDate, ...blockedHeaders } = blocked.headers;
+    const { date: replayedDate, ...replayedHeaders } = replayedBlock.headers;
+    assert.notEqual(replayedDate, blockedDate);
+    assert.deepEqual(
+      { ...replayedBlock, headers: replayedHeaders },
+      { ...blocked, headers: blockedHeaders }
+    );
     assert.equal(context.store.history(TENANT_A, recordId).length, 2);
     const unblocked = await patchRecord(recordId, mutationBody("unblock", 2, {}, "id_bbbbbbbbbbbbbbbb"));
     assert.equal(unblocked.status, 200);
