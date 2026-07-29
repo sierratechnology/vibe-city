@@ -1285,6 +1285,37 @@ body.city-entered .operations-directory-access:focus-visible {
   background: #172329;
 }
 
+.work-records-panel {
+  margin: 1rem 0 1.25rem;
+  padding: 0.85rem;
+  border: 1px solid #2d424a;
+  border-radius: 0.45rem;
+  background: #121f24;
+}
+
+.work-records-panel h3,
+#records-terminal-dialog section > h3 {
+  margin: 0 0 0.75rem;
+}
+
+#work-records-state {
+  margin: 0 0 0.75rem;
+}
+
+.work-records-list {
+  display: grid;
+  gap: 0.55rem;
+  margin: 0;
+  padding-left: 1.35rem;
+}
+
+.work-record-event {
+  padding: 0.55rem;
+  border-left: 3px solid #8fb3bd;
+  background: #172329;
+  overflow-wrap: anywhere;
+}
+
 .records-terminal-details {
   display: grid;
   gap: 0.65rem;

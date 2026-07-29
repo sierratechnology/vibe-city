@@ -21,6 +21,7 @@ type RecordsTerminalElements = {
 };
 
 type LoadRecord = (options?: { force?: boolean }) => Promise<PublicProjectRecordState>;
+type LoadWorkRecords = (options?: { force?: boolean }) => Promise<unknown>;
 
 const REASON_LABELS: Record<PublicProjectRecordUnavailable["reason"], string> = {
   network: "Network unavailable",
@@ -39,7 +40,8 @@ function formatTimestamp(value: string): string {
 
 export function createRecordsTerminalController(
   elements: RecordsTerminalElements,
-  loadRecord: LoadRecord = loadLatestPublicProjectRecord
+  loadRecord: LoadRecord = loadLatestPublicProjectRecord,
+  loadWorkRecords: LoadWorkRecords = async () => undefined
 ): { open: () => Promise<void>; refresh: () => Promise<void>; close: () => void } {
   let loading = false;
 
@@ -84,7 +86,11 @@ export function createRecordsTerminalController(
     loading = true;
     renderLoading();
     try {
-      render(await loadRecord({ force }));
+      const [record] = await Promise.all([
+        loadRecord({ force }),
+        loadWorkRecords({ force })
+      ]);
+      render(record);
     } finally {
       loading = false;
       elements.refresh.disabled = false;
