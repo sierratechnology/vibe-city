@@ -176,6 +176,7 @@ const WORK_RECORD_KEYS = [
   "freshness", "owner", "recordId", "recordType", "recordedAt", "revision", "schemaVersion",
   "sensitivity", "source", "state", "stateChangedAt", "supersedes", "tenantId", "title", "updatedAt"
 ];
+const AUDIT_CHANGE_FIELDS = new Set([...WORK_RECORD_KEYS, "priorRevisionDigest"]);
 const SENSITIVITY_RANK: Readonly<Record<Sensitivity, number>> = {
   public_approved: 0,
   tenant_private: 1,
@@ -195,7 +196,7 @@ const LIFECYCLE_TRANSITIONS: Readonly<Record<LifecycleState, ReadonlySet<Lifecyc
 const LIFECYCLES = new Set<LifecycleState>(Object.keys(LIFECYCLE_TRANSITIONS) as LifecycleState[]);
 const FRESHNESS_STATES = new Set<Freshness>(["live", "recent", "stale", "degraded", "unavailable"]);
 const AUTHORIZED_ACTIONS = new Set([
-  "create", "read", "assign", "transition", "update", "archive", "delete", "project_public"
+  "create", "read", "read_history", "assign", "transition", "update", "archive", "delete", "project_public"
 ]);
 const AUDIT_EVENT_KINDS = new Set([
   "creation", "authorization", "assignment", "reassignment", "state_transition", "block", "unblock",
@@ -544,8 +545,8 @@ export function validateWorkRecord(value: unknown): ValidationResult<WorkRecord>
   if ([value.completedAt, value.archivedAt, value.deletedAt].some(
     (timestamp) => timestamp !== null && typeof timestamp !== "string"
   )) return { ok: false, code: "invalid_timestamp" };
-  const isInitialProposedRevision = value.state === "proposed" && value.revision === 1;
-  if ((value.stateChangedAt === null) !== isInitialProposedRevision ||
+  const isProposedWithoutStateChange = value.state === "proposed";
+  if ((value.stateChangedAt === null) !== isProposedWithoutStateChange ||
       (value.stateChangedAt !== null && !isCanonicalTimestamp(value.stateChangedAt))) {
     return { ok: false, code: "invalid_state_changed_at" };
   }
@@ -559,7 +560,6 @@ export function validateWorkRecord(value: unknown): ValidationResult<WorkRecord>
   if (Date.parse(sourceValidation.value.observedAt) > Date.parse(recordedAt) ||
       Date.parse(recordedAt) > Date.parse(stateChangedAt) ||
       Date.parse(stateChangedAt) > Date.parse(updatedAt) ||
-      (value.stateChangedAt === null && updatedAt !== recordedAt) ||
       lifecycleTimestamps.some((timestamp) => Date.parse(timestamp) < Date.parse(recordedAt) ||
         Date.parse(timestamp) > Date.parse(updatedAt))) {
     return { ok: false, code: "invalid_chronology" };
@@ -620,7 +620,7 @@ function validateMaterialAuditEventContract(
   if (!Array.isArray(value.changedFields) || value.changedFields.length === 0 ||
       value.changedFields.some((change) => !isObject(change) ||
         !hasExactKeys(change, ["after", "before", "field"]) ||
-        typeof change.field !== "string" || !WORK_RECORD_KEYS.includes(change.field) ||
+        typeof change.field !== "string" || !AUDIT_CHANGE_FIELDS.has(change.field) ||
         (change.before !== null && (typeof change.before !== "string" || change.before.length > 1000)) ||
         (change.after !== null && (typeof change.after !== "string" || change.after.length > 1000))) ||
       new Set(value.changedFields.map((change) => (change as Record<string, unknown>).field)).size !==
