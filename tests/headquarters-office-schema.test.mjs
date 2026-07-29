@@ -89,8 +89,50 @@ test("Headquarters scene projects schema-driven environmental room signage", asy
   assert.match(main, /import\s+\{[^}]*HEADQUARTERS_OFFICES[^}]*officeSignText[^}]*\}\s+from\s+["']\.\/headquarters\/officeSchema["']/s);
   assert.match(main, /const HEADQUARTERS_SIGN_POSITIONS:\s*Record<HeadquartersOfficeId,/);
   assert.match(main, /for \(const office of HEADQUARTERS_OFFICES\)/);
-  assert.match(main, /createLabelSprite\(officeSignText\(office\),\s*768,\s*96,\s*32,\s*true\)/);
+  assert.match(main, /createLabelSprite\(officeSignText\(office\),\s*768,\s*96,\s*64,\s*true\)/);
+  assert.match(main, /roomSign\.scale\.set\(5\.2,\s*0\.9,\s*1\)/);
   assert.match(main, /roomSign\.userData\.officeId\s*=\s*office\.id/);
+});
+
+test("essential Headquarters labels meet the 1080p kiosk readability contract", async () => {
+  const [main, css] = await Promise.all([
+    readFile(new URL("../src/main.ts", import.meta.url), "utf8"),
+    readFile(new URL("../src/styles.css", import.meta.url), "utf8")
+  ]);
+  const projectedTextPixels = ({ fontSize, textureHeight, spriteHeight }) =>
+    (fontSize / textureHeight) * spriteHeight * (1080 / 30);
+
+  assert.ok(projectedTextPixels({ fontSize: 64, textureHeight: 96, spriteHeight: 0.9 }) >= 20);
+  assert.match(main, /createLabelSprite\("STG Headquarters",\s*512,\s*128,\s*56,\s*true\)/);
+  assert.match(main, /createLabelSprite\("Exit",\s*256,\s*96,\s*56,\s*true\)/);
+  assert.match(main, /createLabelSprite\("You",\s*256,\s*96,\s*56,\s*true\)/);
+  assert.match(css, /body\.city-entered \.operations-directory-access\s*\{[^}]*min-height:\s*56px[^}]*font-size:\s*22px[^}]*opacity:\s*1/s);
+  const mobileDirectoryOverride = css.slice(css.lastIndexOf("@media (max-width: 520px)"));
+  assert.match(mobileDirectoryOverride, /body\.city-entered \.operations-directory-access\s*\{[^}]*min-height:\s*56px/s);
+});
+
+test("nearby Headquarters interactions use one accessible non-overlapping DOM status", async () => {
+  const [html, main, css] = await Promise.all([
+    readFile(new URL("../index.html", import.meta.url), "utf8"),
+    readFile(new URL("../src/main.ts", import.meta.url), "utf8"),
+    readFile(new URL("../src/styles.css", import.meta.url), "utf8")
+  ]);
+  const visibleExperience = html.slice(html.indexOf("<!-- End legacy interface -->"));
+
+  assert.match(visibleExperience, /<p id="context-action-status" role="status" aria-live="polite" hidden><\/p>/);
+  assert.match(main, /const contextActionStatus = document\.querySelector<HTMLElement>\("#context-action-status"\)!/);
+  assert.match(main, /computeContextActionStatusState\(\{/);
+  assert.match(main, /contextActionStatus\.hidden = contextStatusState\.hidden/);
+  assert.match(main, /contextActionStatus\.textContent = contextStatusState\.text/);
+  assert.match(main, /if \(action === "enter_headquarters"\) return "Enter STG Headquarters"/);
+  assert.match(main, /if \(action === "leave_headquarters"\) return "Exit STG Headquarters"/);
+  assert.doesNotMatch(main, /createLabelSprite\("Records Terminal"/);
+  assert.doesNotMatch(main, /createLabelSprite\(fixture\.label/);
+  assert.doesNotMatch(main, /contextualWorldLabels/);
+  assert.match(css, /#context-action-status\s*\{[^}]*font-size:\s*18px/s);
+  assert.match(main, /reception:\s*\{\s*x:\s*2\.8,\s*z:\s*6\.1\s*\}/);
+  assert.match(main, /title\.position\.set\(0,\s*3\.6,\s*-9\.4\)/);
+  assert.match(main, /exitSign\.position\.set\(0,\s*1\.2,\s*9\.1\)/);
 });
 
 test("Headquarters office directory is visible, semantic, and schema-driven", async () => {

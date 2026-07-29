@@ -153,11 +153,15 @@ test("valid Supabase configuration does not deadlock production startup", { skip
         }
         window.__recordsTestRequests += 1;
         const sha = "f".repeat(40);
-        return new Response(JSON.stringify([{
-          sha,
-          html_url: "https://github.com/sierratechnology/vibe-city/commit/" + sha,
-          commit: { message: "Runtime records proof", committer: { date: "2026-07-28T00:30:00Z" } }
-        }]), { status: 200, headers: { "content-type": "application/json" } });
+        return {
+          status: 200,
+          ok: true,
+          json: async () => [{
+            sha,
+            html_url: "https://github.com/sierratechnology/vibe-city/commit/" + sha,
+            commit: { message: "Runtime records proof", committer: { date: "2026-07-28T00:30:00Z" } }
+          }]
+        };
       };
     `;
 
@@ -429,12 +433,18 @@ test("valid Supabase configuration does not deadlock production startup", { skip
       desktopOpen = await evaluate(`({
         open: document.querySelector("#records-terminal-dialog").open,
         freshness: document.querySelector("#records-terminal-freshness").textContent,
+        state: document.querySelector("#records-terminal-state").textContent,
         requests: window.__recordsTestRequests
       })`);
       if (desktopOpen.open && desktopOpen.freshness === "Fresh") break;
       await new Promise((resolve) => setTimeout(resolve, 50));
     }
-    assert.deepEqual(desktopOpen, { open: true, freshness: "Fresh", requests: 1 });
+    assert.deepEqual(desktopOpen, {
+      open: true,
+      freshness: "Fresh",
+      state: "Fresh public repository record.",
+      requests: 1
+    });
     await evaluate(`document.querySelector("#records-terminal-dialog").close()`);
 
     await cdp.send("Emulation.setDeviceMetricsOverride", {

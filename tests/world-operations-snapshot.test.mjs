@@ -42,7 +42,7 @@ test("operations directory blocks world input, hides touch controls, and has bou
   assert.match(main, /if\s*\(!cityEntered\s*\|\|\s*recordsTerminalDialog\.open\s*\|\|\s*operationsDirectoryDialog\.open\)\s*return/);
   assert.match(css, /body:not\(\.city-entered\)\s+\.operations-directory-access/);
   assert.doesNotMatch(css, /operations-directory-access:not\(:focus-visible\)[\s\S]*clip-path:\s*inset\(50%\)/);
-  assert.match(css, /body\.city-entered \.operations-directory-access[\s\S]*min-height:\s*2\.75rem/);
+  assert.match(css, /body\.city-entered \.operations-directory-access[\s\S]*min-height:\s*56px/);
   assert.match(css, /#operations-directory-dialog[\s\S]*box-sizing:\s*border-box/);
   assert.match(css, /#operations-directory-dialog[\s\S]*max-height:\s*calc\(100vh - 2rem\)/);
   assert.match(css, /@media \(max-width: 520px\)[\s\S]*#operations-directory-dialog/);
@@ -59,7 +59,8 @@ test("Headquarters exposes contextual Reception, Spiders identity, and Executive
   assert.match(main, /label: "Reception Status"[\s\S]*position: RECEPTION_STATUS_INTERACTION_POSITION/);
   assert.match(main, /label: "Spiders Identity"[\s\S]*position: CHIEF_AGENT_IDENTITY_INTERACTION_POSITION/);
   assert.match(main, /label: "Executive Authority"[\s\S]*position: EXECUTIVE_AUTHORITY_INTERACTION_POSITION/);
-  assert.match(main, /createLabelSprite\(fixture\.label/);
+  assert.match(main, /contextActionStatus\.textContent\s*=\s*contextStatusState\.text/);
+  assert.doesNotMatch(main, /createLabelSprite\(fixture\.label/);
   assert.match(main, /for \(const fixture of OPERATIONS_FIXTURES\)[\s\S]*addCollider\(/);
   assert.match(main, /"inspect_reception_status"/);
   assert.match(main, /"inspect_chief_identity"/);
