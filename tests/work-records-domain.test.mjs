@@ -893,13 +893,13 @@ test("freshness is derived from exact trusted source health facts", async () => 
   });
 });
 
-test("stateChangedAt is null only for the initial proposed revision", async () => {
+test("stateChangedAt remains null until the proposed record first changes state", async () => {
   const { validateWorkRecord } = await loadDomain();
   assert.equal(validateWorkRecord(record({
     state: "proposed",
-    revision: 1,
+    revision: 2,
     stateChangedAt: null,
-    updatedAt: RECORDED_AT
+    updatedAt: UPDATED_AT
   })).ok, true);
   assert.deepEqual(validateWorkRecord(record({ stateChangedAt: null })), {
     ok: false,
