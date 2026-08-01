@@ -206,6 +206,524 @@ function workingDerivationInput(overrides = {}) {
   };
 }
 
+function blockedDerivationInput(overrides = {}) {
+  const source = {
+    tenantId: TENANT_ID,
+    sourceId: "id_4444444444444444",
+    sourceRecordId: "synthetic-record-source",
+    sourceEventId: "synthetic-block-event",
+    contractVersion: "1.0",
+    occurredAt: STARTED_AT,
+    observedAt: HEARTBEAT_AT
+  };
+  const assignee = { tenantId: TENANT_ID, subjectId: SUBJECT_ID };
+  const blockReason = {
+    category: "synthetic-dependency",
+    summary: "Synthetic prerequisite is unavailable.",
+    resolutionAuthority: assignee,
+    blockedAt: CHECKED_AT
+  };
+  return {
+    schemaVersion: "1.0",
+    profileName: "synthetic_profile",
+    mapping: mapping(),
+    record: {
+      schemaVersion: "1.0",
+      tenantId: TENANT_ID,
+      recordId: RECORD_ID,
+      state: "blocked",
+      freshness: "live",
+      assignees: [assignee],
+      revision: 4,
+      stateChangedAt: GENERATED_AT,
+      recordedAt: OBSERVED_AT,
+      blockReason,
+      source
+    },
+    assignment: {
+      tenantId: TENANT_ID,
+      recordId: RECORD_ID,
+      authorizationId: "id_5555555555555555",
+      acceptedRevision: 3,
+      assignees: [assignee],
+      source
+    },
+    trace: {
+      tenantId: TENANT_ID,
+      recordId: RECORD_ID,
+      recordRevision: 4,
+      assignmentAuthorizationId: "id_5555555555555555",
+      activityId: "id_6666666666666666",
+      hermesTaskId: "t_a1b2c3d4",
+      hermesRunId: 11,
+      hermesEventId: 12,
+      mappingRevision: 7,
+      policyRevision: 9
+    },
+    audit: {
+      auditEventId: "id_8888888888888888",
+      tenantId: TENANT_ID,
+      recordId: RECORD_ID,
+      eventKind: "block",
+      actor: assignee,
+      onBehalfOf: null,
+      authorizationRef: "id_7777777777777777",
+      policyRevision: 9,
+      occurredAt: CHECKED_AT,
+      recordedAt: GENERATED_AT,
+      priorRevision: 3,
+      newRevision: 4,
+      changedFields: [
+        { field: "state", before: "active", after: "blocked" },
+        { field: "blockReason", before: null, after: JSON.stringify(blockReason) }
+      ],
+      reasonRef: null,
+      source
+    },
+    authorization: {
+      tenantId: TENANT_ID,
+      authorizationId: "id_5555555555555555",
+      action: "assign",
+      scope: RECORD_ID,
+      beneficiary: assignee,
+      authorizationRef: "id_7777777777777777",
+      policyRevision: 9,
+      allowed: true
+    },
+    blockAuthorization: {
+      provenance: "backend_trusted",
+      auditEventId: "id_8888888888888888",
+      authentication: { authenticated: true, subjectId: SUBJECT_ID },
+      membership: { active: true, tenantId: TENANT_ID },
+      permissions: ["transition"],
+      decisionAuthorities: [],
+      onBehalfOf: null,
+      action: "transition",
+      scope: RECORD_ID,
+      authorizationRef: "id_7777777777777777",
+      policyRevision: 9
+    },
+    checkedAt: EVALUATED_AT,
+    generatedAt: EVALUATED_AT,
+    ...overrides
+  };
+}
+
+function constructTrustedBlockAuthorization(createContext, input) {
+  const result = maybeConstructTrustedBlockAuthorization(createContext, input);
+  assertAccepted(result);
+  return input;
+}
+
+function maybeConstructTrustedBlockAuthorization(createContext, input) {
+  if (input.blockAuthorization === null || typeof input.blockAuthorization !== "object" ||
+      Array.isArray(input.blockAuthorization) || input.blockAuthorization.provenance !== "backend_trusted") {
+    return { ok: false, code: "invalid_hosted_agent_presence" };
+  }
+  const { provenance: _provenance, ...facts } = input.blockAuthorization;
+  const result = createContext(facts);
+  if (result.ok) input.blockAuthorization = result.value;
+  return result;
+}
+
+test("blocked accepts M3 durable transition chronology without collapsing source and append times", async () => {
+  const {
+    createTrustedBlockTransitionAuthorizationContext,
+    derivePrivateHostedAgentBlockedPresence
+  } = await loadDomain();
+  const input = constructTrustedBlockAuthorization(
+    createTrustedBlockTransitionAuthorizationContext,
+    blockedDerivationInput()
+  );
+
+  const result = derivePrivateHostedAgentBlockedPresence(input);
+
+  assertAccepted(result);
+  assert.equal(result.value.presence.state, "blocked");
+  assert.equal(result.value.presence.stateChangedAt, GENERATED_AT);
+  assert.equal(result.value.presence.observedAt, GENERATED_AT);
+});
+
+test("blocked rejects paired unanchored assignment and audit authorization references", async () => {
+  const {
+    createTrustedBlockTransitionAuthorizationContext,
+    derivePrivateHostedAgentBlockedPresence
+  } = await loadDomain();
+  const input = blockedDerivationInput();
+  input.audit.authorizationRef = "id_aaaaaaaaaaaaaaaa";
+  input.authorization.authorizationRef = "id_aaaaaaaaaaaaaaaa";
+  constructTrustedBlockAuthorization(createTrustedBlockTransitionAuthorizationContext, input);
+
+  const result = derivePrivateHostedAgentBlockedPresence(input);
+
+  assertAccepted(result);
+  assert.equal(result.value.presence.state, "unavailable");
+  assert.equal(result.value.presence.recordRef, null);
+});
+
+test("blocked rejects three paired caller-authored authorization references", async () => {
+  const { derivePrivateHostedAgentBlockedPresence } = await loadDomain();
+  const input = JSON.parse(JSON.stringify(blockedDerivationInput()));
+  input.audit.authorizationRef = "id_aaaaaaaaaaaaaaaa";
+  input.authorization.authorizationRef = "id_aaaaaaaaaaaaaaaa";
+  input.blockAuthorization.authorizationRef = "id_aaaaaaaaaaaaaaaa";
+
+  const result = derivePrivateHostedAgentBlockedPresence(input);
+
+  assertAccepted(result);
+  assert.equal(result.value.presence.state, "unavailable");
+  assert.equal(result.value.presence.recordRef, null);
+});
+
+test("blocked rejects policy revision zero across all coupled M3 facts", async () => {
+  const {
+    createTrustedBlockTransitionAuthorizationContext,
+    derivePrivateHostedAgentBlockedPresence
+  } = await loadDomain();
+  const input = blockedDerivationInput();
+  input.trace.policyRevision = 0;
+  input.audit.policyRevision = 0;
+  input.authorization.policyRevision = 0;
+  input.blockAuthorization.policyRevision = 0;
+  const construction = maybeConstructTrustedBlockAuthorization(
+    createTrustedBlockTransitionAuthorizationContext,
+    input
+  );
+
+  if (!construction.ok) assertRejected(construction);
+
+  const result = derivePrivateHostedAgentBlockedPresence(input);
+
+  assertAccepted(result);
+  assert.equal(result.value.presence.state, "unavailable");
+  assert.equal(result.value.presence.recordRef, null);
+});
+
+test("blocked trusts only the original backend-constructed authorization identity", async () => {
+  const {
+    createTrustedBlockTransitionAuthorizationContext,
+    derivePrivateHostedAgentBlockedPresence
+  } = await loadDomain();
+  const trustedInput = constructTrustedBlockAuthorization(
+    createTrustedBlockTransitionAuthorizationContext,
+    blockedDerivationInput()
+  );
+  const trusted = trustedInput.blockAuthorization;
+  const copiedContexts = [
+    JSON.parse(JSON.stringify(trusted)),
+    { ...trusted },
+    structuredClone(trusted),
+    new Proxy(trusted, {})
+  ];
+
+  for (const blockAuthorization of copiedContexts) {
+    const input = blockedDerivationInput({ blockAuthorization });
+    const result = derivePrivateHostedAgentBlockedPresence(input);
+    if (!result.ok) {
+      assertRejected(result);
+    } else {
+      assert.equal(result.value.presence.state, "unavailable");
+      assert.equal(result.value.presence.recordRef, null);
+    }
+  }
+
+  const accessorInput = blockedDerivationInput();
+  Object.defineProperty(accessorInput, "blockAuthorization", {
+    enumerable: true,
+    get() { return trusted; }
+  });
+  assertRejected(derivePrivateHostedAgentBlockedPresence(accessorInput));
+});
+
+test("blocked rejects an audit actor different from the trusted block actor", async () => {
+  const {
+    createTrustedBlockTransitionAuthorizationContext,
+    derivePrivateHostedAgentBlockedPresence
+  } = await loadDomain();
+  const input = blockedDerivationInput();
+  input.blockAuthorization.authentication.subjectId = "id_cccccccccccccccc";
+  constructTrustedBlockAuthorization(createTrustedBlockTransitionAuthorizationContext, input);
+
+  const result = derivePrivateHostedAgentBlockedPresence(input);
+
+  assertAccepted(result);
+  assert.equal(result.value.presence.state, "unavailable");
+  assert.equal(result.value.presence.recordRef, null);
+});
+
+test("blocked authority anchors the accepted material audit identity", async () => {
+  const {
+    createTrustedBlockTransitionAuthorizationContext,
+    derivePrivateHostedAgentBlockedPresence
+  } = await loadDomain();
+  const input = constructTrustedBlockAuthorization(
+    createTrustedBlockTransitionAuthorizationContext,
+    blockedDerivationInput()
+  );
+
+  const result = derivePrivateHostedAgentBlockedPresence(input);
+
+  assertAccepted(result);
+  assert.equal(result.value.presence.state, "blocked");
+});
+
+test("blocked accepts a null M3 resolution authority", async () => {
+  const {
+    createTrustedBlockTransitionAuthorizationContext,
+    derivePrivateHostedAgentBlockedPresence
+  } = await loadDomain();
+  const input = blockedDerivationInput();
+  input.record.blockReason.resolutionAuthority = null;
+  input.audit.changedFields[1].after = JSON.stringify(input.record.blockReason);
+  constructTrustedBlockAuthorization(createTrustedBlockTransitionAuthorizationContext, input);
+
+  const result = derivePrivateHostedAgentBlockedPresence(input);
+
+  assertAccepted(result);
+  assert.equal(result.value.presence.state, "blocked");
+});
+
+test("blocked accepts a same-tenant M3 resolution authority distinct from the assignee", async () => {
+  const {
+    createTrustedBlockTransitionAuthorizationContext,
+    derivePrivateHostedAgentBlockedPresence
+  } = await loadDomain();
+  const input = blockedDerivationInput();
+  input.record.blockReason.resolutionAuthority = {
+    tenantId: TENANT_ID,
+    subjectId: "id_cccccccccccccccc"
+  };
+  input.audit.changedFields[1].after = JSON.stringify(input.record.blockReason);
+  constructTrustedBlockAuthorization(createTrustedBlockTransitionAuthorizationContext, input);
+
+  const result = derivePrivateHostedAgentBlockedPresence(input);
+
+  assertAccepted(result);
+  assert.equal(result.value.presence.state, "blocked");
+});
+
+test("blocked accepts same-tenant on-behalf-of when coupled to trusted block authority", async () => {
+  const {
+    createTrustedBlockTransitionAuthorizationContext,
+    derivePrivateHostedAgentBlockedPresence
+  } = await loadDomain();
+  const input = blockedDerivationInput();
+  const onBehalfOf = { tenantId: TENANT_ID, subjectId: "id_cccccccccccccccc" };
+  input.audit.onBehalfOf = onBehalfOf;
+  input.blockAuthorization.onBehalfOf = onBehalfOf;
+  constructTrustedBlockAuthorization(createTrustedBlockTransitionAuthorizationContext, input);
+
+  const result = derivePrivateHostedAgentBlockedPresence(input);
+
+  assertAccepted(result);
+  assert.equal(result.value.presence.state, "blocked");
+});
+
+test("blocked requires current blocked record and matching material block audit without block text", async () => {
+  const {
+    createTrustedBlockTransitionAuthorizationContext,
+    derivePrivateHostedAgentBlockedPresence
+  } = await loadDomain();
+
+  assert.equal(typeof derivePrivateHostedAgentBlockedPresence, "function");
+  const result = derivePrivateHostedAgentBlockedPresence(constructTrustedBlockAuthorization(
+    createTrustedBlockTransitionAuthorizationContext,
+    blockedDerivationInput()
+  ));
+  assertAccepted(result);
+  assert.equal(result.value.presence.state, "blocked");
+  assert.equal(result.value.presence.freshness, "live");
+  assert.equal(result.value.presence.stateChangedAt, GENERATED_AT);
+  assert.equal(result.value.presence.observedAt, GENERATED_AT);
+  assert.equal(result.value.presence.checkedAt, EVALUATED_AT);
+  assert.deepEqual(result.value.presence.recordRef, response().presence.recordRef);
+
+  assert.deepEqual(Object.keys(result.value).sort(), ["generatedAt", "presence", "schemaVersion", "tenantId"]);
+  assert.deepEqual(Object.keys(result.value.presence).sort(), [
+    "checkedAt", "displayName", "freshness", "identityId", "observedAt", "reason", "recordRef", "roleLabel",
+    "state", "stateChangedAt", "workplace"
+  ]);
+  const serialized = JSON.stringify(result.value);
+  for (const forbidden of [
+    "synthetic-dependency", "Synthetic prerequisite is unavailable.", "resolutionAuthority", "auditEventId",
+    "id_8888888888888888", "actor", "onBehalfOf", "authorizationRef", "blockAuthorization",
+    "backend_trusted", "id_7777777777777777", "sourceId",
+    "id_4444444444444444", "changedFields", "blockReason", "t_a1b2c3d4", "\"pid\"", "\"provider\"", "credential"
+  ]) {
+    assert.equal(serialized.includes(forbidden), false, `serialized blocked response leaked ${forbidden}`);
+  }
+
+  const OTHER_TENANT_ID = "id_aaaaaaaaaaaaaaaa";
+  const OTHER_RECORD_ID = "id_bbbbbbbbbbbbbbbb";
+  const OTHER_SUBJECT_ID = "id_cccccccccccccccc";
+  const cases = [
+    ["mapping omitted", (input) => { delete input.mapping; }],
+    ["mapping ambiguous", (input) => { input.mapping = [input.mapping, mapping()]; }],
+    ["mapping subject mismatch", (input) => { input.mapping.subjectId = OTHER_SUBJECT_ID; }],
+    ["mapping profile mismatch", (input) => { input.mapping.profileName = "other_profile"; }],
+    ["mapping revision mismatch", (input) => { input.trace.mappingRevision = 8; }],
+    ["record omitted", (input) => { delete input.record; }],
+    ["record state only", (input) => { delete input.audit; }],
+    ["record state mismatch", (input) => { input.record.state = "active"; }],
+    ["record subject omitted", (input) => { input.record.assignees = []; }],
+    ["record subject mismatch", (input) => {
+      input.record.assignees = [{ tenantId: TENANT_ID, subjectId: OTHER_SUBJECT_ID }];
+    }],
+    ["record tenant mismatch", (input) => {
+      input.record.tenantId = OTHER_TENANT_ID;
+      input.record.assignees = [{ tenantId: OTHER_TENANT_ID, subjectId: SUBJECT_ID }];
+      input.record.blockReason.resolutionAuthority = { tenantId: OTHER_TENANT_ID, subjectId: SUBJECT_ID };
+      input.record.source = { ...input.record.source, tenantId: OTHER_TENANT_ID };
+    }],
+    ["block reason omitted", (input) => { delete input.record.blockReason; }],
+    ["block reason malformed", (input) => { input.record.blockReason.summary = ""; }],
+    ["block reason changed without matching audit delta", (input) => {
+      input.record.blockReason.resolutionAuthority = { tenantId: TENANT_ID, subjectId: OTHER_SUBJECT_ID };
+    }],
+    ["block reason foreign authority", (input) => {
+      input.record.blockReason.resolutionAuthority = { tenantId: OTHER_TENANT_ID, subjectId: OTHER_SUBJECT_ID };
+      input.audit.changedFields[1].after = JSON.stringify(input.record.blockReason);
+    }],
+    ["block reason malformed authority", (input) => {
+      input.record.blockReason.resolutionAuthority = { tenantId: TENANT_ID, subjectId: "id_short" };
+      input.audit.changedFields[1].after = JSON.stringify(input.record.blockReason);
+    }],
+    ["assignment omitted", (input) => { delete input.assignment; }],
+    ["assignment revision mismatch", (input) => { input.assignment.acceptedRevision = 2; }],
+    ["assignment authorization mismatch", (input) => {
+      input.assignment.authorizationId = "id_dddddddddddddddd";
+    }],
+    ["trace omitted", (input) => { delete input.trace; }],
+    ["trace record revision mismatch", (input) => { input.trace.recordRevision = 3; }],
+    ["audit omitted", (input) => { delete input.audit; }],
+    ["audit stale prior revision", (input) => { input.audit.priorRevision = 2; }],
+    ["audit stale current revision", (input) => { input.audit.newRevision = 3; }],
+    ["audit event kind mismatch", (input) => { input.audit.eventKind = "state_transition"; }],
+    ["audit foreign tenant", (input) => {
+      input.audit.tenantId = OTHER_TENANT_ID;
+      input.audit.actor = { tenantId: OTHER_TENANT_ID, subjectId: SUBJECT_ID };
+      input.audit.source = { ...input.audit.source, tenantId: OTHER_TENANT_ID };
+    }],
+    ["audit foreign record", (input) => { input.audit.recordId = OTHER_RECORD_ID; }],
+    ["audit actor mismatch", (input) => {
+      input.audit.actor = { tenantId: TENANT_ID, subjectId: OTHER_SUBJECT_ID };
+    }],
+    ["audit authorization mismatch", (input) => {
+      input.audit.authorizationRef = "id_dddddddddddddddd";
+    }],
+    ["audit policy mismatch", (input) => { input.audit.policyRevision = 10; }],
+    ["audit source mismatch", (input) => {
+      input.audit.source = { ...input.audit.source, sourceEventId: "other-block-event" };
+    }],
+    ["audit fabricated state delta", (input) => { input.audit.changedFields[0].before = "ready"; }],
+    ["audit fabricated block delta", (input) => { input.audit.changedFields[1].after = "fabricated"; }],
+    ["audit duplicate delta", (input) => {
+      input.audit.changedFields = [input.audit.changedFields[0], { ...input.audit.changedFields[0] }];
+    }],
+    ["audit unknown key", (input) => { input.audit.privateText = "rejected private audit text"; }],
+    ["authorization omitted", (input) => { delete input.authorization; }],
+    ["authorization denied", (input) => { input.authorization.allowed = false; }],
+    ["authorization policy mismatch", (input) => { input.authorization.policyRevision = 10; }],
+    ["authorization source subject mismatch", (input) => {
+      input.authorization.beneficiary = { tenantId: TENANT_ID, subjectId: OTHER_SUBJECT_ID };
+    }],
+    ["block authority omitted", (input) => { delete input.blockAuthorization; }],
+    ["block authority duplicate", (input) => {
+      input.blockAuthorization = [input.blockAuthorization, { ...input.blockAuthorization }];
+    }],
+    ["block authority malformed reference", (input) => {
+      input.blockAuthorization.authorizationRef = "id_short";
+    }],
+    ["block authority audit identity mismatch", (input) => {
+      input.blockAuthorization.auditEventId = "id_dddddddddddddddd";
+    }],
+    ["block authority untrusted provenance", (input) => {
+      input.blockAuthorization.provenance = "caller_supplied";
+    }],
+    ["block authority wrong action", (input) => { input.blockAuthorization.action = "assign"; }],
+    ["block authority missing permission", (input) => { input.blockAuthorization.permissions = []; }],
+    ["block authority inactive authentication", (input) => {
+      input.blockAuthorization.authentication.authenticated = false;
+    }],
+    ["block authority inactive membership", (input) => {
+      input.blockAuthorization.membership.active = false;
+    }],
+    ["block authority foreign tenant", (input) => {
+      input.blockAuthorization.membership.tenantId = OTHER_TENANT_ID;
+    }],
+    ["block authority foreign record scope", (input) => {
+      input.blockAuthorization.scope = OTHER_RECORD_ID;
+    }],
+    ["block authority reference mismatch", (input) => {
+      input.blockAuthorization.authorizationRef = "id_dddddddddddddddd";
+    }],
+    ["block authority policy mismatch", (input) => { input.blockAuthorization.policyRevision = 10; }],
+    ["block authority unknown key", (input) => {
+      input.blockAuthorization.privateAuthority = "rejected private authority text";
+    }],
+    ["audit foreign on-behalf-of", (input) => {
+      input.audit.onBehalfOf = { tenantId: OTHER_TENANT_ID, subjectId: OTHER_SUBJECT_ID };
+      input.blockAuthorization.onBehalfOf = input.audit.onBehalfOf;
+    }],
+    ["audit on-behalf-of authority mismatch", (input) => {
+      input.audit.onBehalfOf = { tenantId: TENANT_ID, subjectId: OTHER_SUBJECT_ID };
+    }],
+    ["invalid block chronology", (input) => { input.audit.occurredAt = EVALUATED_AT; }],
+    ["future record chronology", (input) => { input.record.recordedAt = EVALUATED_AT; }],
+    ["task status only claim", (input) => { input.taskStatus = "blocked"; }],
+    ["task text only claim", (input) => { input.taskBody = "Synthetic prerequisite is unavailable."; }],
+    ["raw provider claim", (input) => { input.provider = "synthetic-provider"; }]
+  ];
+
+  for (const [name, mutate] of cases) {
+    const input = blockedDerivationInput();
+    mutate(input);
+    maybeConstructTrustedBlockAuthorization(createTrustedBlockTransitionAuthorizationContext, input);
+    const closed = derivePrivateHostedAgentBlockedPresence(input);
+    if (!closed.ok) {
+      assertRejected(closed);
+    } else {
+      assert.equal(closed.value.presence.state, "unavailable", name);
+      assert.equal(closed.value.presence.recordRef, null, name);
+    }
+    const closedSerialized = JSON.stringify(closed);
+    for (const forbidden of [
+      "Synthetic prerequisite is unavailable.", "rejected private audit text", "synthetic-provider",
+      "rejected private authority text", "synthetic-block-event", "other-block-event", "\"taskStatus\"",
+      "\"taskBody\""
+    ]) {
+      assert.equal(closedSerialized.includes(forbidden), false, `${name} leaked ${forbidden}`);
+    }
+  }
+
+  const accessorInput = blockedDerivationInput();
+  Object.defineProperty(accessorInput.record.blockReason, "summary", {
+    enumerable: true,
+    get() { throw new Error("private block accessor text"); }
+  });
+  constructTrustedBlockAuthorization(createTrustedBlockTransitionAuthorizationContext, accessorInput);
+  assertRejected(derivePrivateHostedAgentBlockedPresence(accessorInput));
+
+  const proxyInput = blockedDerivationInput();
+  proxyInput.audit = new Proxy(proxyInput.audit, {
+    ownKeys() { throw new Error("private audit proxy text"); }
+  });
+  constructTrustedBlockAuthorization(createTrustedBlockTransitionAuthorizationContext, proxyInput);
+  assertRejected(derivePrivateHostedAgentBlockedPresence(proxyInput));
+
+  const mutationInput = blockedDerivationInput();
+  let ownKeyReads = 0;
+  mutationInput.audit = new Proxy(mutationInput.audit, {
+    ownKeys(target) {
+      ownKeyReads += 1;
+      if (ownKeyReads > 1) target.newRevision = 3;
+      return Reflect.ownKeys(target);
+    }
+  });
+  constructTrustedBlockAuthorization(createTrustedBlockTransitionAuthorizationContext, mutationInput);
+  assertRejected(derivePrivateHostedAgentBlockedPresence(mutationInput));
+});
+
 test("working requires active M3 assignment accepted activity and one correlated current Hermes run", async () => {
   const { derivePrivateHostedAgentWorkingPresence } = await loadDomain();
 
