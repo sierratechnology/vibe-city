@@ -25,6 +25,10 @@ const IDENTIFIER = /^syn-[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 const MAX_COLLECTION_LENGTH = 16;
 const MAX_SERIALIZED_CODE_UNITS = 8192;
+const testRegExp = RegExp.prototype.test.call.bind(RegExp.prototype.test) as (
+  pattern: RegExp,
+  value: string
+) => boolean;
 
 function sameKeys(actual: readonly PropertyKey[], expected: readonly string[]): boolean {
   if (actual.length !== expected.length || actual.some((key) => typeof key !== "string")) return false;
@@ -48,7 +52,7 @@ function isWellFormedText(value: unknown, maximumLength: number): value is strin
   if (typeof value !== "string" || value.length === 0 || value.length > maximumLength || value.trim().length === 0) {
     return false;
   }
-  if (/[\u0000-\u001f\u007f-\u009f]/.test(value)) return false;
+  if (testRegExp(/[\u0000-\u001f\u007f-\u009f]/, value)) return false;
   for (let index = 0; index < value.length; index += 1) {
     const code = value.charCodeAt(index);
     if (code >= 0xd800 && code <= 0xdbff) {
@@ -63,11 +67,11 @@ function isWellFormedText(value: unknown, maximumLength: number): value is strin
 }
 
 function isIdentifier(value: unknown): value is string {
-  return typeof value === "string" && value.length <= 64 && IDENTIFIER.test(value);
+  return typeof value === "string" && value.length <= 64 && testRegExp(IDENTIFIER, value);
 }
 
 function isTimestamp(value: unknown): value is string {
-  if (typeof value !== "string" || !TIMESTAMP.test(value)) return false;
+  if (typeof value !== "string" || !testRegExp(TIMESTAMP, value)) return false;
   const parsed = Date.parse(value);
   return Number.isFinite(parsed) && new Date(parsed).toISOString() === value;
 }
