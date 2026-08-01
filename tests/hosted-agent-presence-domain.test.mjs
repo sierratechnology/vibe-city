@@ -4,11 +4,23 @@ import test from "node:test";
 import ts from "typescript";
 
 async function loadDomain() {
+  const workRecordsSource = await readFile(new URL("../src/domain/workRecords.ts", import.meta.url), "utf8");
+  const workRecordsTranspiled = ts.transpileModule(workRecordsSource, {
+    compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 }
+  }).outputText;
+  const workRecordsUrl = `data:text/javascript;base64,${Buffer.from(workRecordsTranspiled).toString("base64")}`;
   const source = await readFile(new URL("../src/domain/hostedAgentPresence.ts", import.meta.url), "utf8");
   const transpiled = ts.transpileModule(source, {
     compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 }
-  }).outputText;
-  return import(`data:text/javascript;base64,${Buffer.from(transpiled).toString("base64")}`);
+  }).outputText.replace('from "./workRecords"', `from "${workRecordsUrl}"`);
+  const [domain, workRecords] = await Promise.all([
+    import(`data:text/javascript;base64,${Buffer.from(transpiled).toString("base64")}`),
+    import(workRecordsUrl)
+  ]);
+  return {
+    ...domain,
+    createTrustedCompletionAuthorizationCapability: workRecords.createTrustedAuthorizationContext
+  };
 }
 
 const TENANT_ID = "id_1111111111111111";
@@ -325,6 +337,592 @@ function maybeConstructTrustedBlockAuthorization(createContext, input) {
   if (result.ok) input.blockAuthorization = result.value;
   return result;
 }
+
+function completedDerivationInput(overrides = {}) {
+  const source = {
+    tenantId: TENANT_ID,
+    sourceId: "id_4444444444444444",
+    sourceRecordId: "synthetic-record-source",
+    sourceEventId: "synthetic-completion-event",
+    contractVersion: "1.0",
+    occurredAt: STARTED_AT,
+    observedAt: HEARTBEAT_AT
+  };
+  const assignee = { tenantId: TENANT_ID, subjectId: SUBJECT_ID };
+  const acceptanceActor = { tenantId: TENANT_ID, subjectId: "id_aaaaaaaaaaaaaaaa" };
+  const evidence = {
+    evidenceId: "id_bbbbbbbbbbbbbbbb",
+    tenantId: TENANT_ID,
+    relation: "result",
+    locator: "internal:synthetic/completion-evidence",
+    label: "Synthetic completion evidence",
+    sensitivity: "tenant_private",
+    integrity: { algorithm: "sha256", digest: "c".repeat(64) },
+    sourceOccurredAt: STARTED_AT,
+    observedAt: HEARTBEAT_AT,
+    recordedAt: OBSERVED_AT,
+    availability: "available",
+    source
+  };
+  const outcome = {
+    outcomeId: "id_dddddddddddddddd",
+    tenantId: TENANT_ID,
+    recordId: RECORD_ID,
+    acceptanceActor,
+    acceptanceAuthorizationId: "id_eeeeeeeeeeeeeeee",
+    requiredEvidenceIds: [evidence.evidenceId],
+    acceptedAt: CHECKED_AT
+  };
+  return {
+    schemaVersion: "1.0",
+    profileName: "synthetic_profile",
+    mapping: mapping(),
+    record: {
+      schemaVersion: "1.0",
+      tenantId: TENANT_ID,
+      recordId: RECORD_ID,
+      state: "completed",
+      freshness: "live",
+      assignees: [assignee],
+      revision: 5,
+      stateChangedAt: GENERATED_AT,
+      recordedAt: OBSERVED_AT,
+      completedAt: GENERATED_AT,
+      source
+    },
+    assignment: {
+      tenantId: TENANT_ID,
+      recordId: RECORD_ID,
+      authorizationId: "id_5555555555555555",
+      acceptedRevision: 4,
+      assignees: [assignee],
+      source
+    },
+    authorization: {
+      tenantId: TENANT_ID,
+      authorizationId: "id_5555555555555555",
+      action: "assign",
+      scope: RECORD_ID,
+      beneficiary: assignee,
+      authorizationRef: "id_7777777777777777",
+      policyRevision: 9,
+      allowed: true
+    },
+    trace: {
+      tenantId: TENANT_ID,
+      recordId: RECORD_ID,
+      recordRevision: 5,
+      assignmentAuthorizationId: "id_5555555555555555",
+      mappingRevision: 7,
+      policyRevision: 9,
+      source
+    },
+    evidence: [evidence],
+    outcome,
+    audit: {
+      auditEventId: "id_8888888888888888",
+      tenantId: TENANT_ID,
+      recordId: RECORD_ID,
+      eventKind: "outcome_acceptance",
+      actor: acceptanceActor,
+      onBehalfOf: null,
+      authorizationRef: "id_9999999999999999",
+      policyRevision: 9,
+      occurredAt: CHECKED_AT,
+      recordedAt: GENERATED_AT,
+      priorRevision: 4,
+      newRevision: 5,
+      changedFields: [
+        { field: "state", before: "active", after: "completed" },
+        { field: "completedAt", before: null, after: GENERATED_AT }
+      ],
+      outcomeId: outcome.outcomeId,
+      evidenceIds: [evidence.evidenceId],
+      source
+    },
+    acceptanceAuthority: {
+      provenance: "backend_trusted",
+      acceptanceAuthorizationId: outcome.acceptanceAuthorizationId,
+      auditEventId: "id_8888888888888888",
+      authentication: { authenticated: true, subjectId: acceptanceActor.subjectId },
+      membership: { active: true, tenantId: TENANT_ID },
+      permissions: ["accept_outcome"],
+      decisionAuthorities: ["accept_outcome"],
+      onBehalfOf: null,
+      action: "accept_outcome",
+      scope: RECORD_ID,
+      authorizationRef: "id_9999999999999999",
+      policyRevision: 9,
+      mappingRevision: 7,
+      recordRevision: 5,
+      assignmentAuthorizationId: "id_5555555555555555",
+      outcomeId: outcome.outcomeId,
+      evidenceIds: [evidence.evidenceId],
+      evidenceIntegrityDigests: [evidence.integrity.digest],
+      sourceId: source.sourceId,
+      sourceRecordId: source.sourceRecordId,
+      sourceEventId: source.sourceEventId,
+      acceptedAt: CHECKED_AT,
+      auditRecordedAt: GENERATED_AT
+    },
+    checkedAt: EVALUATED_AT,
+    generatedAt: EVALUATED_AT,
+    ...overrides
+  };
+}
+
+function completionCapabilityFacts(authority, authorizationRef) {
+  return {
+    authentication: authority.authentication,
+    membership: authority.membership,
+    permissions: ["transition"],
+    decisionAuthorities: authority.decisionAuthorities,
+    authorizationRef,
+    policyRevision: authority.policyRevision
+  };
+}
+
+function completionBackendRecord(input) {
+  return {
+    schemaVersion: "1.0",
+    recordId: input.record.recordId,
+    tenantId: input.record.tenantId,
+    recordType: "outcome",
+    title: "Synthetic completion",
+    owner: input.record.assignees[0],
+    assignees: input.record.assignees,
+    state: "completed",
+    freshness: "stale",
+    blockReason: null,
+    evidenceLinks: [],
+    source: input.record.source,
+    sensitivity: "tenant_private",
+    recordedAt: input.record.recordedAt,
+    updatedAt: input.record.stateChangedAt,
+    stateChangedAt: input.record.stateChangedAt,
+    completedAt: input.record.completedAt,
+    archivedAt: null,
+    deletedAt: null,
+    revision: input.record.revision,
+    supersedes: null
+  };
+}
+
+function maybeConstructCompletionCapabilities(createCapability, input, authority) {
+  if (input.record === null || typeof input.record !== "object" || Array.isArray(input.record)) {
+    return { ok: false, code: "invalid_hosted_agent_presence" };
+  }
+  const acceptance = createCapability(completionCapabilityFacts(
+    authority,
+    authority.acceptanceAuthorizationId
+  ));
+  const audit = createCapability(completionCapabilityFacts(authority, authority.authorizationRef));
+  if (!acceptance.ok) return acceptance;
+  if (!audit.ok) return audit;
+  return {
+    ok: true,
+    value: {
+      acceptanceAuthorization: acceptance.value,
+      auditAuthorization: audit.value,
+      backendRecord: completionBackendRecord(input)
+    }
+  };
+}
+
+function constructCompletionCapabilities(createCapability, input, authority) {
+  const result = maybeConstructCompletionCapabilities(createCapability, input, authority);
+  assertAccepted(result);
+  return result.value;
+}
+
+function constructTrustedCompletionAuthority(createContext, createCapability, input) {
+  const result = maybeConstructTrustedCompletionAuthority(createContext, createCapability, input);
+  assertAccepted(result);
+  return input;
+}
+
+function maybeConstructTrustedCompletionAuthority(createContext, createCapability, input) {
+  if (input.acceptanceAuthority === null || typeof input.acceptanceAuthority !== "object" ||
+      Array.isArray(input.acceptanceAuthority) || input.acceptanceAuthority.provenance !== "backend_trusted") {
+    return { ok: false, code: "invalid_hosted_agent_presence" };
+  }
+  const { provenance: _provenance, ...facts } = input.acceptanceAuthority;
+  const capabilities = maybeConstructCompletionCapabilities(createCapability, input, facts);
+  if (!capabilities.ok) return capabilities;
+  const result = createContext(
+    facts,
+    capabilities.value.acceptanceAuthorization,
+    capabilities.value.auditAuthorization,
+    capabilities.value.backendRecord
+  );
+  if (result.ok) input.acceptanceAuthority = result.value;
+  return result;
+}
+
+test("completed requires outcome evidence and acceptance authority and ignores process exit", async () => {
+  const {
+    createTrustedCompletionAcceptanceAuthorityContext,
+    createTrustedCompletionAuthorizationCapability,
+    derivePrivateHostedAgentCompletedPresence
+  } = await loadDomain();
+
+  assert.equal(typeof createTrustedCompletionAcceptanceAuthorityContext, "function");
+  assert.equal(typeof derivePrivateHostedAgentCompletedPresence, "function");
+  const accepted = derivePrivateHostedAgentCompletedPresence(constructTrustedCompletionAuthority(
+    createTrustedCompletionAcceptanceAuthorityContext,
+    createTrustedCompletionAuthorizationCapability,
+    completedDerivationInput()
+  ));
+  assertAccepted(accepted);
+  assert.equal(accepted.value.presence.state, "completed");
+  assert.equal(accepted.value.presence.freshness, "live");
+  assert.equal(accepted.value.presence.stateChangedAt, GENERATED_AT);
+  assert.equal(accepted.value.presence.observedAt, GENERATED_AT);
+  assert.equal(accepted.value.presence.checkedAt, EVALUATED_AT);
+  assert.deepEqual(accepted.value.presence.recordRef, response().presence.recordRef);
+  assert.deepEqual(Object.keys(accepted.value).sort(), ["generatedAt", "presence", "schemaVersion", "tenantId"]);
+  assert.deepEqual(Object.keys(accepted.value.presence).sort(), [
+    "checkedAt", "displayName", "freshness", "identityId", "observedAt", "reason", "recordRef", "roleLabel",
+    "state", "stateChangedAt", "workplace"
+  ]);
+  const acceptedSerialized = JSON.stringify(accepted.value);
+  for (const forbidden of [
+    "internal:synthetic/completion-evidence", "Synthetic completion evidence", "c".repeat(64),
+    "id_bbbbbbbbbbbbbbbb", "id_dddddddddddddddd", "id_eeeeeeeeeeeeeeee", "id_8888888888888888",
+    "id_9999999999999999", "id_aaaaaaaaaaaaaaaa", "acceptanceActor", "outcome_acceptance",
+    "authorizationRef", "backend_trusted", "synthetic-completion-event", "sourceId", "evidenceIds",
+    "changedFields", "\"pid\"", "\"provider\"", "credential"
+  ]) {
+    assert.equal(acceptedSerialized.includes(forbidden), false, `serialized completion leaked ${forbidden}`);
+  }
+
+  const unanchoredAcceptanceAuthorization = completedDerivationInput();
+  unanchoredAcceptanceAuthorization.outcome.acceptanceAuthorizationId = "id_ffffffffffffffff";
+  constructTrustedCompletionAuthority(
+    createTrustedCompletionAcceptanceAuthorityContext,
+    createTrustedCompletionAuthorizationCapability,
+    unanchoredAcceptanceAuthorization
+  );
+  const unanchored = derivePrivateHostedAgentCompletedPresence(unanchoredAcceptanceAuthorization);
+  assertAccepted(unanchored);
+  assert.equal(unanchored.value.presence.state, "unavailable");
+
+  const processExitOnly = completedDerivationInput();
+  delete processExitOnly.outcome;
+  delete processExitOnly.evidence;
+  delete processExitOnly.audit;
+  delete processExitOnly.acceptanceAuthority;
+  processExitOnly.runStatus = "done";
+  processExitOnly.returnCode = 0;
+  processExitOnly.processPresent = false;
+  processExitOnly.hermesEvent = "completed";
+  const closed = derivePrivateHostedAgentCompletedPresence(processExitOnly);
+  if (!closed.ok) assertRejected(closed);
+  else assert.notEqual(closed.value.presence.state, "completed");
+
+  const OTHER_TENANT_ID = "id_1212121212121212";
+  const OTHER_RECORD_ID = "id_1313131313131313";
+  const OTHER_SUBJECT_ID = "id_1414141414141414";
+  const cases = [
+    ["mapping omitted", (input) => { delete input.mapping; }],
+    ["mapping ambiguous", (input) => { input.mapping = [input.mapping, mapping()]; }],
+    ["mapping subject mismatch", (input) => { input.mapping.subjectId = OTHER_SUBJECT_ID; }],
+    ["mapping profile mismatch", (input) => { input.profileName = "other_profile"; }],
+    ["mapping revision mismatch", (input) => { input.trace.mappingRevision = 8; }],
+    ["mapping revoked", (input) => { input.mapping.status = "revoked"; }],
+    ["record omitted", (input) => { delete input.record; }],
+    ["record state alone", (input) => { delete input.outcome; }],
+    ["record state mismatch", (input) => { input.record.state = "active"; }],
+    ["record assignee omitted", (input) => { input.record.assignees = []; }],
+    ["record assignee mismatch", (input) => {
+      input.record.assignees = [{ tenantId: TENANT_ID, subjectId: OTHER_SUBJECT_ID }];
+    }],
+    ["record tenant mismatch", (input) => {
+      input.record.tenantId = OTHER_TENANT_ID;
+      input.record.assignees = [{ tenantId: OTHER_TENANT_ID, subjectId: SUBJECT_ID }];
+      input.record.source = { ...input.record.source, tenantId: OTHER_TENANT_ID };
+    }],
+    ["record completion time mismatch", (input) => { input.record.completedAt = CHECKED_AT; }],
+    ["record source mismatch", (input) => { input.record.source.sourceEventId = "other-completion-event"; }],
+    ["assignment omitted", (input) => { delete input.assignment; }],
+    ["assignment stale revision", (input) => { input.assignment.acceptedRevision = 3; }],
+    ["assignment authorization mismatch", (input) => {
+      input.assignment.authorizationId = "id_1515151515151515";
+    }],
+    ["authorization omitted", (input) => { delete input.authorization; }],
+    ["authorization denied", (input) => { input.authorization.allowed = false; }],
+    ["authorization beneficiary mismatch", (input) => {
+      input.authorization.beneficiary = { tenantId: TENANT_ID, subjectId: OTHER_SUBJECT_ID };
+    }],
+    ["authorization policy mismatch", (input) => { input.authorization.policyRevision = 10; }],
+    ["trace omitted", (input) => { delete input.trace; }],
+    ["trace record mismatch", (input) => { input.trace.recordId = OTHER_RECORD_ID; }],
+    ["trace stale revision", (input) => { input.trace.recordRevision = 4; }],
+    ["trace policy mismatch", (input) => { input.trace.policyRevision = 10; }],
+    ["trace source mismatch", (input) => { input.trace.source.sourceEventId = "other-completion-event"; }],
+    ["evidence omitted", (input) => { delete input.evidence; }],
+    ["required evidence absent", (input) => { input.evidence = []; }],
+    ["evidence unavailable", (input) => { input.evidence[0].availability = "unavailable"; }],
+    ["evidence missing integrity", (input) => { input.evidence[0].integrity = null; }],
+    ["evidence fabricated digest", (input) => { input.evidence[0].integrity.digest = "d".repeat(64); }],
+    ["evidence foreign tenant", (input) => {
+      input.evidence[0].tenantId = OTHER_TENANT_ID;
+      input.evidence[0].source = { ...input.evidence[0].source, tenantId: OTHER_TENANT_ID };
+    }],
+    ["evidence source mismatch", (input) => { input.evidence[0].source.sourceEventId = "other-completion-event"; }],
+    ["duplicate evidence", (input) => { input.evidence.push({ ...input.evidence[0] }); }],
+    ["outcome omitted", (input) => { delete input.outcome; }],
+    ["outcome foreign record", (input) => { input.outcome.recordId = OTHER_RECORD_ID; }],
+    ["outcome non-independent actor", (input) => { input.outcome.acceptanceActor.subjectId = SUBJECT_ID; }],
+    ["outcome evidence mismatch", (input) => { input.outcome.requiredEvidenceIds = ["id_1515151515151515"]; }],
+    ["outcome accepted after audit", (input) => { input.outcome.acceptedAt = EVALUATED_AT; }],
+    ["audit omitted", (input) => { delete input.audit; }],
+    ["audit kind mismatch", (input) => { input.audit.eventKind = "state_transition"; }],
+    ["audit actor mismatch", (input) => { input.audit.actor.subjectId = OTHER_SUBJECT_ID; }],
+    ["audit outcome mismatch", (input) => { input.audit.outcomeId = "id_1515151515151515"; }],
+    ["audit evidence mismatch", (input) => { input.audit.evidenceIds = ["id_1515151515151515"]; }],
+    ["audit policy mismatch", (input) => { input.audit.policyRevision = 10; }],
+    ["audit stale revision", (input) => { input.audit.newRevision = 4; }],
+    ["audit fabricated delta", (input) => { input.audit.changedFields[0].before = "review"; }],
+    ["audit source mismatch", (input) => { input.audit.source.sourceEventId = "other-completion-event"; }],
+    ["audit invalid chronology", (input) => { input.audit.recordedAt = CHECKED_AT; }],
+    ["acceptance authority omitted", (input) => { delete input.acceptanceAuthority; }],
+    ["acceptance authority caller-forged", (input) => {
+      input.acceptanceAuthority.provenance = "caller_supplied";
+    }],
+    ["acceptance authority actor mismatch", (input) => {
+      input.acceptanceAuthority.authentication.subjectId = OTHER_SUBJECT_ID;
+    }],
+    ["acceptance authority foreign tenant", (input) => {
+      input.acceptanceAuthority.membership.tenantId = OTHER_TENANT_ID;
+    }],
+    ["acceptance authority missing permission", (input) => { input.acceptanceAuthority.permissions = []; }],
+    ["acceptance authority missing independent decision", (input) => {
+      input.acceptanceAuthority.decisionAuthorities = [];
+    }],
+    ["acceptance authority reference mismatch", (input) => {
+      input.acceptanceAuthority.authorizationRef = "id_1515151515151515";
+    }],
+    ["acceptance authority policy mismatch", (input) => { input.acceptanceAuthority.policyRevision = 10; }],
+    ["acceptance authority mapping mismatch", (input) => { input.acceptanceAuthority.mappingRevision = 8; }],
+    ["acceptance authority stale record revision", (input) => { input.acceptanceAuthority.recordRevision = 4; }],
+    ["acceptance authority assignment mismatch", (input) => {
+      input.acceptanceAuthority.assignmentAuthorizationId = "id_1515151515151515";
+    }],
+    ["acceptance authority outcome mismatch", (input) => {
+      input.acceptanceAuthority.outcomeId = "id_1515151515151515";
+    }],
+    ["acceptance authority evidence mismatch", (input) => {
+      input.acceptanceAuthority.evidenceIds = ["id_1515151515151515"];
+    }],
+    ["acceptance authority digest mismatch", (input) => {
+      input.acceptanceAuthority.evidenceIntegrityDigests = ["d".repeat(64)];
+    }],
+    ["acceptance authority source mismatch", (input) => {
+      input.acceptanceAuthority.sourceEventId = "other-completion-event";
+    }],
+    ["acceptance authority chronology mismatch", (input) => {
+      input.acceptanceAuthority.auditRecordedAt = CHECKED_AT;
+    }],
+    ["task status claim", (input) => { input.taskStatus = "completed"; }],
+    ["task title claim", (input) => { input.taskTitle = "Synthetic complete"; }],
+    ["task body claim", (input) => { input.taskBody = "Synthetic result"; }],
+    ["task comment claim", (input) => { input.taskComment = "Synthetic accepted"; }],
+    ["task summary claim", (input) => { input.taskSummary = "Synthetic done"; }],
+    ["run done claim", (input) => { input.runStatus = "done"; }],
+    ["return code claim", (input) => { input.returnCode = 0; }],
+    ["completed event claim", (input) => { input.hermesEvent = "completed"; }],
+    ["process disappearance claim", (input) => { input.processPresent = false; }],
+    ["raw PID claim", (input) => { input.pid = 1234; }],
+    ["provider claim", (input) => { input.provider = "synthetic-provider"; }],
+    ["unknown nested field", (input) => { input.outcome.rawResult = "rejected outcome text"; }]
+  ];
+
+  for (const [name, mutate] of cases) {
+    const input = completedDerivationInput();
+    mutate(input);
+    maybeConstructTrustedCompletionAuthority(
+      createTrustedCompletionAcceptanceAuthorityContext,
+      createTrustedCompletionAuthorizationCapability,
+      input
+    );
+    const result = derivePrivateHostedAgentCompletedPresence(input);
+    if (!result.ok) {
+      assertRejected(result);
+    } else {
+      assert.equal(result.value.presence.state, "unavailable", name);
+      assert.equal(result.value.presence.recordRef, null, name);
+    }
+    const serialized = JSON.stringify(result);
+    for (const forbidden of [
+      "internal:synthetic/completion-evidence", "Synthetic completion evidence", "other-completion-event",
+      "rejected outcome text", "synthetic-provider", "\"taskStatus\"", "\"taskTitle\"", "\"taskBody\"",
+      "\"taskComment\"", "\"taskSummary\"", "\"returnCode\"", "\"hermesEvent\"", "\"processPresent\""
+    ]) {
+      assert.equal(serialized.includes(forbidden), false, `${name} leaked ${forbidden}`);
+    }
+  }
+
+  const trustedInput = constructTrustedCompletionAuthority(
+    createTrustedCompletionAcceptanceAuthorityContext,
+    createTrustedCompletionAuthorizationCapability,
+    completedDerivationInput()
+  );
+  for (const acceptanceAuthority of [
+    JSON.parse(JSON.stringify(trustedInput.acceptanceAuthority)),
+    { ...trustedInput.acceptanceAuthority },
+    structuredClone(trustedInput.acceptanceAuthority),
+    new Proxy(trustedInput.acceptanceAuthority, {})
+  ]) {
+    const input = completedDerivationInput({ acceptanceAuthority });
+    const result = derivePrivateHostedAgentCompletedPresence(input);
+    if (!result.ok) assertRejected(result);
+    else assert.equal(result.value.presence.state, "unavailable");
+  }
+
+  const accessorInput = completedDerivationInput();
+  Object.defineProperty(accessorInput.outcome, "outcomeId", {
+    enumerable: true,
+    get() { throw new Error("private outcome accessor text"); }
+  });
+  constructTrustedCompletionAuthority(
+    createTrustedCompletionAcceptanceAuthorityContext,
+    createTrustedCompletionAuthorizationCapability,
+    accessorInput
+  );
+  assertRejected(derivePrivateHostedAgentCompletedPresence(accessorInput));
+
+  const proxyInput = completedDerivationInput();
+  proxyInput.evidence[0] = new Proxy(proxyInput.evidence[0], {
+    ownKeys() { throw new Error("private evidence proxy text"); }
+  });
+  constructTrustedCompletionAuthority(
+    createTrustedCompletionAcceptanceAuthorityContext,
+    createTrustedCompletionAuthorizationCapability,
+    proxyInput
+  );
+  assertRejected(derivePrivateHostedAgentCompletedPresence(proxyInput));
+
+  const mutationInput = completedDerivationInput();
+  let ownKeyReads = 0;
+  mutationInput.audit = new Proxy(mutationInput.audit, {
+    ownKeys(target) {
+      ownKeyReads += 1;
+      if (ownKeyReads > 1) target.newRevision = 4;
+      return Reflect.ownKeys(target);
+    }
+  });
+  constructTrustedCompletionAuthority(
+    createTrustedCompletionAcceptanceAuthorityContext,
+    createTrustedCompletionAuthorizationCapability,
+    mutationInput
+  );
+  assertRejected(derivePrivateHostedAgentCompletedPresence(mutationInput));
+});
+
+test("completed rejects paired caller-authored acceptance authorization references", async () => {
+  const {
+    createTrustedCompletionAcceptanceAuthorityContext,
+    createTrustedCompletionAuthorizationCapability,
+    derivePrivateHostedAgentCompletedPresence
+  } = await loadDomain();
+  const input = completedDerivationInput();
+  const { provenance: _provenance, ...originalFacts } = input.acceptanceAuthority;
+  const capabilities = constructCompletionCapabilities(
+    createTrustedCompletionAuthorizationCapability,
+    input,
+    originalFacts
+  );
+  input.outcome.acceptanceAuthorizationId = "id_1515151515151515";
+  input.acceptanceAuthority.acceptanceAuthorizationId = "id_1515151515151515";
+  const { provenance: _changedProvenance, ...changedFacts } = input.acceptanceAuthority;
+  const construction = createTrustedCompletionAcceptanceAuthorityContext(
+    changedFacts,
+    capabilities.acceptanceAuthorization,
+    capabilities.auditAuthorization,
+    capabilities.backendRecord
+  );
+  if (construction.ok) input.acceptanceAuthority = construction.value;
+
+  const result = derivePrivateHostedAgentCompletedPresence(input);
+
+  assertAccepted(result);
+  assert.equal(result.value.presence.state, "unavailable");
+  assert.equal(result.value.presence.recordRef, null);
+});
+
+test("completed rejects paired caller-authored audit authorization references", async () => {
+  const {
+    createTrustedCompletionAcceptanceAuthorityContext,
+    createTrustedCompletionAuthorizationCapability,
+    derivePrivateHostedAgentCompletedPresence
+  } = await loadDomain();
+  const input = completedDerivationInput();
+  const { provenance: _provenance, ...originalFacts } = input.acceptanceAuthority;
+  const capabilities = constructCompletionCapabilities(
+    createTrustedCompletionAuthorizationCapability,
+    input,
+    originalFacts
+  );
+  input.audit.authorizationRef = "id_1515151515151515";
+  input.acceptanceAuthority.authorizationRef = "id_1515151515151515";
+  const { provenance: _changedProvenance, ...changedFacts } = input.acceptanceAuthority;
+  const construction = createTrustedCompletionAcceptanceAuthorityContext(
+    changedFacts,
+    capabilities.acceptanceAuthorization,
+    capabilities.auditAuthorization,
+    capabilities.backendRecord
+  );
+  if (construction.ok) input.acceptanceAuthority = construction.value;
+
+  const result = derivePrivateHostedAgentCompletedPresence(input);
+
+  assertAccepted(result);
+  assert.equal(result.value.presence.state, "unavailable");
+  assert.equal(result.value.presence.recordRef, null);
+});
+
+test("completed rejects evidence sourceOccurredAt that contradicts its nested source", async () => {
+  const {
+    createTrustedCompletionAcceptanceAuthorityContext,
+    createTrustedCompletionAuthorizationCapability,
+    derivePrivateHostedAgentCompletedPresence
+  } = await loadDomain();
+  const input = completedDerivationInput();
+  input.evidence[0].sourceOccurredAt = SYNCHRONIZED_AT;
+  constructTrustedCompletionAuthority(
+    createTrustedCompletionAcceptanceAuthorityContext,
+    createTrustedCompletionAuthorizationCapability,
+    input
+  );
+
+  const result = derivePrivateHostedAgentCompletedPresence(input);
+
+  assertAccepted(result);
+  assert.equal(result.value.presence.state, "unavailable");
+  assert.equal(result.value.presence.recordRef, null);
+});
+
+test("completed rejects evidence observedAt that contradicts its nested source", async () => {
+  const {
+    createTrustedCompletionAcceptanceAuthorityContext,
+    createTrustedCompletionAuthorizationCapability,
+    derivePrivateHostedAgentCompletedPresence
+  } = await loadDomain();
+  const input = completedDerivationInput();
+  input.evidence[0].observedAt = STARTED_AT;
+  constructTrustedCompletionAuthority(
+    createTrustedCompletionAcceptanceAuthorityContext,
+    createTrustedCompletionAuthorizationCapability,
+    input
+  );
+
+  const result = derivePrivateHostedAgentCompletedPresence(input);
+
+  assertAccepted(result);
+  assert.equal(result.value.presence.state, "unavailable");
+  assert.equal(result.value.presence.recordRef, null);
+});
 
 test("blocked accepts M3 durable transition chronology without collapsing source and append times", async () => {
   const {

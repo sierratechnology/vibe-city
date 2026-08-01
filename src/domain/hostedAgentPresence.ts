@@ -1,3 +1,5 @@
+import { authorizeAction, type TrustedAuthorizationInput, type WorkRecord } from "./workRecords";
+
 export type HostedPresenceValidationResult<T> =
   | { ok: true; value: T }
   | { ok: false; code: "invalid_hosted_agent_presence" };
@@ -95,6 +97,35 @@ export interface TrustedBlockTransitionAuthorizationContext extends BlockTransit
   provenance: "backend_trusted";
 }
 
+export interface CompletionAcceptanceAuthorityFacts {
+  acceptanceAuthorizationId: string;
+  auditEventId: string;
+  authentication: { authenticated: boolean; subjectId: string | null };
+  membership: { active: boolean; tenantId: string | null };
+  permissions: string[];
+  decisionAuthorities: string[];
+  onBehalfOf: { tenantId: string; subjectId: string } | null;
+  action: "accept_outcome";
+  scope: string;
+  authorizationRef: string;
+  policyRevision: number;
+  mappingRevision: number;
+  recordRevision: number;
+  assignmentAuthorizationId: string;
+  outcomeId: string;
+  evidenceIds: string[];
+  evidenceIntegrityDigests: string[];
+  sourceId: string;
+  sourceRecordId: string;
+  sourceEventId: string;
+  acceptedAt: string;
+  auditRecordedAt: string;
+}
+
+export interface TrustedCompletionAcceptanceAuthorityContext extends CompletionAcceptanceAuthorityFacts {
+  provenance: "backend_trusted";
+}
+
 type SnapshotObject = Record<string, unknown>;
 
 const INVALID = Object.freeze({ ok: false, code: "invalid_hosted_agent_presence" } as const);
@@ -177,7 +208,46 @@ const SUBJECT_KEYS = ["subjectId", "tenantId"];
 const SOURCE_KEYS = [
   "contractVersion", "observedAt", "occurredAt", "sourceEventId", "sourceId", "sourceRecordId", "tenantId"
 ];
+const COMPLETED_INPUT_KEYS = [
+  "acceptanceAuthority", "assignment", "audit", "authorization", "checkedAt", "evidence", "generatedAt",
+  "mapping", "outcome", "profileName", "record", "schemaVersion", "trace"
+];
+const COMPLETED_RECORD_KEYS = [
+  "assignees", "completedAt", "freshness", "recordId", "recordedAt", "revision", "schemaVersion", "source",
+  "state", "stateChangedAt", "tenantId"
+];
+const COMPLETED_TRACE_KEYS = [
+  "assignmentAuthorizationId", "mappingRevision", "policyRevision", "recordId", "recordRevision", "source",
+  "tenantId"
+];
+const COMPLETION_EVIDENCE_KEYS = [
+  "availability", "evidenceId", "integrity", "label", "locator", "observedAt", "recordedAt", "relation",
+  "sensitivity", "source", "sourceOccurredAt", "tenantId"
+];
+const INTEGRITY_KEYS = ["algorithm", "digest"];
+const OUTCOME_KEYS = [
+  "acceptanceActor", "acceptanceAuthorizationId", "acceptedAt", "outcomeId", "recordId", "requiredEvidenceIds",
+  "tenantId"
+];
+const COMPLETION_AUDIT_KEYS = [
+  "actor", "auditEventId", "authorizationRef", "changedFields", "eventKind", "evidenceIds", "newRevision",
+  "occurredAt", "onBehalfOf", "outcomeId", "policyRevision", "priorRevision", "recordId", "recordedAt",
+  "source", "tenantId"
+];
+const COMPLETION_AUTHORITY_KEYS = [
+  "acceptanceAuthorizationId", "acceptedAt", "action", "assignmentAuthorizationId", "auditEventId", "auditRecordedAt",
+  "authentication",
+  "authorizationRef", "decisionAuthorities", "evidenceIds", "evidenceIntegrityDigests", "mappingRevision",
+  "membership", "onBehalfOf", "outcomeId", "permissions", "policyRevision", "provenance", "recordRevision",
+  "scope", "sourceEventId", "sourceId", "sourceRecordId"
+];
+const COMPLETION_AUTHORITY_FACT_KEYS = COMPLETION_AUTHORITY_KEYS.filter((key) => key !== "provenance");
+const COMPLETION_CAPABILITY_KEYS = [
+  "authentication", "authorizationRef", "decisionAuthorities", "membership", "permissions", "policyRevision",
+  "provenance"
+];
 const trustedBlockTransitionAuthorizationContexts = new WeakSet<object>();
+const trustedCompletionAcceptanceAuthorityContexts = new WeakSet<object>();
 
 function reject<T>(): HostedPresenceValidationResult<T> {
   return INVALID;
@@ -899,6 +969,348 @@ export function derivePrivateHostedAgentBlockedPresence(
         relationship: "designated"
       },
       state: "blocked",
+      freshness: record.freshness as "live" | "recent",
+      reason: null,
+      stateChangedAt: record.stateChangedAt as string,
+      observedAt: audit.recordedAt as string,
+      checkedAt: input.checkedAt as string,
+      recordRef: {
+        recordId: record.recordId as string,
+        href: `/api/private/tenants/${mapping.tenantId}/records/${record.recordId as string}`
+      }
+    }
+  };
+  const detached = snapshotObject(response);
+  if (!detached) return reject();
+  return validatePrivateHostedAgentPresenceResponse(detached, input.generatedAt as string);
+}
+
+function exactOpaqueIds(value: unknown): value is string[] {
+  return Array.isArray(value) && value.length > 0 && value.every(isOpaqueId) &&
+    new Set(value).size === value.length;
+}
+
+function sameStrings(left: unknown, right: unknown): boolean {
+  return Array.isArray(left) && Array.isArray(right) && left.length === right.length &&
+    left.every((item, index) => item === right[index]);
+}
+
+function validCompletionEvidence(value: unknown, tenantId: string): value is SnapshotObject {
+  if (value === null || typeof value !== "object" || Array.isArray(value) ||
+      !sameKeys(Object.keys(value), COMPLETION_EVIDENCE_KEYS)) return false;
+  const evidence = value as SnapshotObject;
+  const integrity = evidence.integrity;
+  return evidence.tenantId === tenantId && isOpaqueId(evidence.evidenceId) && evidence.relation === "result" &&
+    isClosedString(evidence.locator) && /^internal:[A-Za-z0-9._:/-]{1,491}$/.test(evidence.locator) &&
+    isClosedString(evidence.label) && (evidence.label as string).length <= 200 &&
+    oneOf(evidence.sensitivity, ["tenant_private", "tenant_restricted", "public_approved"]) &&
+    evidence.availability === "available" && integrity !== null && typeof integrity === "object" &&
+    !Array.isArray(integrity) && sameKeys(Object.keys(integrity), INTEGRITY_KEYS) &&
+    (integrity as SnapshotObject).algorithm === "sha256" &&
+    typeof (integrity as SnapshotObject).digest === "string" &&
+    /^[a-f0-9]{64}$/.test((integrity as SnapshotObject).digest as string) &&
+    validWorkingSource(evidence.source, tenantId) && isCanonicalUtc(evidence.sourceOccurredAt) &&
+    isCanonicalUtc(evidence.observedAt) && isCanonicalUtc(evidence.recordedAt) &&
+    evidence.sourceOccurredAt === (evidence.source as SnapshotObject).occurredAt &&
+    evidence.observedAt === (evidence.source as SnapshotObject).observedAt &&
+    time(evidence.sourceOccurredAt as string) <= time(evidence.observedAt as string) &&
+    time(evidence.observedAt as string) <= time(evidence.recordedAt as string);
+}
+
+function hasExactCompletionDelta(value: unknown, completedAt: string): boolean {
+  if (!Array.isArray(value) || value.length !== 2 || value.some((change) =>
+    change === null || typeof change !== "object" || Array.isArray(change) ||
+    !sameKeys(Object.keys(change), FIELD_CHANGE_KEYS))) return false;
+  const changes = value as SnapshotObject[];
+  const state = changes.find((change) => change.field === "state");
+  const completed = changes.find((change) => change.field === "completedAt");
+  return new Set(changes.map((change) => change.field)).size === 2 &&
+    state?.before === "active" && state.after === "completed" &&
+    completed?.before === null && completed.after === completedAt;
+}
+
+function validCompletionAcceptanceAuthorityFacts(value: unknown): value is SnapshotObject {
+  if (value === null || typeof value !== "object" || Array.isArray(value) ||
+      !sameKeys(Object.keys(value), COMPLETION_AUTHORITY_FACT_KEYS)) return false;
+  const authority = value as SnapshotObject;
+  return authority.action === "accept_outcome" && isOpaqueId(authority.acceptanceAuthorizationId) &&
+    isOpaqueId(authority.auditEventId) &&
+    isOpaqueId(authority.scope) && isOpaqueId(authority.authorizationRef) &&
+    isPositivePolicyRevision(authority.policyRevision) && isRevision(authority.mappingRevision) &&
+    isRevision(authority.recordRevision) && isOpaqueId(authority.assignmentAuthorizationId) &&
+    isOpaqueId(authority.outcomeId) && exactOpaqueIds(authority.evidenceIds) &&
+    Array.isArray(authority.evidenceIntegrityDigests) &&
+    authority.evidenceIntegrityDigests.length === authority.evidenceIds.length &&
+    authority.evidenceIntegrityDigests.every((digest) => typeof digest === "string" && /^[a-f0-9]{64}$/.test(digest)) &&
+    new Set(authority.evidenceIntegrityDigests).size === authority.evidenceIntegrityDigests.length &&
+    isOpaqueId(authority.sourceId) && isClosedString(authority.sourceRecordId) &&
+    (authority.sourceRecordId as string).length <= 200 && isClosedString(authority.sourceEventId) &&
+    (authority.sourceEventId as string).length <= 200 && isCanonicalUtc(authority.acceptedAt) &&
+    isCanonicalUtc(authority.auditRecordedAt) &&
+    time(authority.acceptedAt as string) <= time(authority.auditRecordedAt as string) &&
+    Array.isArray(authority.permissions) && authority.permissions.length === 1 &&
+    authority.permissions[0] === "accept_outcome" &&
+    Array.isArray(authority.decisionAuthorities) && authority.decisionAuthorities.length === 1 &&
+    authority.decisionAuthorities[0] === "accept_outcome" && authority.onBehalfOf === null &&
+    authority.authentication !== null && typeof authority.authentication === "object" &&
+    !Array.isArray(authority.authentication) &&
+    sameKeys(Object.keys(authority.authentication), AUTHENTICATION_KEYS) &&
+    (authority.authentication as SnapshotObject).authenticated === true &&
+    isOpaqueId((authority.authentication as SnapshotObject).subjectId) &&
+    authority.membership !== null && typeof authority.membership === "object" &&
+    !Array.isArray(authority.membership) && sameKeys(Object.keys(authority.membership), MEMBERSHIP_KEYS) &&
+    (authority.membership as SnapshotObject).active === true &&
+    isOpaqueId((authority.membership as SnapshotObject).tenantId);
+}
+
+function trustedCompletionAuthorizationSnapshot(
+  value: unknown,
+  tenantId: string,
+  record: WorkRecord
+): SnapshotObject | null {
+  try {
+    const decision = authorizeAction({
+      authorization: value as TrustedAuthorizationInput,
+      action: "transition",
+      tenantId,
+      record
+    });
+    const capability = snapshotWorkingValue(value);
+    if (!decision.allowed || capability === null || typeof capability !== "object" || Array.isArray(capability) ||
+        !sameKeys(Object.keys(capability), COMPLETION_CAPABILITY_KEYS)) return null;
+    const trusted = capability as SnapshotObject;
+    return trusted.provenance === "backend_trusted" && isOpaqueId(trusted.authorizationRef) &&
+      isPositivePolicyRevision(trusted.policyRevision) &&
+      Array.isArray(trusted.permissions) && trusted.permissions.length === 1 &&
+      trusted.permissions[0] === "transition" &&
+      Array.isArray(trusted.decisionAuthorities) && trusted.decisionAuthorities.length === 1 &&
+      trusted.decisionAuthorities[0] === "accept_outcome" &&
+      trusted.authentication !== null && typeof trusted.authentication === "object" &&
+      !Array.isArray(trusted.authentication) &&
+      sameKeys(Object.keys(trusted.authentication), AUTHENTICATION_KEYS) &&
+      (trusted.authentication as SnapshotObject).authenticated === true &&
+      isOpaqueId((trusted.authentication as SnapshotObject).subjectId) &&
+      trusted.membership !== null && typeof trusted.membership === "object" &&
+      !Array.isArray(trusted.membership) && sameKeys(Object.keys(trusted.membership), MEMBERSHIP_KEYS) &&
+      (trusted.membership as SnapshotObject).active === true &&
+      (trusted.membership as SnapshotObject).tenantId === tenantId ? trusted : null;
+  } catch {
+    return null;
+  }
+}
+
+export function createTrustedCompletionAcceptanceAuthorityContext(
+  value: unknown,
+  acceptanceAuthorization: unknown,
+  auditAuthorization: unknown,
+  backendRecord: unknown
+): HostedPresenceValidationResult<TrustedCompletionAcceptanceAuthorityContext> {
+  const facts = snapshotWorkingValue(value);
+  const record = snapshotWorkingValue(backendRecord);
+  if (!validCompletionAcceptanceAuthorityFacts(facts) || record === null || typeof record !== "object" ||
+      Array.isArray(record) || acceptanceAuthorization === auditAuthorization) return reject();
+  const authority = facts as SnapshotObject;
+  const tenantId = (authority.membership as SnapshotObject).tenantId as string;
+  const acceptance = trustedCompletionAuthorizationSnapshot(
+    acceptanceAuthorization,
+    tenantId,
+    record as WorkRecord
+  );
+  const audit = trustedCompletionAuthorizationSnapshot(auditAuthorization, tenantId, record as WorkRecord);
+  if (!acceptance || !audit) return reject();
+  if (acceptance.authorizationRef !== authority.acceptanceAuthorizationId ||
+      audit.authorizationRef !== authority.authorizationRef ||
+      acceptance.policyRevision !== authority.policyRevision || audit.policyRevision !== authority.policyRevision ||
+      (acceptance.authentication as SnapshotObject).subjectId !==
+        (authority.authentication as SnapshotObject).subjectId ||
+      (audit.authentication as SnapshotObject).subjectId !== (authority.authentication as SnapshotObject).subjectId ||
+      (acceptance.membership as SnapshotObject).tenantId !== (authority.membership as SnapshotObject).tenantId ||
+      (audit.membership as SnapshotObject).tenantId !== (authority.membership as SnapshotObject).tenantId ||
+      (record as SnapshotObject).tenantId !== tenantId ||
+      (record as SnapshotObject).recordId !== authority.scope ||
+      (record as SnapshotObject).revision !== authority.recordRevision) {
+    return reject();
+  }
+  const context = Object.freeze({
+    ...(facts as SnapshotObject),
+    provenance: "backend_trusted" as const
+  }) as unknown as TrustedCompletionAcceptanceAuthorityContext;
+  trustedCompletionAcceptanceAuthorityContexts.add(context);
+  return accept(context);
+}
+
+function isTrustedCompletionAcceptanceAuthorityContext(
+  value: unknown
+): value is TrustedCompletionAcceptanceAuthorityContext {
+  return value !== null && typeof value === "object" && !Array.isArray(value) &&
+    trustedCompletionAcceptanceAuthorityContexts.has(value) &&
+    sameKeys(Object.keys(value), COMPLETION_AUTHORITY_KEYS) &&
+    (value as SnapshotObject).provenance === "backend_trusted" &&
+    validCompletionAcceptanceAuthorityFacts(Object.fromEntries(
+      Object.entries(value).filter(([key]) => key !== "provenance")
+    ));
+}
+
+function trustedCompletionAuthorityFromInput(
+  value: unknown
+): TrustedCompletionAcceptanceAuthorityContext | null {
+  try {
+    if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
+    const descriptor = Reflect.getOwnPropertyDescriptor(value, "acceptanceAuthority");
+    if (!descriptor || !descriptor.enumerable || !("value" in descriptor) || descriptor.get !== undefined ||
+        descriptor.set !== undefined || !isTrustedCompletionAcceptanceAuthorityContext(descriptor.value)) return null;
+    return descriptor.value;
+  } catch {
+    return null;
+  }
+}
+
+export function derivePrivateHostedAgentCompletedPresence(
+  value: unknown
+): HostedPresenceValidationResult<PrivateHostedAgentPresenceResponse> {
+  const trustedAcceptanceAuthority = trustedCompletionAuthorityFromInput(value);
+  const candidate = snapshotWorkingValue(value);
+  if (candidate === null || typeof candidate !== "object" || Array.isArray(candidate) ||
+      !sameKeys(Object.keys(candidate), COMPLETED_INPUT_KEYS)) return reject();
+  const input = candidate as SnapshotObject;
+  if (input.schemaVersion !== "1.0" || !isConfigScope(input.profileName) || !isCanonicalUtc(input.checkedAt) ||
+      !isCanonicalUtc(input.generatedAt) || time(input.checkedAt as string) > time(input.generatedAt as string)) {
+    return reject();
+  }
+
+  const mappingResult = validateReviewedHostedIdentityMapping(input.mapping, input.checkedAt as string);
+  if (!mappingResult.ok) return reject();
+  const mapping = mappingResult.value;
+  if (input.profileName !== mapping.profileName) return reject();
+  if (mapping.status !== "active") {
+    return accept(workingUnavailable(mapping.tenantId, input.checkedAt as string,
+      input.generatedAt as string, "membership_revoked"));
+  }
+
+  if (input.record === null || typeof input.record !== "object" || Array.isArray(input.record) ||
+      input.assignment === null || typeof input.assignment !== "object" || Array.isArray(input.assignment) ||
+      input.authorization === null || typeof input.authorization !== "object" || Array.isArray(input.authorization) ||
+      input.trace === null || typeof input.trace !== "object" || Array.isArray(input.trace) ||
+      !Array.isArray(input.evidence) || input.outcome === null || typeof input.outcome !== "object" ||
+      Array.isArray(input.outcome) || input.audit === null || typeof input.audit !== "object" ||
+      Array.isArray(input.audit) || input.acceptanceAuthority === null ||
+      typeof input.acceptanceAuthority !== "object" || Array.isArray(input.acceptanceAuthority)) return reject();
+  const record = input.record as SnapshotObject;
+  const assignment = input.assignment as SnapshotObject;
+  const authorization = input.authorization as SnapshotObject;
+  const trace = input.trace as SnapshotObject;
+  const outcome = input.outcome as SnapshotObject;
+  const audit = input.audit as SnapshotObject;
+  if (!sameKeys(Object.keys(record), COMPLETED_RECORD_KEYS) ||
+      !sameKeys(Object.keys(assignment), WORKING_ASSIGNMENT_KEYS) ||
+      !sameKeys(Object.keys(authorization), WORKING_AUTHORIZATION_KEYS) ||
+      !sameKeys(Object.keys(trace), COMPLETED_TRACE_KEYS) ||
+      !sameKeys(Object.keys(outcome), OUTCOME_KEYS) || !sameKeys(Object.keys(audit), COMPLETION_AUDIT_KEYS) ||
+      !sameKeys(Object.keys(input.acceptanceAuthority as SnapshotObject), COMPLETION_AUTHORITY_KEYS)) return reject();
+  if (trustedAcceptanceAuthority === null) {
+    return accept(workingUnavailable(mapping.tenantId, input.checkedAt as string,
+      input.generatedAt as string, "completion_unaccepted"));
+  }
+  const authority = trustedAcceptanceAuthority as unknown as SnapshotObject;
+
+  if (!isOpaqueId(record.tenantId) || !isOpaqueId(record.recordId) || record.schemaVersion !== "1.0" ||
+      !isRevision(record.revision) || !isCanonicalUtc(record.stateChangedAt) ||
+      !isCanonicalUtc(record.recordedAt) || !isCanonicalUtc(record.completedAt) ||
+      !hasWorkingAssignee(record.assignees, record.tenantId, mapping.subjectId) ||
+      !validWorkingSource(record.source, record.tenantId) ||
+      !isOpaqueId(assignment.tenantId) || !isOpaqueId(assignment.recordId) ||
+      !isOpaqueId(assignment.authorizationId) || !isRevision(assignment.acceptedRevision) ||
+      !hasWorkingAssignee(assignment.assignees, assignment.tenantId, mapping.subjectId) ||
+      !validWorkingSource(assignment.source, assignment.tenantId) ||
+      !isOpaqueId(authorization.tenantId) || authorization.action !== "assign" ||
+      !isOpaqueId(authorization.authorizationId) || !isOpaqueId(authorization.authorizationRef) ||
+      !isOpaqueId(authorization.scope) ||
+      !validWorkingSubject(authorization.beneficiary, authorization.tenantId as string) ||
+      !isPositivePolicyRevision(authorization.policyRevision) || authorization.allowed !== true ||
+      !isOpaqueId(trace.tenantId) || !isOpaqueId(trace.recordId) || !isRevision(trace.recordRevision) ||
+      !isOpaqueId(trace.assignmentAuthorizationId) || !isRevision(trace.mappingRevision) ||
+      !isPositivePolicyRevision(trace.policyRevision) || !validWorkingSource(trace.source, trace.tenantId as string) ||
+      !isOpaqueId(outcome.outcomeId) || !isOpaqueId(outcome.tenantId) || !isOpaqueId(outcome.recordId) ||
+      !validWorkingSubject(outcome.acceptanceActor, outcome.tenantId as string) ||
+      !isOpaqueId(outcome.acceptanceAuthorizationId) || !exactOpaqueIds(outcome.requiredEvidenceIds) ||
+      !isCanonicalUtc(outcome.acceptedAt) || !isOpaqueId(audit.auditEventId) || !isOpaqueId(audit.tenantId) ||
+      !isOpaqueId(audit.recordId) || audit.eventKind !== "outcome_acceptance" ||
+      !validWorkingSubject(audit.actor, audit.tenantId as string) || audit.onBehalfOf !== null ||
+      !isOpaqueId(audit.authorizationRef) || !isPositivePolicyRevision(audit.policyRevision) ||
+      !isRevision(audit.priorRevision) || !isRevision(audit.newRevision) || !isCanonicalUtc(audit.occurredAt) ||
+      !isCanonicalUtc(audit.recordedAt) || !isOpaqueId(audit.outcomeId) || !exactOpaqueIds(audit.evidenceIds) ||
+      !validWorkingSource(audit.source, audit.tenantId as string) ||
+      !hasExactCompletionDelta(audit.changedFields, record.completedAt as string)) return reject();
+
+  if (input.evidence.length === 0 ||
+      !input.evidence.every((item) => validCompletionEvidence(item, mapping.tenantId)) ||
+      new Set(input.evidence.map((item) => (item as SnapshotObject).evidenceId)).size !== input.evidence.length) {
+    return accept(workingUnavailable(mapping.tenantId, input.checkedAt as string,
+      input.generatedAt as string, "completion_unaccepted"));
+  }
+
+  const evidence = input.evidence as SnapshotObject[];
+  const evidenceIds = evidence.map((item) => item.evidenceId);
+  const evidenceDigests = evidence.map((item) => (item.integrity as SnapshotObject).digest);
+  const source = record.source as SnapshotObject;
+  const tenantsMatch = [record, assignment, authorization, trace, outcome, audit]
+    .every((item) => item.tenantId === mapping.tenantId);
+  const recordsMatch = [assignment, trace, outcome, audit].every((item) => item.recordId === record.recordId);
+  const sourcesMatch = sameWorkingSource(source, assignment.source as SnapshotObject) &&
+    sameWorkingSource(source, trace.source as SnapshotObject) && sameWorkingSource(source, audit.source as SnapshotObject) &&
+    evidence.every((item) => sameWorkingSource(source, item.source as SnapshotObject));
+  const chronologyValid = time(source.observedAt as string) <= time(record.recordedAt as string) &&
+    evidence.every((item) => time(item.sourceOccurredAt as string) <= time(item.observedAt as string) &&
+      time(item.observedAt as string) <= time(item.recordedAt as string) &&
+      time(item.recordedAt as string) <= time(outcome.acceptedAt as string)) &&
+    time(record.recordedAt as string) <= time(outcome.acceptedAt as string) &&
+    outcome.acceptedAt === audit.occurredAt && time(audit.occurredAt as string) <= time(audit.recordedAt as string) &&
+    audit.recordedAt === record.stateChangedAt && record.stateChangedAt === record.completedAt &&
+    time(audit.recordedAt as string) <= time(input.checkedAt as string) &&
+    time(input.checkedAt as string) <= time(input.generatedAt as string);
+  const acceptedM3 = record.state === "completed" && oneOf(record.freshness, ["live", "recent"]) &&
+    record.revision >= 1 && assignment.acceptedRevision === record.revision - 1 &&
+    trace.recordRevision === record.revision && audit.priorRevision === record.revision - 1 &&
+    audit.newRevision === record.revision && authorization.authorizationId === assignment.authorizationId &&
+    assignment.authorizationId === trace.assignmentAuthorizationId && trace.mappingRevision === mapping.registryRevision &&
+    authorization.scope === record.recordId &&
+    (authorization.beneficiary as SnapshotObject).subjectId === mapping.subjectId &&
+    authorization.policyRevision === trace.policyRevision && trace.policyRevision === audit.policyRevision &&
+    outcome.recordId === record.recordId && outcome.acceptanceAuthorizationId !== assignment.authorizationId &&
+    (outcome.acceptanceActor as SnapshotObject).subjectId !== mapping.subjectId &&
+    audit.outcomeId === outcome.outcomeId && sameStrings(outcome.requiredEvidenceIds, evidenceIds) &&
+    sameStrings(audit.evidenceIds, evidenceIds) &&
+    (audit.actor as SnapshotObject).subjectId === (outcome.acceptanceActor as SnapshotObject).subjectId &&
+    (authority.authentication as SnapshotObject).subjectId === (audit.actor as SnapshotObject).subjectId &&
+    (authority.membership as SnapshotObject).tenantId === mapping.tenantId && authority.auditEventId === audit.auditEventId &&
+    authority.scope === record.recordId && authority.authorizationRef === audit.authorizationRef &&
+    authority.policyRevision === audit.policyRevision && authority.mappingRevision === mapping.registryRevision &&
+    authority.recordRevision === record.revision && authority.assignmentAuthorizationId === assignment.authorizationId &&
+    authority.acceptanceAuthorizationId === outcome.acceptanceAuthorizationId &&
+    authority.outcomeId === outcome.outcomeId && sameStrings(authority.evidenceIds, evidenceIds) &&
+    sameStrings(authority.evidenceIntegrityDigests, evidenceDigests) && authority.sourceId === source.sourceId &&
+    authority.sourceRecordId === source.sourceRecordId && authority.sourceEventId === source.sourceEventId &&
+    authority.acceptedAt === outcome.acceptedAt && authority.auditRecordedAt === audit.recordedAt;
+
+  if (!tenantsMatch || !recordsMatch || !sourcesMatch || !chronologyValid || !acceptedM3) {
+    return accept(workingUnavailable(mapping.tenantId, input.checkedAt as string,
+      input.generatedAt as string, "completion_unaccepted"));
+  }
+
+  const response: PrivateHostedAgentPresenceResponse = {
+    schemaVersion: "1.0",
+    tenantId: mapping.tenantId,
+    generatedAt: input.generatedAt as string,
+    presence: {
+      identityId: "stg-spiders",
+      displayName: "Spiders",
+      roleLabel: "Chief Agent",
+      workplace: {
+        id: "stg-chief-agent-office",
+        label: "Chief Agent Office",
+        relationship: "designated"
+      },
+      state: "completed",
       freshness: record.freshness as "live" | "recent",
       reason: null,
       stateChangedAt: record.stateChangedAt as string,
