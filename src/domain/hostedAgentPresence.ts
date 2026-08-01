@@ -78,6 +78,23 @@ export interface PrivateHostedAgentPresenceResponse {
   presence: PrivateHostedAgentPresence | null;
 }
 
+export interface BlockTransitionAuthorizationFacts {
+  auditEventId: string;
+  authentication: { authenticated: boolean; subjectId: string | null };
+  membership: { active: boolean; tenantId: string | null };
+  permissions: string[];
+  decisionAuthorities: string[];
+  onBehalfOf: { tenantId: string; subjectId: string } | null;
+  action: "transition";
+  scope: string;
+  authorizationRef: string;
+  policyRevision: number;
+}
+
+export interface TrustedBlockTransitionAuthorizationContext extends BlockTransitionAuthorizationFacts {
+  provenance: "backend_trusted";
+}
+
 type SnapshotObject = Record<string, unknown>;
 
 const INVALID = Object.freeze({ ok: false, code: "invalid_hosted_agent_presence" } as const);
@@ -135,10 +152,32 @@ const WORKING_AUDIT_KEYS = [
 const WORKING_AUTHORIZATION_KEYS = [
   "action", "allowed", "authorizationId", "authorizationRef", "beneficiary", "policyRevision", "scope", "tenantId"
 ];
+const BLOCKED_INPUT_KEYS = [
+  "assignment", "audit", "authorization", "blockAuthorization", "checkedAt", "generatedAt", "mapping",
+  "profileName", "record", "schemaVersion", "trace"
+];
+const BLOCKED_RECORD_KEYS = [
+  "assignees", "blockReason", "freshness", "recordId", "recordedAt", "revision", "schemaVersion", "source",
+  "state", "stateChangedAt", "tenantId"
+];
+const BLOCK_REASON_KEYS = ["blockedAt", "category", "resolutionAuthority", "summary"];
+const BLOCK_AUDIT_KEYS = [
+  "actor", "auditEventId", "authorizationRef", "changedFields", "eventKind", "newRevision", "occurredAt",
+  "onBehalfOf", "policyRevision", "priorRevision", "reasonRef", "recordId", "recordedAt", "source", "tenantId"
+];
+const FIELD_CHANGE_KEYS = ["after", "before", "field"];
+const BLOCK_AUTHORIZATION_KEYS = [
+  "action", "auditEventId", "authentication", "authorizationRef", "decisionAuthorities", "membership",
+  "onBehalfOf", "permissions", "policyRevision", "provenance", "scope"
+];
+const BLOCK_AUTHORIZATION_FACT_KEYS = BLOCK_AUTHORIZATION_KEYS.filter((key) => key !== "provenance");
+const AUTHENTICATION_KEYS = ["authenticated", "subjectId"];
+const MEMBERSHIP_KEYS = ["active", "tenantId"];
 const SUBJECT_KEYS = ["subjectId", "tenantId"];
 const SOURCE_KEYS = [
   "contractVersion", "observedAt", "occurredAt", "sourceEventId", "sourceId", "sourceRecordId", "tenantId"
 ];
+const trustedBlockTransitionAuthorizationContexts = new WeakSet<object>();
 
 function reject<T>(): HostedPresenceValidationResult<T> {
   return INVALID;
@@ -287,6 +326,10 @@ function isConfigScope(value: unknown): value is string {
 
 function isRevision(value: unknown): value is number {
   return typeof value === "number" && Number.isSafeInteger(value) && !Object.is(value, -0) && value >= 0;
+}
+
+function isPositivePolicyRevision(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 1;
 }
 
 function isPositiveId(value: unknown): value is number {
@@ -609,6 +652,257 @@ export function derivePrivateHostedAgentWorkingPresence(
       reason: null,
       stateChangedAt: record.stateChangedAt as string,
       observedAt: observationValue.observedAt,
+      checkedAt: input.checkedAt as string,
+      recordRef: {
+        recordId: record.recordId as string,
+        href: `/api/private/tenants/${mapping.tenantId}/records/${record.recordId as string}`
+      }
+    }
+  };
+  const detached = snapshotObject(response);
+  if (!detached) return reject();
+  return validatePrivateHostedAgentPresenceResponse(detached, input.generatedAt as string);
+}
+
+function validBlockReason(value: unknown, tenantId: string): value is SnapshotObject {
+  if (value === null || typeof value !== "object" || Array.isArray(value) ||
+      !sameKeys(Object.keys(value), BLOCK_REASON_KEYS)) return false;
+  const reason = value as SnapshotObject;
+  return isClosedString(reason.category) && (reason.category as string).length <= 64 &&
+    isClosedString(reason.summary) && (reason.summary as string).length <= 500 &&
+    isCanonicalUtc(reason.blockedAt) && (reason.resolutionAuthority === null ||
+      validWorkingSubject(reason.resolutionAuthority, tenantId));
+}
+
+function blockReasonAuditValue(reason: SnapshotObject): string {
+  return JSON.stringify({
+    category: reason.category,
+    summary: reason.summary,
+    resolutionAuthority: reason.resolutionAuthority,
+    blockedAt: reason.blockedAt
+  });
+}
+
+function hasExactBlockDelta(value: unknown, reason: SnapshotObject): boolean {
+  if (!Array.isArray(value) || value.length !== 2) return false;
+  const changes = value as unknown[];
+  if (!changes.every((change) => change !== null && typeof change === "object" && !Array.isArray(change) &&
+      sameKeys(Object.keys(change), FIELD_CHANGE_KEYS))) return false;
+  const fields = changes.map((change) => (change as SnapshotObject).field);
+  if (new Set(fields).size !== fields.length) return false;
+  const state = changes.find((change) => (change as SnapshotObject).field === "state") as SnapshotObject | undefined;
+  const blockReason = changes.find((change) =>
+    (change as SnapshotObject).field === "blockReason") as SnapshotObject | undefined;
+  return state?.before === "active" && state.after === "blocked" &&
+    blockReason?.before === null && blockReason.after === blockReasonAuditValue(reason);
+}
+
+function validBlockTransitionAuthorizationFacts(value: unknown): value is SnapshotObject {
+  if (value === null || typeof value !== "object" || Array.isArray(value) ||
+      !sameKeys(Object.keys(value), BLOCK_AUTHORIZATION_FACT_KEYS)) return false;
+  const authorization = value as SnapshotObject;
+  return authorization.action === "transition" && isOpaqueId(authorization.auditEventId) &&
+    isOpaqueId(authorization.scope) && isOpaqueId(authorization.authorizationRef) &&
+    isPositivePolicyRevision(authorization.policyRevision) &&
+    Array.isArray(authorization.permissions) && authorization.permissions.length === 1 &&
+    authorization.permissions[0] === "transition" &&
+    Array.isArray(authorization.decisionAuthorities) && authorization.decisionAuthorities.length === 0 &&
+    (authorization.onBehalfOf === null ||
+      (authorization.onBehalfOf !== null && typeof authorization.onBehalfOf === "object" &&
+        !Array.isArray(authorization.onBehalfOf) &&
+        sameKeys(Object.keys(authorization.onBehalfOf), SUBJECT_KEYS) &&
+        isOpaqueId((authorization.onBehalfOf as SnapshotObject).tenantId) &&
+        isOpaqueId((authorization.onBehalfOf as SnapshotObject).subjectId))) &&
+    authorization.authentication !== null && typeof authorization.authentication === "object" &&
+    !Array.isArray(authorization.authentication) &&
+    sameKeys(Object.keys(authorization.authentication), AUTHENTICATION_KEYS) &&
+    (authorization.authentication as SnapshotObject).authenticated === true &&
+    isOpaqueId((authorization.authentication as SnapshotObject).subjectId) &&
+    authorization.membership !== null && typeof authorization.membership === "object" &&
+    !Array.isArray(authorization.membership) &&
+    sameKeys(Object.keys(authorization.membership), MEMBERSHIP_KEYS) &&
+    (authorization.membership as SnapshotObject).active === true &&
+    isOpaqueId((authorization.membership as SnapshotObject).tenantId);
+}
+
+export function createTrustedBlockTransitionAuthorizationContext(
+  value: unknown
+): HostedPresenceValidationResult<TrustedBlockTransitionAuthorizationContext> {
+  const facts = snapshotWorkingValue(value);
+  if (!validBlockTransitionAuthorizationFacts(facts)) return reject();
+  const context = Object.freeze({
+    ...(facts as SnapshotObject),
+    provenance: "backend_trusted" as const
+  }) as unknown as TrustedBlockTransitionAuthorizationContext;
+  trustedBlockTransitionAuthorizationContexts.add(context);
+  return accept(context);
+}
+
+function isTrustedBlockTransitionAuthorizationContext(
+  value: unknown
+): value is TrustedBlockTransitionAuthorizationContext {
+  return value !== null && typeof value === "object" && !Array.isArray(value) &&
+    trustedBlockTransitionAuthorizationContexts.has(value) &&
+    sameKeys(Object.keys(value), BLOCK_AUTHORIZATION_KEYS) &&
+    (value as SnapshotObject).provenance === "backend_trusted" &&
+    validBlockTransitionAuthorizationFacts(Object.fromEntries(
+      Object.entries(value).filter(([key]) => key !== "provenance")
+    ));
+}
+
+function trustedBlockAuthorizationFromInput(value: unknown): TrustedBlockTransitionAuthorizationContext | null {
+  try {
+    if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
+    const descriptor = Reflect.getOwnPropertyDescriptor(value, "blockAuthorization");
+    if (!descriptor || !descriptor.enumerable || !("value" in descriptor) || descriptor.get !== undefined ||
+        descriptor.set !== undefined || !isTrustedBlockTransitionAuthorizationContext(descriptor.value)) return null;
+    return descriptor.value;
+  } catch {
+    return null;
+  }
+}
+
+export function derivePrivateHostedAgentBlockedPresence(
+  value: unknown
+): HostedPresenceValidationResult<PrivateHostedAgentPresenceResponse> {
+  const trustedBlockAuthorization = trustedBlockAuthorizationFromInput(value);
+  const candidate = snapshotWorkingValue(value);
+  if (candidate === null || typeof candidate !== "object" || Array.isArray(candidate) ||
+      !sameKeys(Object.keys(candidate), BLOCKED_INPUT_KEYS)) return reject();
+  const input = candidate as SnapshotObject;
+  if (input.schemaVersion !== "1.0" || !isConfigScope(input.profileName) || !isCanonicalUtc(input.checkedAt) ||
+      !isCanonicalUtc(input.generatedAt) || time(input.checkedAt as string) > time(input.generatedAt as string)) {
+    return reject();
+  }
+
+  const mappingResult = validateReviewedHostedIdentityMapping(input.mapping, input.checkedAt as string);
+  if (!mappingResult.ok) return reject();
+  const mapping = mappingResult.value;
+  if (input.profileName !== mapping.profileName) return reject();
+  if (mapping.status !== "active") {
+    return accept(workingUnavailable(mapping.tenantId, input.checkedAt as string,
+      input.generatedAt as string, "membership_revoked"));
+  }
+
+  if (input.record === null || typeof input.record !== "object" || Array.isArray(input.record) ||
+      input.assignment === null || typeof input.assignment !== "object" || Array.isArray(input.assignment) ||
+      input.trace === null || typeof input.trace !== "object" || Array.isArray(input.trace) ||
+      input.audit === null || typeof input.audit !== "object" || Array.isArray(input.audit) ||
+      input.authorization === null || typeof input.authorization !== "object" || Array.isArray(input.authorization) ||
+      input.blockAuthorization === null || typeof input.blockAuthorization !== "object" ||
+      Array.isArray(input.blockAuthorization)) {
+    return reject();
+  }
+  const record = input.record as SnapshotObject;
+  const assignment = input.assignment as SnapshotObject;
+  const trace = input.trace as SnapshotObject;
+  const audit = input.audit as SnapshotObject;
+  const authorization = input.authorization as SnapshotObject;
+  const blockAuthorization = input.blockAuthorization as SnapshotObject;
+  if (!sameKeys(Object.keys(record), BLOCKED_RECORD_KEYS) ||
+      !sameKeys(Object.keys(assignment), WORKING_ASSIGNMENT_KEYS) ||
+      !sameKeys(Object.keys(trace), WORKING_TRACE_KEYS) ||
+      !sameKeys(Object.keys(audit), BLOCK_AUDIT_KEYS) ||
+      !sameKeys(Object.keys(authorization), WORKING_AUTHORIZATION_KEYS) ||
+      !sameKeys(Object.keys(blockAuthorization), BLOCK_AUTHORIZATION_KEYS)) return reject();
+  if (trustedBlockAuthorization === null) {
+    return accept(workingUnavailable(mapping.tenantId, input.checkedAt as string,
+      input.generatedAt as string, "record_unavailable"));
+  }
+  const trustedAuthorization = trustedBlockAuthorization as unknown as SnapshotObject;
+
+  if (!isOpaqueId(record.tenantId) || !isOpaqueId(record.recordId) || record.schemaVersion !== "1.0" ||
+      !isRevision(record.revision) || !isCanonicalUtc(record.stateChangedAt) ||
+      !isCanonicalUtc(record.recordedAt) || !hasWorkingAssignee(record.assignees, record.tenantId, mapping.subjectId) ||
+      !validWorkingSource(record.source, record.tenantId) ||
+      !validBlockReason(record.blockReason, record.tenantId) ||
+      !isOpaqueId(assignment.tenantId) || !isOpaqueId(assignment.recordId) ||
+      !isOpaqueId(assignment.authorizationId) || !isRevision(assignment.acceptedRevision) ||
+      !hasWorkingAssignee(assignment.assignees, assignment.tenantId, mapping.subjectId) ||
+      !validWorkingSource(assignment.source, assignment.tenantId) ||
+      !isOpaqueId(trace.tenantId) || !isOpaqueId(trace.recordId) || !isRevision(trace.recordRevision) ||
+      !isOpaqueId(trace.assignmentAuthorizationId) || !isOpaqueId(trace.activityId) ||
+      !isClosedString(trace.hermesTaskId) || !TASK_ID.test(trace.hermesTaskId) ||
+      !isPositiveId(trace.hermesRunId) || !isPositiveId(trace.hermesEventId) ||
+      !isRevision(trace.mappingRevision) || !isPositivePolicyRevision(trace.policyRevision) ||
+      !isOpaqueId(audit.auditEventId) || !isOpaqueId(audit.tenantId) || !isOpaqueId(audit.recordId) ||
+      audit.eventKind !== "block" || !validWorkingSubject(audit.actor, audit.tenantId as string) ||
+      (audit.onBehalfOf !== null && !validWorkingSubject(audit.onBehalfOf, audit.tenantId as string)) ||
+      !isOpaqueId(audit.authorizationRef) ||
+      !isPositivePolicyRevision(audit.policyRevision) || !isRevision(audit.priorRevision) ||
+      !isRevision(audit.newRevision) ||
+      !isCanonicalUtc(audit.occurredAt) || !isCanonicalUtc(audit.recordedAt) ||
+      (audit.reasonRef !== null && !isOpaqueId(audit.reasonRef)) ||
+      !validWorkingSource(audit.source, audit.tenantId as string) ||
+      !hasExactBlockDelta(audit.changedFields, record.blockReason as SnapshotObject) ||
+      !isOpaqueId(authorization.tenantId) || authorization.action !== "assign" ||
+      !isOpaqueId(authorization.authorizationId) || !isOpaqueId(authorization.authorizationRef) ||
+      !isOpaqueId(authorization.scope) ||
+      !validWorkingSubject(authorization.beneficiary, authorization.tenantId as string) ||
+      !isPositivePolicyRevision(authorization.policyRevision) || typeof authorization.allowed !== "boolean" ||
+      !validBlockTransitionAuthorizationFacts(Object.fromEntries(
+        Object.entries(blockAuthorization).filter(([key]) => key !== "provenance")
+      ))) return reject();
+
+  const tenantMatches = [record, assignment, trace, audit, authorization]
+    .every((item) => item.tenantId === mapping.tenantId);
+  const recordMatches = [assignment, trace, audit].every((item) => item.recordId === record.recordId);
+  const sourceMatches = sameWorkingSource(record.source as SnapshotObject, assignment.source as SnapshotObject) &&
+    sameWorkingSource(record.source as SnapshotObject, audit.source as SnapshotObject);
+  const reason = record.blockReason as SnapshotObject;
+  const chronologyValid = time((record.source as SnapshotObject).observedAt as string) <=
+      time(record.recordedAt as string) &&
+    time(record.recordedAt as string) <= time(reason.blockedAt as string) &&
+    time(reason.blockedAt as string) <= time(audit.recordedAt as string) &&
+    time((audit.source as SnapshotObject).observedAt as string) <= time(audit.occurredAt as string) &&
+    time(audit.occurredAt as string) <= time(audit.recordedAt as string) &&
+    record.stateChangedAt === audit.recordedAt &&
+    time(audit.recordedAt as string) <= time(input.checkedAt as string) &&
+    time(input.checkedAt as string) <= time(input.generatedAt as string);
+  const acceptedM3 = record.state === "blocked" && oneOf(record.freshness, ["live", "recent"]) &&
+    record.tenantId === mapping.tenantId && record.revision >= 1 &&
+    audit.priorRevision === record.revision - 1 && audit.newRevision === record.revision &&
+    assignment.acceptedRevision === audit.priorRevision && trace.recordRevision === record.revision &&
+    authorization.authorizationId === assignment.authorizationId &&
+    assignment.authorizationId === trace.assignmentAuthorizationId &&
+    trace.mappingRevision === mapping.registryRevision && authorization.scope === record.recordId &&
+    (authorization.beneficiary as SnapshotObject).subjectId === mapping.subjectId && authorization.allowed === true &&
+    authorization.policyRevision === trace.policyRevision &&
+    (audit.actor as SnapshotObject).subjectId === mapping.subjectId &&
+    (trustedAuthorization.authentication as SnapshotObject).subjectId === (audit.actor as SnapshotObject).subjectId &&
+    (trustedAuthorization.membership as SnapshotObject).tenantId === mapping.tenantId &&
+    (audit.onBehalfOf === null ? trustedAuthorization.onBehalfOf === null :
+      trustedAuthorization.onBehalfOf !== null &&
+      (trustedAuthorization.onBehalfOf as SnapshotObject).tenantId === (audit.onBehalfOf as SnapshotObject).tenantId &&
+      (trustedAuthorization.onBehalfOf as SnapshotObject).subjectId === (audit.onBehalfOf as SnapshotObject).subjectId) &&
+    trustedAuthorization.auditEventId === audit.auditEventId &&
+    trustedAuthorization.scope === record.recordId &&
+    trustedAuthorization.authorizationRef === audit.authorizationRef &&
+    trustedAuthorization.policyRevision === audit.policyRevision && audit.policyRevision === trace.policyRevision;
+
+  if (!tenantMatches || !recordMatches || !sourceMatches || !chronologyValid || !acceptedM3) {
+    return accept(workingUnavailable(mapping.tenantId, input.checkedAt as string,
+      input.generatedAt as string, "record_unavailable"));
+  }
+
+  const response: PrivateHostedAgentPresenceResponse = {
+    schemaVersion: "1.0",
+    tenantId: mapping.tenantId,
+    generatedAt: input.generatedAt as string,
+    presence: {
+      identityId: "stg-spiders",
+      displayName: "Spiders",
+      roleLabel: "Chief Agent",
+      workplace: {
+        id: "stg-chief-agent-office",
+        label: "Chief Agent Office",
+        relationship: "designated"
+      },
+      state: "blocked",
+      freshness: record.freshness as "live" | "recent",
+      reason: null,
+      stateChangedAt: record.stateChangedAt as string,
+      observedAt: audit.recordedAt as string,
       checkedAt: input.checkedAt as string,
       recordRef: {
         recordId: record.recordId as string,
