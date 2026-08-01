@@ -109,6 +109,36 @@ const PRESENCE_KEYS = [
 ];
 const WORKPLACE_KEYS = ["id", "label", "relationship"];
 const RECORD_REF_KEYS = ["href", "recordId"];
+const WORKING_INPUT_KEYS = [
+  "activity", "assignment", "audit", "authorization", "checkedAt", "generatedAt", "mapping", "observation",
+  "record", "schemaVersion", "trace"
+];
+const WORKING_RECORD_KEYS = [
+  "assignees", "freshness", "recordId", "recordedAt", "revision", "schemaVersion", "state", "stateChangedAt",
+  "tenantId"
+];
+const WORKING_ASSIGNMENT_KEYS = [
+  "acceptedRevision", "assignees", "authorizationId", "recordId", "source", "tenantId"
+];
+const WORKING_ACTIVITY_KEYS = [
+  "activityId", "actor", "eventKind", "observedAt", "occurredAt", "recordId", "recordedAt", "source",
+  "tenantId"
+];
+const WORKING_TRACE_KEYS = [
+  "activityId", "assignmentAuthorizationId", "hermesEventId", "hermesRunId", "hermesTaskId", "mappingRevision",
+  "policyRevision", "recordId", "recordRevision", "tenantId"
+];
+const WORKING_AUDIT_KEYS = [
+  "authorizationRef", "eventKind", "newRevision", "occurredAt", "policyRevision", "recordId", "recordedAt",
+  "source", "tenantId"
+];
+const WORKING_AUTHORIZATION_KEYS = [
+  "action", "allowed", "authorizationId", "authorizationRef", "beneficiary", "policyRevision", "scope", "tenantId"
+];
+const SUBJECT_KEYS = ["subjectId", "tenantId"];
+const SOURCE_KEYS = [
+  "contractVersion", "observedAt", "occurredAt", "sourceEventId", "sourceId", "sourceRecordId", "tenantId"
+];
 
 function reject<T>(): HostedPresenceValidationResult<T> {
   return INVALID;
@@ -164,6 +194,77 @@ function snapshotObject(value: unknown, budget = { nodes: 0 }, depth = 0): Snaps
       if (!before || !after || before.enumerable !== after.enumerable ||
           before.configurable !== after.configurable || before.writable !== after.writable ||
           !("value" in after) || !Object.is(before.value, after.value)) return null;
+    }
+    return Object.freeze(snapshot);
+  } catch {
+    return null;
+  }
+}
+
+function snapshotWorkingValue(value: unknown, budget = { nodes: 0 }, depth = 0): unknown | null {
+  try {
+    if (value === null || typeof value !== "object") return value;
+    if (depth > SNAPSHOT_MAX_DEPTH) return null;
+    budget.nodes += 1;
+    if (budget.nodes > SNAPSHOT_MAX_NODES * 2) return null;
+
+    if (Array.isArray(value)) {
+      if (value.length > 8) return null;
+      const firstKeys = Reflect.ownKeys(value);
+      const expectedKeys = [...Array.from({ length: value.length }, (_, index) => String(index)), "length"];
+      if (firstKeys.length !== expectedKeys.length ||
+          firstKeys.some((key, index) => key !== expectedKeys[index])) return null;
+      const descriptors = firstKeys.map((key) => Reflect.getOwnPropertyDescriptor(value, key));
+      if (descriptors.some((descriptor, index) => !descriptor || !("value" in descriptor) ||
+          descriptor.get !== undefined || descriptor.set !== undefined ||
+          (index < value.length ? !descriptor.enumerable : descriptor.enumerable))) return null;
+      const snapshot = [];
+      for (let index = 0; index < value.length; index += 1) {
+        const field = (descriptors[index] as PropertyDescriptor).value;
+        const nested = snapshotWorkingValue(field, budget, depth + 1);
+        if (nested === null && field !== null) return null;
+        snapshot.push(nested);
+      }
+      const secondKeys = Reflect.ownKeys(value);
+      if (secondKeys.length !== firstKeys.length || secondKeys.some((key, index) => key !== firstKeys[index])) {
+        return null;
+      }
+      for (let index = 0; index < firstKeys.length; index += 1) {
+        const before = descriptors[index];
+        const after = Reflect.getOwnPropertyDescriptor(value, firstKeys[index]);
+        if (!before || !after || !("value" in before) || !("value" in after) ||
+            before.enumerable !== after.enumerable || before.configurable !== after.configurable ||
+            before.writable !== after.writable || !Object.is(before.value, after.value)) return null;
+      }
+      return Object.freeze(snapshot);
+    }
+
+    const prototype = Reflect.getPrototypeOf(value);
+    if (prototype !== Object.prototype && prototype !== null) return null;
+    const firstKeys = Reflect.ownKeys(value);
+    if (firstKeys.length > SNAPSHOT_MAX_KEYS || firstKeys.some((key) => typeof key !== "string")) return null;
+    const descriptors = new Map<string, PropertyDescriptor>();
+    for (const key of firstKeys as string[]) {
+      const descriptor = Reflect.getOwnPropertyDescriptor(value, key);
+      if (!descriptor || !descriptor.enumerable || !("value" in descriptor) ||
+          descriptor.get !== undefined || descriptor.set !== undefined) return null;
+      descriptors.set(key, descriptor);
+    }
+    const snapshot: SnapshotObject = {};
+    for (const key of firstKeys as string[]) {
+      const field = descriptors.get(key)?.value;
+      const nested = snapshotWorkingValue(field, budget, depth + 1);
+      if (nested === null && field !== null) return null;
+      snapshot[key] = nested;
+    }
+    const secondKeys = Reflect.ownKeys(value);
+    if (secondKeys.length !== firstKeys.length || secondKeys.some((key, index) => key !== firstKeys[index])) return null;
+    for (const key of firstKeys as string[]) {
+      const before = descriptors.get(key);
+      const after = Reflect.getOwnPropertyDescriptor(value, key);
+      if (!before || !after || !("value" in before) || !("value" in after) ||
+          before.enumerable !== after.enumerable || before.configurable !== after.configurable ||
+          before.writable !== after.writable || !Object.is(before.value, after.value)) return null;
     }
     return Object.freeze(snapshot);
   } catch {
@@ -303,6 +404,221 @@ export function validateHermesPresenceObservation(
     candidate.decisiveEvent as SnapshotObject, candidate.observedAt)) return reject();
 
   return accept(candidate as unknown as HermesPresenceObservation);
+}
+
+function validWorkingSubject(value: unknown, tenantId: string): value is SnapshotObject {
+  return value !== null && typeof value === "object" && !Array.isArray(value) &&
+    sameKeys(Object.keys(value), SUBJECT_KEYS) &&
+    (value as SnapshotObject).tenantId === tenantId && isOpaqueId((value as SnapshotObject).subjectId);
+}
+
+function validWorkingSource(value: unknown, tenantId: string): value is SnapshotObject {
+  if (value === null || typeof value !== "object" || Array.isArray(value) ||
+      !sameKeys(Object.keys(value), SOURCE_KEYS)) return false;
+  const source = value as SnapshotObject;
+  return source.tenantId === tenantId && isOpaqueId(source.sourceId) &&
+    isClosedString(source.sourceRecordId) && source.sourceRecordId.length <= 200 &&
+    isClosedString(source.sourceEventId) && source.sourceEventId.length <= 200 &&
+    isClosedString(source.contractVersion) && source.contractVersion.length <= 32 &&
+    isCanonicalUtc(source.occurredAt) && isCanonicalUtc(source.observedAt) &&
+    time(source.occurredAt as string) <= time(source.observedAt as string);
+}
+
+function sameWorkingSource(left: SnapshotObject, right: SnapshotObject): boolean {
+  return SOURCE_KEYS.every((key) => Object.is(left[key], right[key]));
+}
+
+function hasWorkingAssignee(value: unknown, tenantId: string, subjectId: string): boolean {
+  return Array.isArray(value) && value.length > 0 && value.every((candidate, index) =>
+    validWorkingSubject(candidate, tenantId) &&
+    value.findIndex((other) => validWorkingSubject(other, tenantId) &&
+      other.subjectId === candidate.subjectId) === index) &&
+    value.some((candidate) => validWorkingSubject(candidate, tenantId) && candidate.subjectId === subjectId);
+}
+
+function workingUnavailable(
+  tenantId: string,
+  checkedAt: string,
+  generatedAt: string,
+  reason: PrivateHostedAgentPresence["reason"]
+): PrivateHostedAgentPresenceResponse {
+  const response: PrivateHostedAgentPresenceResponse = {
+    schemaVersion: "1.0",
+    tenantId,
+    generatedAt,
+    presence: {
+      identityId: "stg-spiders",
+      displayName: "Spiders",
+      roleLabel: "Chief Agent",
+      workplace: {
+        id: "stg-chief-agent-office",
+        label: "Chief Agent Office",
+        relationship: "designated"
+      },
+      state: "unavailable",
+      freshness: "unavailable",
+      reason,
+      stateChangedAt: null,
+      observedAt: null,
+      checkedAt,
+      recordRef: null
+    }
+  };
+  return snapshotObject(response) as unknown as PrivateHostedAgentPresenceResponse;
+}
+
+export function derivePrivateHostedAgentWorkingPresence(
+  value: unknown
+): HostedPresenceValidationResult<PrivateHostedAgentPresenceResponse> {
+  const candidate = snapshotWorkingValue(value);
+  if (candidate === null || typeof candidate !== "object" || Array.isArray(candidate) ||
+      !sameKeys(Object.keys(candidate), WORKING_INPUT_KEYS)) return reject();
+  const input = candidate as SnapshotObject;
+  if (input.schemaVersion !== "1.0" || !isCanonicalUtc(input.checkedAt) ||
+      !isCanonicalUtc(input.generatedAt) || time(input.checkedAt as string) > time(input.generatedAt as string)) {
+    return reject();
+  }
+
+  const mappingResult = validateReviewedHostedIdentityMapping(input.mapping, input.checkedAt as string);
+  if (!mappingResult.ok) return reject();
+  const mapping = mappingResult.value;
+  if (mapping.status !== "active") {
+    return accept(workingUnavailable(mapping.tenantId, input.checkedAt as string,
+      input.generatedAt as string, "membership_revoked"));
+  }
+
+  if (input.record === null || typeof input.record !== "object" || Array.isArray(input.record) ||
+      input.assignment === null || typeof input.assignment !== "object" || Array.isArray(input.assignment) ||
+      input.activity === null || typeof input.activity !== "object" || Array.isArray(input.activity) ||
+      input.trace === null || typeof input.trace !== "object" || Array.isArray(input.trace) ||
+      input.audit === null || typeof input.audit !== "object" || Array.isArray(input.audit) ||
+      input.authorization === null || typeof input.authorization !== "object" || Array.isArray(input.authorization)) {
+    return reject();
+  }
+  const record = input.record as SnapshotObject;
+  const assignment = input.assignment as SnapshotObject;
+  const activity = input.activity as SnapshotObject;
+  const trace = input.trace as SnapshotObject;
+  const audit = input.audit as SnapshotObject;
+  const authorization = input.authorization as SnapshotObject;
+  if (!sameKeys(Object.keys(record), WORKING_RECORD_KEYS) ||
+      !sameKeys(Object.keys(assignment), WORKING_ASSIGNMENT_KEYS) ||
+      !sameKeys(Object.keys(activity), WORKING_ACTIVITY_KEYS) ||
+      !sameKeys(Object.keys(trace), WORKING_TRACE_KEYS) ||
+      !sameKeys(Object.keys(audit), WORKING_AUDIT_KEYS) ||
+      !sameKeys(Object.keys(authorization), WORKING_AUTHORIZATION_KEYS)) return reject();
+
+  if (!isOpaqueId(record.tenantId) || !isOpaqueId(record.recordId) || record.schemaVersion !== "1.0" ||
+      !isRevision(record.revision) || !isCanonicalUtc(record.stateChangedAt) ||
+      !isCanonicalUtc(record.recordedAt) || !hasWorkingAssignee(record.assignees, record.tenantId, mapping.subjectId) ||
+      !isOpaqueId(assignment.tenantId) || !isOpaqueId(assignment.recordId) ||
+      !isOpaqueId(assignment.authorizationId) || !isRevision(assignment.acceptedRevision) ||
+      !hasWorkingAssignee(assignment.assignees, assignment.tenantId, mapping.subjectId) ||
+      !validWorkingSource(assignment.source, assignment.tenantId) ||
+      !isOpaqueId(activity.activityId) || !isOpaqueId(activity.tenantId) || !isOpaqueId(activity.recordId) ||
+      !validWorkingSubject(activity.actor, activity.tenantId as string) ||
+      !oneOf(activity.eventKind, ["work_started", "work_performed"]) ||
+      !validWorkingSource(activity.source, activity.tenantId as string) ||
+      !isCanonicalUtc(activity.occurredAt) || !isCanonicalUtc(activity.observedAt) ||
+      !isCanonicalUtc(activity.recordedAt) ||
+      !isOpaqueId(trace.tenantId) || !isOpaqueId(trace.recordId) || !isRevision(trace.recordRevision) ||
+      !isOpaqueId(trace.assignmentAuthorizationId) || !isOpaqueId(trace.activityId) ||
+      !isClosedString(trace.hermesTaskId) || !TASK_ID.test(trace.hermesTaskId) ||
+      !isPositiveId(trace.hermesRunId) || !isPositiveId(trace.hermesEventId) ||
+      !isRevision(trace.mappingRevision) || !isRevision(trace.policyRevision) ||
+      !isOpaqueId(audit.tenantId) || !isOpaqueId(audit.recordId) || audit.eventKind !== "assignment" ||
+      !isOpaqueId(audit.authorizationRef) || !isRevision(audit.policyRevision) || !isRevision(audit.newRevision) ||
+      !isCanonicalUtc(audit.occurredAt) || !isCanonicalUtc(audit.recordedAt) ||
+      !validWorkingSource(audit.source, audit.tenantId as string) ||
+      !isOpaqueId(authorization.tenantId) || authorization.action !== "assign" ||
+      !isOpaqueId(authorization.authorizationId) || !isOpaqueId(authorization.authorizationRef) ||
+      !isOpaqueId(authorization.scope) ||
+      !validWorkingSubject(authorization.beneficiary, authorization.tenantId as string) ||
+      !isRevision(authorization.policyRevision) ||
+      typeof authorization.allowed !== "boolean") return reject();
+
+  const observationRequest = {
+    schemaVersion: "1.0",
+    boardScope: "working_derivation",
+    profileName: mapping.profileName,
+    evaluatedAt: input.checkedAt,
+    mappingRevision: mapping.registryRevision
+  };
+  const observationResult = validateHermesPresenceObservation(input.observation, observationRequest);
+  if (!observationResult.ok) return reject();
+  const observationValue = observationResult.value;
+  const run = observationValue.currentRun;
+  const event = observationValue.decisiveEvent;
+
+  const tenantMatches = [record, assignment, activity, trace, audit, authorization]
+    .every((item) => item.tenantId === mapping.tenantId);
+  const recordMatches = [assignment, activity, trace, audit].every((item) => item.recordId === record.recordId);
+  const sourceMatches = sameWorkingSource(assignment.source as SnapshotObject, activity.source as SnapshotObject) &&
+    sameWorkingSource(assignment.source as SnapshotObject, audit.source as SnapshotObject);
+  const chronologyValid = time(record.stateChangedAt as string) <= time(record.recordedAt as string) &&
+    time(record.stateChangedAt as string) <= time(observationValue.observedAt) &&
+    time(activity.occurredAt as string) <= time(activity.observedAt as string) &&
+    time(activity.observedAt as string) <= time(activity.recordedAt as string) &&
+    time(activity.recordedAt as string) <= time(input.generatedAt as string) &&
+    time(audit.occurredAt as string) <= time(audit.recordedAt as string) &&
+    time(audit.recordedAt as string) <= time(input.generatedAt as string) &&
+    time(record.recordedAt as string) <= time(input.generatedAt as string) &&
+    time(observationValue.observedAt) <= time(input.checkedAt as string);
+  const currentRunMatches = observationValue.sourceStatus === "available" && observationValue.reason === null &&
+    run !== null && event !== null && run.runStatus === "running" && run.outcome === null &&
+    run.claimCurrent === true && run.spawnedEventPresent === true && run.pidLiveness !== "dead" &&
+    trace.hermesTaskId === run.taskId && trace.hermesRunId === run.runId && trace.hermesEventId === event.eventId &&
+    (assignment.source as SnapshotObject).sourceRecordId === run.taskId &&
+    (assignment.source as SnapshotObject).sourceEventId === String(run.runId);
+  const acceptedM3 = record.state === "active" && oneOf(record.freshness, ["live", "recent"]) &&
+    record.tenantId === mapping.tenantId &&
+    assignment.acceptedRevision === record.revision && trace.recordRevision === record.revision &&
+    audit.newRevision === record.revision &&
+    authorization.authorizationId === assignment.authorizationId &&
+    assignment.authorizationId === trace.assignmentAuthorizationId &&
+    activity.activityId === trace.activityId && (activity.actor as SnapshotObject).subjectId === mapping.subjectId &&
+    (activity.source as SnapshotObject).occurredAt === activity.occurredAt &&
+    (activity.source as SnapshotObject).observedAt === activity.observedAt &&
+    trace.mappingRevision === mapping.registryRevision &&
+    authorization.scope === record.recordId &&
+    (authorization.beneficiary as SnapshotObject).subjectId === mapping.subjectId && authorization.allowed === true &&
+    authorization.authorizationRef === audit.authorizationRef && authorization.policyRevision === audit.policyRevision &&
+    audit.policyRevision === trace.policyRevision;
+
+  if (!tenantMatches || !recordMatches || !sourceMatches || !chronologyValid || !currentRunMatches || !acceptedM3) {
+    const reason = !currentRunMatches ? "run_disagreement" : "record_unavailable";
+    return accept(workingUnavailable(mapping.tenantId, input.checkedAt as string,
+      input.generatedAt as string, reason));
+  }
+
+  const response: PrivateHostedAgentPresenceResponse = {
+    schemaVersion: "1.0",
+    tenantId: mapping.tenantId,
+    generatedAt: input.generatedAt as string,
+    presence: {
+      identityId: "stg-spiders",
+      displayName: "Spiders",
+      roleLabel: "Chief Agent",
+      workplace: {
+        id: "stg-chief-agent-office",
+        label: "Chief Agent Office",
+        relationship: "designated"
+      },
+      state: "working",
+      freshness: record.freshness as "live" | "recent",
+      reason: null,
+      stateChangedAt: record.stateChangedAt as string,
+      observedAt: observationValue.observedAt,
+      checkedAt: input.checkedAt as string,
+      recordRef: {
+        recordId: record.recordId as string,
+        href: `/api/private/tenants/${mapping.tenantId}/records/${record.recordId as string}`
+      }
+    }
+  };
+  const detached = snapshotObject(response);
+  if (!detached) return reject();
+  return validatePrivateHostedAgentPresenceResponse(detached, input.generatedAt as string);
 }
 
 function validRecordRef(value: SnapshotObject, tenantId: string): boolean {
