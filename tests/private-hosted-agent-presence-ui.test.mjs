@@ -1,0 +1,550 @@
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import test from "node:test";
+import ts from "typescript";
+
+async function loadClient(fragment) {
+  const source = await readFile(
+    new URL("../src/agents/privateHostedAgentPresence.ts", import.meta.url),
+    "utf8"
+  ).catch(() => "");
+  const transpiled = ts.transpileModule(source, {
+    compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 }
+  }).outputText;
+  return import(`data:text/javascript;base64,${Buffer.from(transpiled).toString("base64")}#${fragment}`);
+}
+
+const TENANT_ID = "id_1111111111111111";
+const SUBJECT_ID = "id_2222222222222222";
+const SESSION_ID = "id_3333333333333333";
+const AUTHORIZATION_REF = "id_4444444444444444";
+const RECORD_ID = "id_5555555555555555";
+
+function authority(overrides = {}) {
+  return {
+    schemaVersion: "1.0",
+    tenantId: TENANT_ID,
+    subjectId: SUBJECT_ID,
+    sessionId: SESSION_ID,
+    mappingRevision: 7,
+    policyRevision: 11,
+    authorizationRef: AUTHORIZATION_REF,
+    membershipActive: true,
+    canReadHostedAgentPresence: true,
+    ...overrides
+  };
+}
+
+function acceptedResponse(overrides = {}) {
+  return {
+    schemaVersion: "1.0",
+    tenantId: TENANT_ID,
+    generatedAt: "2026-07-29T12:05:00.000Z",
+    presence: {
+      identityId: "stg-spiders",
+      displayName: "Spiders",
+      roleLabel: "Chief Agent",
+      workplace: {
+        id: "stg-chief-agent-office",
+        label: "Chief Agent Office",
+        relationship: "designated"
+      },
+      state: "working",
+      freshness: "live",
+      reason: null,
+      stateChangedAt: "2026-07-29T12:01:00.000Z",
+      observedAt: "2026-07-29T12:03:00.000Z",
+      checkedAt: "2026-07-29T12:04:00.000Z",
+      recordRef: {
+        recordId: RECORD_ID,
+        href: `/api/private/tenants/${TENANT_ID}/records/${RECORD_ID}`
+      }
+    },
+    ...overrides
+  };
+}
+
+function deferred() {
+  let resolve;
+  let reject;
+  const promise = new Promise((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
+function assertDeeplyFrozen(value) {
+  if (value === null || typeof value !== "object") return;
+  assert.equal(Object.isFrozen(value), true);
+  for (const nested of Object.values(value)) assertDeeplyFrozen(nested);
+}
+
+const absentBoundary = () => ({
+  refresh: async () => null,
+  getAcceptedPresence: () => null
+});
+
+test("private presence rejects non-primitive authority IDs and negative-zero revisions before loading", async () => {
+  const module = await loadClient("primitive-authority-scalars");
+  const createController = module.createPrivateHostedAgentPresenceController ?? absentBoundary;
+  const malformedAuthorities = [
+    ...["tenantId", "subjectId", "sessionId", "authorizationRef"].map((field) =>
+      authority({ [field]: { toString: () => authority()[field] } })
+    ),
+    authority({ mappingRevision: -0 }),
+    authority({ policyRevision: -0 })
+  ];
+
+  for (const trustedAuthority of malformedAuthorities) {
+    let loadCount = 0;
+    const controller = createController({
+      getTrustedAuthoritySnapshot: () => trustedAuthority,
+      loadPrivatePresence: async () => {
+        loadCount += 1;
+        return acceptedResponse();
+      }
+    });
+
+    assert.equal(await controller.refresh(), null);
+    assert.equal(loadCount, 0, "malformed authority must not begin a private load");
+    assert.equal(controller.getAcceptedPresence(), null);
+  }
+});
+
+test("private presence preserves newer acceptance after stale rejection unless authority is revoked", async () => {
+  const module = await loadClient("stale-rejection");
+  const createController = module.createPrivateHostedAgentPresenceController ?? absentBoundary;
+
+  async function runOverlap(revokeBeforeOlderReject) {
+    const olderPending = deferred();
+    let trustedAuthority = authority();
+    let loadCount = 0;
+    const newerAccepted = acceptedResponse({
+      presence: { ...acceptedResponse().presence, state: "blocked", freshness: "recent" }
+    });
+    const controller = createController({
+      getTrustedAuthoritySnapshot: () => trustedAuthority,
+      loadPrivatePresence: () => {
+        loadCount += 1;
+        return loadCount === 1 ? olderPending.promise : Promise.resolve(newerAccepted);
+      }
+    });
+
+    const olderRefresh = controller.refresh();
+    const newerResult = await controller.refresh();
+    assert.deepEqual(newerResult, newerAccepted);
+    if (revokeBeforeOlderReject) trustedAuthority = authority({ membershipActive: false });
+    olderPending.reject(new Error("private rejected value must not leak"));
+    assert.equal(await olderRefresh, null);
+    return { controller, newerResult };
+  }
+
+  const unchanged = await runOverlap(false);
+  assert.equal(
+    unchanged.controller.getAcceptedPresence(),
+    unchanged.newerResult,
+    "a stale rejection cannot erase a newer accepted result under unchanged authority"
+  );
+
+  const revoked = await runOverlap(true);
+  assert.equal(revoked.controller.getAcceptedPresence(), null, "genuine revocation must clear the newer accepted result");
+});
+
+test("private presence preserves authority-B acceptance after older authority-A resolution", async () => {
+  const module = await loadClient("stale-resolution-after-authority-advance");
+  const createController = module.createPrivateHostedAgentPresenceController ?? absentBoundary;
+  const olderPending = deferred();
+  let trustedAuthority = authority();
+  let loadCount = 0;
+  const newerAccepted = acceptedResponse({
+    presence: { ...acceptedResponse().presence, state: "blocked", freshness: "recent" }
+  });
+  const controller = createController({
+    getTrustedAuthoritySnapshot: () => trustedAuthority,
+    loadPrivatePresence: () => {
+      loadCount += 1;
+      return loadCount === 1 ? olderPending.promise : Promise.resolve(newerAccepted);
+    }
+  });
+
+  const olderRefresh = controller.refresh();
+  trustedAuthority = authority({ mappingRevision: 8 });
+  const newerResult = await controller.refresh();
+  assert.deepEqual(newerResult, newerAccepted);
+  assert.equal(controller.getAcceptedPresence(), newerResult);
+
+  olderPending.resolve(acceptedResponse());
+  assert.equal(await olderRefresh, null);
+  assert.equal(
+    controller.getAcceptedPresence(),
+    newerResult,
+    "an older authority-A resolution cannot erase a newer result accepted under current authority B"
+  );
+});
+
+test("private presence preserves authority-B acceptance after older authority-A rejection", async () => {
+  const module = await loadClient("stale-rejection-after-authority-advance");
+  const createController = module.createPrivateHostedAgentPresenceController ?? absentBoundary;
+  const olderPending = deferred();
+  let trustedAuthority = authority();
+  let loadCount = 0;
+  const newerAccepted = acceptedResponse({
+    presence: { ...acceptedResponse().presence, state: "blocked", freshness: "recent" }
+  });
+  const controller = createController({
+    getTrustedAuthoritySnapshot: () => trustedAuthority,
+    loadPrivatePresence: () => {
+      loadCount += 1;
+      return loadCount === 1 ? olderPending.promise : Promise.resolve(newerAccepted);
+    }
+  });
+
+  const olderRefresh = controller.refresh();
+  trustedAuthority = authority({ mappingRevision: 8 });
+  const newerResult = await controller.refresh();
+  assert.deepEqual(newerResult, newerAccepted);
+  assert.equal(controller.getAcceptedPresence(), newerResult);
+
+  olderPending.reject(new Error("private rejected value must not leak"));
+  assert.equal(await olderRefresh, null);
+  assert.equal(
+    controller.getAcceptedPresence(),
+    newerResult,
+    "an older authority-A rejection cannot erase a newer result accepted under current authority B"
+  );
+});
+
+test("private presence rejects sibling-induced deep mutation during whole-graph snapshot", async () => {
+  const module = await loadClient("whole-graph-snapshot");
+  const createController = module.createPrivateHostedAgentPresenceController ?? absentBoundary;
+  const mutatingResponse = acceptedResponse();
+  const recordRef = mutatingResponse.presence.recordRef;
+  let sourceMutated = false;
+  mutatingResponse.presence.recordRef = new Proxy(recordRef, {
+    ownKeys(target) {
+      sourceMutated = true;
+      mutatingResponse.presence.workplace.label = "MUTATED_DURING_SNAPSHOT";
+      return Reflect.ownKeys(target);
+    }
+  });
+  let loadCount = 0;
+  const controller = createController({
+    getTrustedAuthoritySnapshot: () => authority(),
+    loadPrivatePresence: async () => {
+      loadCount += 1;
+      return loadCount === 1 ? acceptedResponse() : mutatingResponse;
+    }
+  });
+
+  assert.notEqual(await controller.refresh(), null, "fixture setup must accept");
+  assert.equal(await controller.refresh(), null, "mutation anywhere in the source graph must reject the whole value");
+  assert.equal(sourceMutated, true);
+  assert.equal(controller.getAcceptedPresence(), null, "mutation rejection must clear previously accepted state");
+});
+
+test("private presence rejects mutation triggered during final whole-graph verification", async () => {
+  const module = await loadClient("final-whole-graph-verification");
+  const createController = module.createPrivateHostedAgentPresenceController ?? absentBoundary;
+  const mutatingResponse = acceptedResponse();
+  const recordRef = mutatingResponse.presence.recordRef;
+  let ownKeysCalls = 0;
+  mutatingResponse.presence.recordRef = new Proxy(recordRef, {
+    ownKeys(target) {
+      ownKeysCalls += 1;
+      if (ownKeysCalls === 3) {
+        mutatingResponse.presence.workplace.label = "MUTATED_ON_FINAL_RECHECK";
+      }
+      return Reflect.ownKeys(target);
+    }
+  });
+  let loadCount = 0;
+  const controller = createController({
+    getTrustedAuthoritySnapshot: () => authority(),
+    loadPrivatePresence: async () => {
+      loadCount += 1;
+      return loadCount === 1 ? acceptedResponse() : mutatingResponse;
+    }
+  });
+
+  assert.notEqual(await controller.refresh(), null, "fixture setup must accept");
+  const result = await controller.refresh();
+  assert.deepEqual({
+    ownKeysCalls,
+    sourceLabel: mutatingResponse.presence.workplace.label,
+    resultAccepted: result !== null,
+    resultLabel: result?.presence?.workplace?.label ?? null,
+    cacheAccepted: controller.getAcceptedPresence() !== null
+  }, {
+    ownKeysCalls: 3,
+    sourceLabel: "MUTATED_ON_FINAL_RECHECK",
+    resultAccepted: false,
+    resultLabel: null,
+    cacheAccepted: false
+  });
+});
+
+test("private presence rejects a transparent top-level authority proxy before loading", async () => {
+  const module = await loadClient("transparent-authority-proxy");
+  const createController = module.createPrivateHostedAgentPresenceController ?? absentBoundary;
+  let trustedAuthority = authority();
+  let loadCount = 0;
+  const controller = createController({
+    getTrustedAuthoritySnapshot: () => trustedAuthority,
+    loadPrivatePresence: async () => {
+      loadCount += 1;
+      return acceptedResponse();
+    }
+  });
+
+  assert.notEqual(await controller.refresh(), null, "fixture setup must accept");
+  assert.equal(loadCount, 1);
+  const target = authority();
+  trustedAuthority = new Proxy(target, {
+    ownKeys: (candidate) => Reflect.ownKeys(candidate),
+    getOwnPropertyDescriptor: (candidate, property) =>
+      Reflect.getOwnPropertyDescriptor(candidate, property)
+  });
+
+  assert.equal(await controller.refresh(), null);
+  assert.equal(loadCount, 1, "transparent authority proxy must begin zero private loads");
+  assert.equal(controller.getAcceptedPresence(), null, "proxy rejection must clear all prior accepted fields");
+  assert.equal(JSON.stringify(controller.getAcceptedPresence()), "null");
+});
+
+test("private presence clears accepted fields when membership mapping or policy is revoked after await", async () => {
+  const module = await loadClient("membership-revocation");
+  const createController = module.createPrivateHostedAgentPresenceController ?? absentBoundary;
+  const pending = deferred();
+  let trustedAuthority = authority();
+  let loadCount = 0;
+  const controller = createController({
+    getTrustedAuthoritySnapshot: () => trustedAuthority,
+    loadPrivatePresence: () => {
+      loadCount += 1;
+      return pending.promise;
+    }
+  });
+
+  const refresh = controller.refresh();
+  assert.equal(loadCount, 1, "an authorized refresh must begin exactly one private load");
+  trustedAuthority = authority({ membershipActive: false });
+  pending.resolve(acceptedResponse());
+
+  assert.equal(await refresh, null);
+  assert.equal(controller.getAcceptedPresence(), null);
+  assert.equal(JSON.stringify(controller.getAcceptedPresence()), "null");
+
+  const mappingPending = deferred();
+  trustedAuthority = authority();
+  const mappingController = createController({
+    getTrustedAuthoritySnapshot: () => trustedAuthority,
+    loadPrivatePresence: () => mappingPending.promise
+  });
+  const mappingRefresh = mappingController.refresh();
+  trustedAuthority = authority({ mappingRevision: 8 });
+  mappingPending.resolve(acceptedResponse());
+
+  assert.equal(await mappingRefresh, null, "a changed reviewed mapping revision must revoke the in-flight result");
+  assert.equal(mappingController.getAcceptedPresence(), null);
+  assert.equal(JSON.stringify(mappingController.getAcceptedPresence()), "null");
+
+  const policyPending = deferred();
+  trustedAuthority = authority();
+  const policyController = createController({
+    getTrustedAuthoritySnapshot: () => trustedAuthority,
+    loadPrivatePresence: () => policyPending.promise
+  });
+  const policyRefresh = policyController.refresh();
+  trustedAuthority = authority({ policyRevision: 12 });
+  policyPending.resolve(acceptedResponse());
+
+  assert.equal(await policyRefresh, null, "a changed policy revision must revoke the in-flight result");
+  assert.equal(policyController.getAcceptedPresence(), null);
+  assert.equal(JSON.stringify(policyController.getAcceptedPresence()), "null");
+
+  trustedAuthority = authority();
+  const accepted = acceptedResponse();
+  const revokedRefreshPending = deferred();
+  let acceptedLoadCount = 0;
+  const retainingController = createController({
+    getTrustedAuthoritySnapshot: () => trustedAuthority,
+    loadPrivatePresence: () => {
+      acceptedLoadCount += 1;
+      return acceptedLoadCount === 1 ? Promise.resolve(accepted) : revokedRefreshPending.promise;
+    }
+  });
+  const detached = await retainingController.refresh();
+  assert.deepEqual(detached, accepted);
+  assert.notEqual(detached, accepted, "accepted state must be detached from the transport value");
+  assertDeeplyFrozen(detached);
+  assert.equal(retainingController.getAcceptedPresence(), detached);
+
+  const revokedRefresh = retainingController.refresh();
+  trustedAuthority = authority({ membershipActive: false });
+  revokedRefreshPending.resolve(acceptedResponse());
+  assert.equal(await revokedRefresh, null);
+  assert.equal(retainingController.getAcceptedPresence(), null, "revocation must clear the prior accepted cache");
+  assert.equal(JSON.stringify(retainingController.getAcceptedPresence()), "null");
+
+  async function assertRejectedAfterAccepted(rejectedLoader, label) {
+    trustedAuthority = authority();
+    let loads = 0;
+    const rejectingController = createController({
+      getTrustedAuthoritySnapshot: () => trustedAuthority,
+      loadPrivatePresence: () => {
+        loads += 1;
+        return loads === 1 ? Promise.resolve(acceptedResponse()) : rejectedLoader();
+      }
+    });
+    assert.notEqual(await rejectingController.refresh(), null, `${label}: fixture setup must accept`);
+    assert.equal(await rejectingController.refresh(), null, label);
+    assert.equal(rejectingController.getAcceptedPresence(), null, `${label}: prior fields must be cleared`);
+    assert.equal(JSON.stringify(rejectingController.getAcceptedPresence()), "null");
+  }
+
+  await assertRejectedAfterAccepted(
+    () => Promise.resolve({ ...acceptedResponse(), privateSource: "must-not-survive" }),
+    "unknown response keys fail closed"
+  );
+  await assertRejectedAfterAccepted(
+    () => Promise.resolve({
+      ...acceptedResponse(),
+      presence: { ...acceptedResponse().presence, state: "meeting" }
+    }),
+    "malformed response values fail closed"
+  );
+  await assertRejectedAfterAccepted(
+    () => { throw new Error("private rejected value must not leak"); },
+    "synchronous loader exceptions fail closed"
+  );
+  await assertRejectedAfterAccepted(
+    () => Promise.reject(new Error("private rejected value must not leak")),
+    "asynchronous loader exceptions fail closed"
+  );
+
+  const accessorResponse = acceptedResponse();
+  Object.defineProperty(accessorResponse, "generatedAt", {
+    enumerable: true,
+    get() { throw new Error("private accessor text must not leak"); }
+  });
+  await assertRejectedAfterAccepted(
+    () => Promise.resolve(accessorResponse),
+    "accessor-backed responses fail closed"
+  );
+
+  const proxyTarget = acceptedResponse();
+  let proxyMutated = false;
+  const mutatingProxy = new Proxy(proxyTarget, {
+    getOwnPropertyDescriptor(target, property) {
+      if (!proxyMutated) {
+        proxyMutated = true;
+        target.privateSource = "must-not-survive";
+      }
+      return Reflect.getOwnPropertyDescriptor(target, property);
+    }
+  });
+  await assertRejectedAfterAccepted(
+    () => Promise.resolve(mutatingProxy),
+    "proxy-mutating responses fail closed"
+  );
+
+  const descriptorTarget = acceptedResponse();
+  let descriptorMutated = false;
+  const descriptorMutatingProxy = new Proxy(descriptorTarget, {
+    getOwnPropertyDescriptor(target, property) {
+      if (property === "tenantId" && !descriptorMutated) {
+        descriptorMutated = true;
+        target.schemaVersion = "2.0";
+      }
+      return Reflect.getOwnPropertyDescriptor(target, property);
+    }
+  });
+  await assertRejectedAfterAccepted(
+    () => Promise.resolve(descriptorMutatingProxy),
+    "descriptor value mutation during response snapshot fails closed"
+  );
+
+  const authorityTarget = authority();
+  let authorityMutated = false;
+  const mutatingAuthority = new Proxy(authorityTarget, {
+    getOwnPropertyDescriptor(target, property) {
+      if (!authorityMutated) {
+        authorityMutated = true;
+        target.privateSource = "must-not-survive";
+      }
+      return Reflect.getOwnPropertyDescriptor(target, property);
+    }
+  });
+  let authorityProxyLoads = 0;
+  const authorityProxyController = createController({
+    getTrustedAuthoritySnapshot: () => mutatingAuthority,
+    loadPrivatePresence: async () => {
+      authorityProxyLoads += 1;
+      return acceptedResponse();
+    }
+  });
+  assert.equal(await authorityProxyController.refresh(), null, "proxy-mutating authority snapshots fail closed");
+  assert.equal(authorityProxyLoads, 0, "invalid authority must not begin a private load");
+
+  const authorityDescriptorTarget = authority();
+  let schemaDescriptorReads = 0;
+  const authorityDescriptorProxy = new Proxy(authorityDescriptorTarget, {
+    getOwnPropertyDescriptor(target, property) {
+      const descriptor = Reflect.getOwnPropertyDescriptor(target, property);
+      if (property === "schemaVersion") {
+        schemaDescriptorReads += 1;
+        if (schemaDescriptorReads > 1) return { ...descriptor, writable: false };
+      }
+      return descriptor;
+    }
+  });
+  let authorityDescriptorLoads = 0;
+  const authorityDescriptorController = createController({
+    getTrustedAuthoritySnapshot: () => authorityDescriptorProxy,
+    loadPrivatePresence: async () => {
+      authorityDescriptorLoads += 1;
+      return acceptedResponse();
+    }
+  });
+  assert.equal(await authorityDescriptorController.refresh(), null, "authority descriptor mutation fails closed");
+  assert.equal(authorityDescriptorLoads, 0);
+
+  let publishAuthorityReads = 0;
+  const publishRevocationController = createController({
+    getTrustedAuthoritySnapshot: () => {
+      publishAuthorityReads += 1;
+      return publishAuthorityReads < 3 ? authority() : authority({ membershipActive: false });
+    },
+    loadPrivatePresence: async () => acceptedResponse()
+  });
+  assert.equal(
+    await publishRevocationController.refresh(),
+    null,
+    "authority revoked after response normalization and immediately before publish must clear"
+  );
+  assert.equal(publishAuthorityReads, 3);
+
+  const olderPending = deferred();
+  const newerPending = deferred();
+  let overlapLoads = 0;
+  trustedAuthority = authority();
+  const overlapController = createController({
+    getTrustedAuthoritySnapshot: () => trustedAuthority,
+    loadPrivatePresence: () => {
+      overlapLoads += 1;
+      return overlapLoads === 1 ? olderPending.promise : newerPending.promise;
+    }
+  });
+  const olderRefresh = overlapController.refresh();
+  const newerRefresh = overlapController.refresh();
+  const newerAccepted = acceptedResponse({
+    presence: { ...acceptedResponse().presence, state: "blocked", freshness: "recent" }
+  });
+  newerPending.resolve(newerAccepted);
+  const newerResult = await newerRefresh;
+  assert.deepEqual(newerResult, newerAccepted);
+  olderPending.resolve(acceptedResponse());
+  assert.equal(await olderRefresh, null, "an older completion must be rejected as stale-generation");
+  assert.equal(overlapController.getAcceptedPresence(), newerResult, "an older completion cannot replace or clear the newer result");
+});
