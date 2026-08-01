@@ -1516,3 +1516,85 @@ body.city-entered .private-records-access {
     gap: 0.2rem;
   }
 }
+
+.private-hosted-presence-open {
+  min-height: 44px;
+}
+
+#private-hosted-presence-dialog {
+  box-sizing: border-box;
+  width: min(42rem, calc(100vw - 2rem));
+  max-height: calc(100vh - 2rem);
+  overflow: auto;
+  overflow-wrap: anywhere;
+  padding: 1.25rem;
+  border: 1px solid #58737c;
+  border-radius: 0.65rem;
+  background: #10191d;
+  color: #f4f7f8;
+}
+
+.private-hosted-presence-header,
+.private-hosted-presence-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.private-hosted-presence-decoration {
+  color: #8fb3bd;
+}
+
+.private-hosted-presence-fields > div {
+  display: grid;
+  grid-template-columns: minmax(7rem, 0.4fr) minmax(0, 1fr);
+  gap: 0.75rem;
+  padding-block: 0.5rem;
+  border-bottom: 1px solid #2d424a;
+}
+
+.private-hosted-presence-fields dd {
+  margin: 0;
+}
+
+#private-hosted-presence-dialog button,
+#private-hosted-presence-dialog a {
+  box-sizing: border-box;
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  padding: 0.65rem 0.85rem;
+  border: 1px solid #58737c;
+  border-radius: 0.35rem;
+  background: #1b2a30;
+  color: #f4f7f8;
+  font: inherit;
+}
+
+#private-hosted-presence-dialog[data-presentation-mode="kiosk-pi"] .private-hosted-presence-decoration {
+  display: none;
+}
+
+@media (max-width: 640px) {
+  #private-hosted-presence-dialog {
+    width: calc(100vw - 1rem);
+    max-height: calc(100vh - 1rem);
+    padding: 1rem;
+  }
+
+  .private-hosted-presence-fields > div {
+    grid-template-columns: 1fr;
+    gap: 0.2rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #private-hosted-presence-dialog,
+  #private-hosted-presence-dialog * {
+    scroll-behavior: auto;
+    transition: none;
+    animation: none;
+  }
+}

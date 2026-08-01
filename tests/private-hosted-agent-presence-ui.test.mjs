@@ -14,6 +14,28 @@ async function loadClient(fragment) {
   return import(`data:text/javascript;base64,${Buffer.from(transpiled).toString("base64")}#${fragment}`);
 }
 
+async function loadView(fragment) {
+  const source = await readFile(
+    new URL("../src/agents/privateHostedAgentPresenceView.ts", import.meta.url),
+    "utf8"
+  ).catch(() => "");
+  const transpiled = ts.transpileModule(source, {
+    compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 }
+  }).outputText;
+  return import(`data:text/javascript;base64,${Buffer.from(transpiled).toString("base64")}#${fragment}`);
+}
+
+async function loadWorldOperationsSnapshot(fragment) {
+  const source = await readFile(
+    new URL("../src/operations/worldOperationsSnapshot.ts", import.meta.url),
+    "utf8"
+  );
+  const transpiled = ts.transpileModule(source, {
+    compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 }
+  }).outputText;
+  return import(`data:text/javascript;base64,${Buffer.from(transpiled).toString("base64")}#${fragment}`);
+}
+
 const TENANT_ID = "id_1111111111111111";
 const SUBJECT_ID = "id_2222222222222222";
 const SESSION_ID = "id_3333333333333333";
@@ -83,6 +105,306 @@ function assertDeeplyFrozen(value) {
 const absentBoundary = () => ({
   refresh: async () => null,
   getAcceptedPresence: () => null
+});
+
+test("one stationary private Spiders presence shares meaning across world non-spatial mobile zoom reduced motion and kiosk while public output stays zero", async () => {
+  const module = await loadView("stationary-shared-meaning");
+  assert.equal(typeof module.createPrivateHostedAgentPresencePresentation, "function");
+
+  const presentation = module.createPrivateHostedAgentPresencePresentation(acceptedResponse());
+  const expectedSemanticPresence = {
+    identity: "Spiders",
+    role: "Chief Agent",
+    state: "working",
+    freshness: "live",
+    asOf: "2026-07-29T12:03:00.000Z",
+    recordHref: `/api/private/tenants/${TENANT_ID}/records/${RECORD_ID}`
+  };
+
+  assert.equal(presentation.world.occupancyCount, 1);
+  assert.deepEqual(presentation.world.anchor, {
+    id: "stg-chief-agent-office",
+    label: "Chief Agent Office"
+  });
+  assert.equal(presentation.world.stationary, true);
+  assert.deepEqual(presentation.world.semanticPresence, expectedSemanticPresence);
+  assert.equal(
+    presentation.world.semanticPresence,
+    presentation.nonSpatial.semanticPresence,
+    "world and non-spatial output must share one semantic model"
+  );
+  assertDeeplyFrozen(presentation);
+});
+
+test("no accepted private response presents locked unavailable without hosted occupancy", async () => {
+  const module = await loadView("locked-unavailable");
+  const presentation = module.createPrivateHostedAgentPresencePresentation(null);
+
+  assert.equal(presentation.world.occupancyCount, 0);
+  assert.equal(presentation.world.anchor, null);
+  assert.equal(presentation.world.stationary, true);
+  assert.deepEqual(presentation.world.semanticPresence, {
+    identity: "Private hosted presence",
+    role: "Authorized session required",
+    state: "unavailable",
+    freshness: "unavailable",
+    asOf: null,
+    recordHref: null
+  });
+  assert.equal(presentation.world.semanticPresence, presentation.nonSpatial.semanticPresence);
+  assert.equal(JSON.stringify(presentation).includes("Spiders"), false, "a static plaque cannot imply hosted state");
+  assertDeeplyFrozen(presentation);
+});
+
+test("private presentation rejects undefined and missing nested objects without throwing or leaking", async () => {
+  const module = await loadView("missing-presentation-structure");
+  const rejectedValues = [undefined, {}, { presence: {} }, { ...acceptedResponse(), presence: { ...acceptedResponse().presence, workplace: undefined } }];
+
+  for (const rejected of rejectedValues) {
+    const presentation = module.createPrivateHostedAgentPresencePresentation(rejected);
+    assert.equal(presentation.world.occupancyCount, 0);
+    assert.equal(presentation.world.semanticPresence.recordHref, null);
+    assert.doesNotMatch(JSON.stringify(presentation), /undefined|PRIVATE_/);
+  }
+});
+
+test("private presentation catches throwing accessors at every accepted nested path without leaking exception text", async () => {
+  const module = await loadView("throwing-presentation-accessors");
+  const paths = [
+    ["schemaVersion"], ["tenantId"], ["generatedAt"], ["presence"],
+    ...["identityId", "displayName", "roleLabel", "workplace", "state", "freshness", "reason", "stateChangedAt", "observedAt", "checkedAt", "recordRef"].map((key) => ["presence", key]),
+    ...["id", "label", "relationship"].map((key) => ["presence", "workplace", key]),
+    ...["recordId", "href"].map((key) => ["presence", "recordRef", key])
+  ];
+
+  for (const path of paths) {
+    const rejected = acceptedResponse();
+    const parent = path.slice(0, -1).reduce((value, key) => value[key], rejected);
+    Object.defineProperty(parent, path.at(-1), {
+      enumerable: true,
+      get() { throw new Error("PRIVATE_EXCEPTION_TEXT"); }
+    });
+    const presentation = module.createPrivateHostedAgentPresencePresentation(rejected);
+    assert.equal(presentation.world.occupancyCount, 0, path.join("."));
+    assert.equal(presentation.world.semanticPresence.recordHref, null);
+    assert.doesNotMatch(JSON.stringify(presentation), /PRIVATE_EXCEPTION_TEXT/);
+  }
+});
+
+test("private presentation rejects transparent and mutating proxies before validation can render private text", async () => {
+  const module = await loadView("mutating-presentation-proxies");
+  const transparentTarget = acceptedResponse();
+  const transparent = new Proxy(transparentTarget, {
+    ownKeys: (target) => Reflect.ownKeys(target),
+    getOwnPropertyDescriptor: (target, property) => Reflect.getOwnPropertyDescriptor(target, property),
+    getPrototypeOf: (target) => Reflect.getPrototypeOf(target)
+  });
+  const unstableTarget = acceptedResponse();
+  let displayNameDescriptorReads = 0;
+  unstableTarget.presence = new Proxy(unstableTarget.presence, {
+    getOwnPropertyDescriptor(target, property) {
+      const descriptor = Reflect.getOwnPropertyDescriptor(target, property);
+      if (property === "displayName") {
+        displayNameDescriptorReads += 1;
+        return { ...descriptor, value: displayNameDescriptorReads === 1 ? "Spiders" : "PRIVATE_LEAK" };
+      }
+      return descriptor;
+    }
+  });
+  const keyTarget = acceptedResponse();
+  let keyReads = 0;
+  const unstableKeys = new Proxy(keyTarget, {
+    ownKeys(target) {
+      keyReads += 1;
+      return keyReads === 1 ? Reflect.ownKeys(target) : [...Reflect.ownKeys(target), "PRIVATE_LEAK"];
+    }
+  });
+
+  for (const rejected of [transparent, unstableTarget, unstableKeys]) {
+    const presentation = module.createPrivateHostedAgentPresencePresentation(rejected);
+    assert.equal(presentation.world.occupancyCount, 0);
+    assert.equal(presentation.world.semanticPresence.recordHref, null);
+    assert.doesNotMatch(JSON.stringify(presentation), /PRIVATE_LEAK/);
+  }
+});
+
+test("private presentation rejects unknown structure malformed scalars chronology and record paths", async () => {
+  const module = await loadView("closed-presentation-schema");
+  const withPresence = (overrides) => acceptedResponse({ presence: { ...acceptedResponse().presence, ...overrides } });
+  const inherited = Object.assign(Object.create({ future: "PRIVATE_LEAK" }), acceptedResponse());
+  const symbolValue = acceptedResponse();
+  symbolValue[Symbol("PRIVATE_LEAK")] = true;
+  const tooManyKeys = acceptedResponse();
+  for (let index = 0; index < 20; index += 1) tooManyKeys[`future${index}`] = index;
+  const rejectedValues = [
+    { ...acceptedResponse(), future: "PRIVATE_LEAK" },
+    withPresence({ future: "PRIVATE_LEAK" }),
+    withPresence({ workplace: { ...acceptedResponse().presence.workplace, future: "PRIVATE_LEAK" } }),
+    withPresence({ recordRef: { ...acceptedResponse().presence.recordRef, future: "PRIVATE_LEAK" } }),
+    [], withPresence({ workplace: [] }), withPresence({ recordRef: [] }),
+    symbolValue, inherited, new Date(), tooManyKeys,
+    { ...acceptedResponse(), schemaVersion: "2.0" },
+    { ...acceptedResponse(), tenantId: "id_UPPERCASE000000" },
+    { ...acceptedResponse(), generatedAt: "2026-07-29T12:05:00Z" },
+    withPresence({ stateChangedAt: "not-a-time" }),
+    withPresence({ observedAt: "2026-07-29T12:06:00.000Z" }),
+    withPresence({ checkedAt: "2026-07-29T12:02:00.000Z" }),
+    withPresence({ identityId: "stg-private-leak" }),
+    withPresence({ state: "meeting" }),
+    withPresence({ freshness: "stale" }),
+    withPresence({ reason: "PRIVATE_LEAK" }),
+    withPresence({ recordRef: { recordId: "id_bad", href: "PRIVATE_LEAK" } }),
+    withPresence({ recordRef: { recordId: RECORD_ID, href: "https://PRIVATE_LEAK.invalid" } }),
+    withPresence({ recordRef: { recordId: RECORD_ID, href: `/api/private/tenants/id_9999999999999999/records/${RECORD_ID}` } })
+  ];
+
+  for (const rejected of rejectedValues) {
+    const presentation = module.createPrivateHostedAgentPresencePresentation(rejected);
+    assert.equal(presentation.world.occupancyCount, 0);
+    assert.equal(presentation.world.semanticPresence.recordHref, null);
+    assert.doesNotMatch(JSON.stringify(presentation), /PRIVATE_LEAK/);
+  }
+});
+
+test("private presence state updates change semantics without movement or time-driven paths", async () => {
+  const module = await loadView("stationary-state-update");
+  assert.equal(typeof module.createPrivateHostedAgentPresenceViewController, "function");
+  const controller = module.createPrivateHostedAgentPresenceViewController(null);
+
+  const unavailable = controller.getPresentation();
+  const working = controller.updateAcceptedPresence(acceptedResponse());
+  const blocked = controller.updateAcceptedPresence(acceptedResponse({
+    presence: { ...acceptedResponse().presence, state: "blocked", freshness: "recent" }
+  }));
+
+  assert.equal(unavailable.world.occupancyCount, 0);
+  assert.equal(working.world.anchor, blocked.world.anchor, "every accepted state uses the one fixed office anchor");
+  assert.equal(working.world.semanticPresence.state, "working");
+  assert.equal(blocked.world.semanticPresence.state, "blocked");
+  assert.deepEqual(Object.keys(blocked.world).sort(), ["anchor", "occupancyCount", "semanticPresence", "stationary"]);
+  assert.doesNotMatch(
+    JSON.stringify(blocked),
+    /"(?:animation|celebration|interpolation|position|random|timer)"\s*:/i
+  );
+});
+
+test("private presentation controls are keyboard and touch addressable without hover precise movement or color-only meaning", async () => {
+  const module = await loadView("essential-controls");
+  const presentation = module.createPrivateHostedAgentPresencePresentation(acceptedResponse());
+
+  assert.deepEqual(presentation.nonSpatial.operation, {
+    inputModes: ["keyboard", "touch"],
+    requiresPreciseMovement: false,
+    requiresHover: false,
+    colorOnlyMeaning: false
+  });
+  assert.deepEqual(presentation.nonSpatial.controls, [
+    { intent: "open", elementId: "private-hosted-presence-open", kind: "button", minimumTargetCssPixels: 44 },
+    { intent: "refresh-request", elementId: "private-hosted-presence-refresh", kind: "button", minimumTargetCssPixels: 44 },
+    {
+      intent: "record-link",
+      elementId: "private-hosted-presence-record",
+      kind: "link",
+      minimumTargetCssPixels: 44,
+      href: `/api/private/tenants/${TENANT_ID}/records/${RECORD_ID}`
+    },
+    { intent: "close", elementId: "private-hosted-presence-close", kind: "button", minimumTargetCssPixels: 44 }
+  ]);
+  assertDeeplyFrozen(presentation.nonSpatial.operation);
+  assertDeeplyFrozen(presentation.nonSpatial.controls);
+});
+
+test("mobile zoom reduced motion and kiosk preserve semantic fields and essential controls", async () => {
+  const module = await loadView("device-parity");
+  const presentation = module.createPrivateHostedAgentPresencePresentation(acceptedResponse());
+  assert.deepEqual(presentation.nonSpatial.parity, {
+    modes: ["desktop", "mobile-touch", "zoom-200", "reduced-motion", "kiosk-pi"],
+    semanticFields: ["identity", "role", "state", "freshness", "asOf", "recordHref"],
+    essentialControls: ["open", "refresh-request", "record-link", "close"],
+    reflowsAtZoom200: true,
+    motion: "none",
+    kioskDecoration: "reduced"
+  });
+
+  const html = await readFile(new URL("../index.html", import.meta.url), "utf8");
+  for (const id of [
+    "private-hosted-presence-open",
+    "private-hosted-presence-dialog",
+    "private-hosted-presence-identity",
+    "private-hosted-presence-role",
+    "private-hosted-presence-state",
+    "private-hosted-presence-freshness",
+    "private-hosted-presence-as-of",
+    "private-hosted-presence-record",
+    "private-hosted-presence-refresh",
+    "private-hosted-presence-close"
+  ]) assert.match(html, new RegExp(`id="${id}"`), `${id} must remain in the semantic DOM contract`);
+  assert.match(html, /<dialog id="private-hosted-presence-dialog"[^>]*aria-labelledby=/);
+  assert.match(html, /id="private-hosted-presence-refresh" type="button"/);
+  assert.match(html, /id="private-hosted-presence-close" type="button"/);
+
+  const css = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
+  assert.match(css, /#private-hosted-presence-dialog\s*\{[^}]*max-height:[^}]*overflow:\s*auto/s);
+  assert.match(css, /#private-hosted-presence-dialog[^}]*overflow-wrap:\s*anywhere/s);
+  assert.match(css, /#private-hosted-presence-dialog[^}]*min-height:\s*44px/s);
+  assert.match(css, /@media \(max-width: 640px\)[\s\S]*#private-hosted-presence-dialog/);
+  assert.match(css, /@media \(prefers-reduced-motion: reduce\)[\s\S]*#private-hosted-presence-dialog[\s\S]*animation:\s*none/);
+  assert.match(css, /data-presentation-mode="kiosk-pi"/);
+});
+
+test("private presentation fails closed rather than exposing rejected text or external record links", async () => {
+  const module = await loadView("safe-text-and-link");
+  const rejected = acceptedResponse({
+    presence: {
+      ...acceptedResponse().presence,
+      displayName: "<img src=x onerror=alert(1)>",
+      recordRef: { recordId: RECORD_ID, href: "https://untrusted.invalid/private" }
+    }
+  });
+  const presentation = module.createPrivateHostedAgentPresencePresentation(rejected);
+
+  assert.equal(presentation.world.occupancyCount, 0);
+  assert.equal(presentation.nonSpatial.semanticPresence.recordHref, null);
+  assert.doesNotMatch(JSON.stringify(presentation), /img|onerror|untrusted\.invalid/);
+  const source = await readFile(
+    new URL("../src/agents/privateHostedAgentPresenceView.ts", import.meta.url),
+    "utf8"
+  );
+  assert.doesNotMatch(source, /\.innerHTML\b|insertAdjacentHTML|eval\s*\(|new Function/);
+});
+
+test("private presentation leaves the public snapshot plaque-only with zero projected hosted agents", async () => {
+  const [viewModule, worldModule] = await Promise.all([
+    loadView("public-isolation"),
+    loadWorldOperationsSnapshot("public-isolation")
+  ]);
+  const publicSnapshot = worldModule.createWorldOperationsSnapshot({ now: () => 0 });
+  const before = JSON.stringify(publicSnapshot);
+  const presentation = viewModule.createPrivateHostedAgentPresencePresentation(acceptedResponse());
+
+  assert.deepEqual(presentation.isolation, {
+    visibility: "private",
+    publicProjection: "unchanged",
+    publicHostedAgentDelta: 0
+  });
+  assert.equal(JSON.stringify(publicSnapshot), before);
+  assert.deepEqual(publicSnapshot.hostedAgents, {
+    registryStatus: "not_configured",
+    projectedCount: 0,
+    reason: "not_configured"
+  });
+  const publicSpiders = publicSnapshot.publicIdentities.find(({ identityId }) => identityId === "stg-spiders");
+  assert.deepEqual({
+    representation: publicSpiders.representation,
+    temporality: publicSpiders.temporality,
+    availability: publicSpiders.availability,
+    currentWork: publicSpiders.currentWork
+  }, {
+    representation: "plaque_only",
+    temporality: "static",
+    availability: "not_claimed",
+    currentWork: null
+  });
 });
 
 test("private presence rejects non-primitive authority IDs and negative-zero revisions before loading", async () => {

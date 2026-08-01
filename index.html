@@ -236,6 +236,28 @@
       </div>
       <p class="private-records-note">Private fields remain unavailable unless a trusted authenticated session supplies an authorized tenant-scoped read model. This interface does not grant access.</p>
     </dialog>
+    <button id="private-hosted-presence-open" class="private-hosted-presence-open" type="button" hidden>Open private hosted presence</button>
+    <dialog id="private-hosted-presence-dialog" aria-labelledby="private-hosted-presence-title" aria-describedby="private-hosted-presence-status" data-presentation-mode="desktop">
+      <header class="private-hosted-presence-header">
+        <div>
+          <p class="private-hosted-presence-decoration">Chief Agent Office / Private</p>
+          <h2 id="private-hosted-presence-title">Hosted presence</h2>
+        </div>
+        <button id="private-hosted-presence-close" type="button">Close</button>
+      </header>
+      <p id="private-hosted-presence-status" role="status" aria-live="polite">Private hosted presence is unavailable. Authorized access is required.</p>
+      <dl class="private-hosted-presence-fields">
+        <div><dt>Identity</dt><dd id="private-hosted-presence-identity">Private hosted presence</dd></div>
+        <div><dt>Role</dt><dd id="private-hosted-presence-role">Authorized session required</dd></div>
+        <div><dt>State</dt><dd id="private-hosted-presence-state">Unavailable</dd></div>
+        <div><dt>Freshness</dt><dd id="private-hosted-presence-freshness">Unavailable</dd></div>
+        <div><dt>As of</dt><dd id="private-hosted-presence-as-of">Unavailable</dd></div>
+      </dl>
+      <div class="private-hosted-presence-actions">
+        <a id="private-hosted-presence-record" hidden>Open authorized record</a>
+        <button id="private-hosted-presence-refresh" type="button">Request refresh</button>
+      </div>
+    </dialog>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>
