@@ -29,6 +29,12 @@ const testRegExp = RegExp.prototype.test.call.bind(RegExp.prototype.test) as (
   pattern: RegExp,
   value: string
 ) => boolean;
+const parseTimestamp: (value: string) => number = Date.parse;
+const DateConstructor = Date;
+const timestampToISOString = Date.prototype.toISOString.call.bind(
+  Date.prototype.toISOString
+) as (value: Date) => string;
+const isFiniteNumber: (value: unknown) => boolean = Number.isFinite;
 
 function sameKeys(actual: readonly PropertyKey[], expected: readonly string[]): boolean {
   if (actual.length !== expected.length || actual.some((key) => typeof key !== "string")) return false;
@@ -72,8 +78,9 @@ function isIdentifier(value: unknown): value is string {
 
 function isTimestamp(value: unknown): value is string {
   if (typeof value !== "string" || !testRegExp(TIMESTAMP, value)) return false;
-  const parsed = Date.parse(value);
-  return Number.isFinite(parsed) && new Date(parsed).toISOString() === value;
+  const parsed = parseTimestamp(value);
+  return isFiniteNumber(parsed)
+    && timestampToISOString(new DateConstructor(parsed)) === value;
 }
 
 function inspectMeetingReadiness(candidate: unknown): AcceptedMeetingReadiness | null {
@@ -95,7 +102,7 @@ function inspectMeetingReadiness(candidate: unknown): AcceptedMeetingReadiness |
       || lifecycle.state !== "ready"
       || !isTimestamp(lifecycle.preparedAt)
       || !isTimestamp(lifecycle.readyAt)
-      || Date.parse(lifecycle.preparedAt) >= Date.parse(lifecycle.readyAt)
+      || parseTimestamp(lifecycle.preparedAt) >= parseTimestamp(lifecycle.readyAt)
       || outcome === null
       || outcome.state !== "no-outcome-yet"
       || !isIdentifier(outcome.provenanceReference)) {
