@@ -13,6 +13,18 @@ const PRIVATE_HEADERS = Object.freeze({
   "X-Content-Type-Options": "nosniff"
 });
 const NOT_FOUND = Object.freeze({ error: "not_found" });
+const CACHE_KEYS = Object.freeze([
+  "action", "authorizationRef", "mappingRevision", "policyRevision", "projection", "recordId", "schemaVersion",
+  "subjectId", "tenantId"
+]);
+const RESPONSE_KEYS = Object.freeze(["generatedAt", "presence", "schemaVersion", "tenantId"]);
+const PRESENCE_KEYS = Object.freeze([
+  "checkedAt", "displayName", "freshness", "identityId", "observedAt", "reason", "recordRef", "roleLabel",
+  "state", "stateChangedAt", "workplace"
+]);
+const WORKPLACE_KEYS = Object.freeze(["id", "label", "relationship"]);
+const RECORD_REF_KEYS = Object.freeze(["href", "recordId"]);
+const POLICY_VERDICT_KEYS = Object.freeze(["policyRevision", "verdict"]);
 
 function sendJson(response, status, body) {
   const payload = JSON.stringify(body);
@@ -161,17 +173,130 @@ function isCanonicalUtc(value) {
   return Number.isFinite(parsed) && new Date(parsed).toISOString() === value;
 }
 
+function sameKeys(value, expected) {
+  const keys = Object.keys(value).sort();
+  return keys.length === expected.length && keys.every((key, index) => key === expected[index]);
+}
+
+function snapshotClosedValue(value, budget = { nodes: 0 }, depth = 0) {
+  try {
+    if (value === null || typeof value !== "object") return value;
+    if (Array.isArray(value) || depth > 8 || ++budget.nodes > 32) return undefined;
+    const prototype = Reflect.getPrototypeOf(value);
+    if (prototype !== Object.prototype && prototype !== null) return undefined;
+    const keys = Reflect.ownKeys(value);
+    if (keys.length > 32 || keys.some((key) => typeof key !== "string")) return undefined;
+    const descriptors = new Map();
+    for (const key of keys) {
+      const descriptor = Reflect.getOwnPropertyDescriptor(value, key);
+      if (!descriptor || !descriptor.enumerable || !("value" in descriptor) ||
+          descriptor.get !== undefined || descriptor.set !== undefined) return undefined;
+      descriptors.set(key, descriptor);
+    }
+    const snapshot = {};
+    for (const key of keys) {
+      const field = descriptors.get(key).value;
+      const detached = snapshotClosedValue(field, budget, depth + 1);
+      if (detached === undefined) return undefined;
+      snapshot[key] = detached;
+    }
+    const finalKeys = Reflect.ownKeys(value);
+    if (finalKeys.length !== keys.length || finalKeys.some((key, index) => key !== keys[index])) return undefined;
+    for (const key of keys) {
+      const before = descriptors.get(key);
+      const after = Reflect.getOwnPropertyDescriptor(value, key);
+      if (!after || !("value" in after) || before.enumerable !== after.enumerable ||
+          before.configurable !== after.configurable || before.writable !== after.writable ||
+          !Object.is(before.value, after.value)) return undefined;
+    }
+    return Object.freeze(snapshot);
+  } catch {
+    return undefined;
+  }
+}
+
+function validCurrentProjection(value, tenantId, evaluatedAt) {
+  const response = snapshotClosedValue(value);
+  if (!response || typeof response !== "object" || !sameKeys(response, RESPONSE_KEYS) ||
+      response.schemaVersion !== "1.0" || response.tenantId !== tenantId ||
+      !isCanonicalUtc(response.generatedAt) || Date.parse(response.generatedAt) > Date.parse(evaluatedAt) ||
+      !response.presence || typeof response.presence !== "object") return null;
+  const presence = response.presence;
+  if (!sameKeys(presence, PRESENCE_KEYS) || presence.identityId !== "stg-spiders" ||
+      presence.displayName !== "Spiders" || presence.roleLabel !== "Chief Agent" ||
+      !presence.workplace || typeof presence.workplace !== "object" ||
+      !sameKeys(presence.workplace, WORKPLACE_KEYS) || presence.workplace.id !== "stg-chief-agent-office" ||
+      presence.workplace.label !== "Chief Agent Office" || presence.workplace.relationship !== "designated" ||
+      !["working", "blocked", "completed"].includes(presence.state) ||
+      !["live", "recent"].includes(presence.freshness) || presence.reason !== null ||
+      !isCanonicalUtc(presence.stateChangedAt) || !isCanonicalUtc(presence.observedAt) ||
+      !isCanonicalUtc(presence.checkedAt) || Date.parse(presence.stateChangedAt) > Date.parse(presence.observedAt) ||
+      Date.parse(presence.observedAt) > Date.parse(presence.checkedAt) ||
+      Date.parse(presence.checkedAt) > Date.parse(response.generatedAt) ||
+      !presence.recordRef || typeof presence.recordRef !== "object" ||
+      !sameKeys(presence.recordRef, RECORD_REF_KEYS) || !TENANT_ID.test(presence.recordRef.recordId) ||
+      presence.recordRef.href !== `/api/private/tenants/${tenantId}/records/${presence.recordRef.recordId}`) return null;
+  return response;
+}
+
+function retainedAuthorizationFacts(cache) {
+  return Object.freeze({
+    tenantId: cache.tenantId,
+    subjectId: cache.subjectId,
+    mappingRevision: cache.mappingRevision,
+    recordId: cache.recordId,
+    action: cache.action,
+    authorizationRef: cache.authorizationRef,
+    policyRevision: cache.policyRevision
+  });
+}
+
+function sameMapping(left, right) {
+  return left && right && left.schemaVersion === right.schemaVersion && left.tenantId === right.tenantId &&
+    left.subjectId === right.subjectId && left.identityId === right.identityId && left.profileName === right.profileName &&
+    left.registryRevision === right.registryRevision && left.synchronizedAt === right.synchronizedAt &&
+    left.status === right.status;
+}
+
+function unavailablePresence(reason, checkedAt) {
+  return {
+    identityId: "stg-spiders",
+    displayName: "Spiders",
+    roleLabel: "Chief Agent",
+    workplace: {
+      id: "stg-chief-agent-office",
+      label: "Chief Agent Office",
+      relationship: "designated"
+    },
+    state: "unavailable",
+    freshness: "unavailable",
+    reason,
+    stateChangedAt: null,
+    observedAt: null,
+    checkedAt,
+    recordRef: null
+  };
+}
+
 export function createPrivateHostedAgentPresenceApiHandler({
   now,
   resolveTrustedSession,
   resolveTrustedMembership,
   readMappingCandidates,
   installedProfileNames,
-  validateMapping
+  validateMapping,
+  readCurrentPresence,
+  readLastValidatedPresence,
+  authorizeRetainedPresence,
+  evaluateStaleRetention
 }) {
   if (typeof now !== "function" || typeof resolveTrustedSession !== "function" ||
       typeof resolveTrustedMembership !== "function" || typeof readMappingCandidates !== "function" ||
       !Array.isArray(installedProfileNames) || typeof validateMapping !== "function" ||
+      (readCurrentPresence !== undefined && typeof readCurrentPresence !== "function") ||
+      (readLastValidatedPresence !== undefined && typeof readLastValidatedPresence !== "function") ||
+      (authorizeRetainedPresence !== undefined && typeof authorizeRetainedPresence !== "function") ||
+      (evaluateStaleRetention !== undefined && typeof evaluateStaleRetention !== "function") ||
       typeof resolveReviewedHostedIdentityMapping !== "function") {
     throw new TypeError("private hosted-presence dependencies are required");
   }
@@ -193,22 +318,233 @@ export function createPrivateHostedAgentPresenceApiHandler({
         return deny(response);
       }
 
-      const generatedAt = now();
-      if (!isCanonicalUtc(generatedAt)) return deny(response);
+      let checkedAt;
+      try {
+        checkedAt = now();
+      } catch {
+        checkedAt = null;
+      }
+      if (!isCanonicalUtc(checkedAt)) {
+        if (readCurrentPresence === undefined) return deny(response);
+        const closureMappingCandidates = readMappingCandidates({
+          tenantId: membership.tenantId,
+          identityId: "stg-spiders"
+        });
+        let closedAt;
+        try {
+          closedAt = now();
+        } catch {
+          return deny(response);
+        }
+        if (!isCanonicalUtc(closedAt)) return deny(response);
+        const closureMapping = resolveReviewedHostedIdentityMapping({
+          mappingCandidates: closureMappingCandidates,
+          installedProfileNames,
+          evaluatedAt: closedAt,
+          validateMapping
+        });
+        const currentClosureMapping = resolveReviewedHostedIdentityMapping({
+          mappingCandidates: readMappingCandidates({
+            tenantId: membership.tenantId,
+            identityId: "stg-spiders"
+          }),
+          installedProfileNames,
+          evaluatedAt: closedAt,
+          validateMapping
+        });
+        const closureSessionSource = resolveTrustedSession(request);
+        const closureSession = snapshotSession(closureSessionSource);
+        const closureMembership = closureSession &&
+          snapshotMembership(resolveTrustedMembership({ session: closureSessionSource }));
+        if (!sameSession(session, closureSession) || !sameAuthorization(membership, closureMembership) ||
+            !closureMapping.ok || closureMapping.value.tenantId !== membership.tenantId ||
+            closureMapping.value.subjectId !== membership.subjectId || !currentClosureMapping.ok ||
+            !sameMapping(closureMapping.value, currentClosureMapping.value)) return deny(response);
+        return sendJson(response, 200, {
+          schemaVersion: "1.0",
+          tenantId: membership.tenantId,
+          generatedAt: closedAt,
+          presence: unavailablePresence("clock_invalid", closedAt)
+        });
+      }
       const mapping = resolveReviewedHostedIdentityMapping({
         mappingCandidates: readMappingCandidates({ tenantId: membership.tenantId, identityId: "stg-spiders" }),
         installedProfileNames,
-        evaluatedAt: generatedAt,
+        evaluatedAt: checkedAt,
         validateMapping
       });
       if (!mapping.ok || mapping.value.tenantId !== membership.tenantId ||
           mapping.value.subjectId !== membership.subjectId) return deny(response);
+      const mappingStillCurrent = () => {
+        const current = resolveReviewedHostedIdentityMapping({
+          mappingCandidates: readMappingCandidates({ tenantId: membership.tenantId, identityId: "stg-spiders" }),
+          installedProfileNames,
+          evaluatedAt: generatedAt,
+          validateMapping
+        });
+        return current.ok && sameMapping(mapping.value, current.value);
+      };
+      const authorityStillCurrent = () => {
+        const currentSessionSource = resolveTrustedSession(request);
+        const currentSession = snapshotSession(currentSessionSource);
+        if (!sameSession(session, currentSession)) return false;
+        const currentMembership = snapshotMembership(resolveTrustedMembership({ session: currentSessionSource }));
+        return sameAuthorization(membership, currentMembership) && mappingStillCurrent();
+      };
+
+      let generatedAt = checkedAt;
+      let clockValid = true;
+      if (readCurrentPresence !== undefined) {
+        try {
+          const candidate = now();
+          if (isCanonicalUtc(candidate) && Date.parse(checkedAt) <= Date.parse(candidate)) generatedAt = candidate;
+          else clockValid = false;
+        } catch {
+          clockValid = false;
+        }
+      }
 
       const reauthorizedSessionSource = resolveTrustedSession(request);
       const reauthorizedSession = snapshotSession(reauthorizedSessionSource);
       if (!sameSession(session, reauthorizedSession)) return deny(response);
       const reauthorized = snapshotMembership(resolveTrustedMembership({ session: reauthorizedSessionSource }));
       if (!sameAuthorization(membership, reauthorized)) return deny(response);
+      if (readCurrentPresence !== undefined && !mappingStillCurrent()) return deny(response);
+      if (readCurrentPresence !== undefined && !clockValid) {
+        return sendJson(response, 200, {
+          schemaVersion: "1.0",
+          tenantId: membership.tenantId,
+          generatedAt,
+          presence: unavailablePresence("clock_invalid", checkedAt)
+        });
+      }
+      if (readCurrentPresence !== undefined) {
+        let sourceReadCompleted = false;
+        try {
+          const current = await readCurrentPresence(Object.freeze({
+            tenantId: membership.tenantId,
+            subjectId: membership.subjectId,
+            mappingRevision: mapping.value.registryRevision,
+            checkedAt,
+            generatedAt
+          }));
+          sourceReadCompleted = true;
+          if (!authorityStillCurrent()) return deny(response);
+          const fresh = validCurrentProjection(current, membership.tenantId, generatedAt);
+          if (fresh === null || typeof authorizeRetainedPresence !== "function") {
+            return sendJson(response, 200, {
+              schemaVersion: "1.0",
+              tenantId: membership.tenantId,
+              generatedAt,
+              presence: unavailablePresence("source_stale", checkedAt)
+            });
+          }
+          const authorization = Object.freeze({
+            tenantId: membership.tenantId,
+            subjectId: membership.subjectId,
+            mappingRevision: mapping.value.registryRevision,
+            recordId: fresh.presence.recordRef.recordId,
+            action: "read_hosted_agent_presence",
+            authorizationRef: membership.authorizationRef,
+            policyRevision: membership.policyRevision
+          });
+          if (await authorizeRetainedPresence(authorization) !== true) return deny(response);
+          const finalSessionSource = resolveTrustedSession(request);
+          const finalSession = snapshotSession(finalSessionSource);
+          const finalMembership = finalSession && snapshotMembership(resolveTrustedMembership({ session: finalSessionSource }));
+          if (!sameSession(session, finalSession) || !sameAuthorization(membership, finalMembership) ||
+              !mappingStillCurrent() ||
+              await authorizeRetainedPresence(authorization) !== true) return deny(response);
+          const serializationSessionSource = resolveTrustedSession(request);
+          const serializationSession = snapshotSession(serializationSessionSource);
+          const serializationMembership = serializationSession &&
+            snapshotMembership(resolveTrustedMembership({ session: serializationSessionSource }));
+          if (!sameSession(session, serializationSession) ||
+              !sameAuthorization(membership, serializationMembership) || !mappingStillCurrent()) return deny(response);
+          return sendJson(response, 200, fresh);
+        } catch {
+          if (sourceReadCompleted) return deny(response);
+          if (!authorityStillCurrent()) return deny(response);
+          let cache;
+          try {
+            cache = snapshotClosedValue(await readLastValidatedPresence?.());
+          } catch {
+            cache = null;
+          }
+          if (!authorityStillCurrent()) return deny(response);
+          const prior = cache && sameKeys(cache, CACHE_KEYS) && cache.schemaVersion === "1.0" &&
+            cache.tenantId === membership.tenantId && cache.subjectId === membership.subjectId &&
+            cache.mappingRevision === mapping.value.registryRevision && cache.action === "read_hosted_agent_presence" &&
+            cache.authorizationRef === membership.authorizationRef && cache.policyRevision === membership.policyRevision &&
+            TENANT_ID.test(cache.recordId) ? validCurrentProjection(cache.projection, membership.tenantId, checkedAt) : null;
+          if (prior === null || prior.presence.recordRef.recordId !== cache.recordId ||
+              typeof authorizeRetainedPresence !== "function" || typeof evaluateStaleRetention !== "function") {
+            return sendJson(response, 200, {
+              schemaVersion: "1.0",
+              tenantId: membership.tenantId,
+              generatedAt,
+              presence: unavailablePresence("source_stale", checkedAt)
+            });
+          }
+          const authorization = retainedAuthorizationFacts(cache);
+          if (await authorizeRetainedPresence(authorization) !== true) return deny(response);
+          let verdict;
+          try {
+            verdict = snapshotClosedValue(await evaluateStaleRetention(Object.freeze({
+              verdictRequired: "closed",
+              ...authorization,
+              observedAt: prior.presence.observedAt,
+              stateChangedAt: prior.presence.stateChangedAt,
+              checkedAt
+            })));
+          } catch {
+            authorityStillCurrent();
+            return deny(response);
+          }
+          if (!authorityStillCurrent()) return deny(response);
+          if (!verdict || !sameKeys(verdict, POLICY_VERDICT_KEYS) ||
+              !["retain", "expired"].includes(verdict.verdict) ||
+              verdict.policyRevision !== membership.policyRevision) {
+            return sendJson(response, 200, {
+              schemaVersion: "1.0",
+              tenantId: membership.tenantId,
+              generatedAt,
+              presence: unavailablePresence("source_stale", checkedAt)
+            });
+          }
+          const finalSessionSource = resolveTrustedSession(request);
+          const finalSession = snapshotSession(finalSessionSource);
+          const finalMembership = finalSession && snapshotMembership(resolveTrustedMembership({ session: finalSessionSource }));
+          if (!sameSession(session, finalSession) || !sameAuthorization(membership, finalMembership) ||
+              !mappingStillCurrent() ||
+              await authorizeRetainedPresence(authorization) !== true) return deny(response);
+          const serializationSessionSource = resolveTrustedSession(request);
+          const serializationSession = snapshotSession(serializationSessionSource);
+          const serializationMembership = serializationSession &&
+            snapshotMembership(resolveTrustedMembership({ session: serializationSessionSource }));
+          if (!sameSession(session, serializationSession) ||
+              !sameAuthorization(membership, serializationMembership) || !mappingStillCurrent()) return deny(response);
+          if (verdict.verdict === "expired") {
+            return sendJson(response, 200, {
+              schemaVersion: "1.0",
+              tenantId: membership.tenantId,
+              generatedAt,
+              presence: unavailablePresence("source_stale", checkedAt)
+            });
+          }
+          return sendJson(response, 200, {
+            schemaVersion: "1.0",
+            tenantId: membership.tenantId,
+            generatedAt,
+            presence: {
+              ...prior.presence,
+              freshness: "stale",
+              reason: "source_stale",
+              checkedAt
+            }
+          });
+        }
+      }
       return sendJson(response, 200, {
         schemaVersion: "1.0",
         tenantId: membership.tenantId,

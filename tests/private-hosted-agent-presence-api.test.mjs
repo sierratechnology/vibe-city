@@ -7,7 +7,12 @@ import { createPrivateHostedAgentPresenceApiHandler } from "../server/privateHos
 const TENANT_A = "id_1111111111111111";
 const TENANT_B = "id_2222222222222222";
 const SUBJECT_A = "id_3333333333333333";
+const RECORD_A = "id_4444444444444444";
+const STATE_CHANGED_AT = "2026-07-29T12:01:00.000Z";
+const OBSERVED_AT = "2026-07-29T12:03:00.000Z";
+const PRIOR_CHECKED_AT = "2026-07-29T12:04:00.000Z";
 const GENERATED_AT = "2026-07-29T12:05:00.000Z";
+const LATER_GENERATED_AT = "2026-07-29T12:05:01.000Z";
 
 function reviewedMapping(overrides = {}) {
   return {
@@ -29,8 +34,11 @@ function validateMapping(value) {
 
 function boundary({
   session = { authenticated: true, subjectId: SUBJECT_A, sessionId: "synthetic_session" },
+  resolveSession,
   resolveMembership,
-  readMappingCandidates = () => [reviewedMapping()]
+  readMappingCandidates = () => [reviewedMapping()],
+  now = () => GENERATED_AT,
+  ...presenceDependencies
 }) {
   const membership = {
     active: true,
@@ -41,12 +49,13 @@ function boundary({
     policyRevision: 1
   };
   return createPrivateHostedAgentPresenceApiHandler({
-    now: () => GENERATED_AT,
-    resolveTrustedSession: () => session,
+    now,
+    resolveTrustedSession: resolveSession ?? (() => session),
     resolveTrustedMembership: resolveMembership ?? (() => membership),
     readMappingCandidates,
     installedProfileNames: ["synthetic_profile"],
-    validateMapping
+    validateMapping,
+    ...presenceDependencies
   });
 }
 
@@ -159,6 +168,807 @@ function denialMatrixEntry(name, result) {
     body: result.body
   };
 }
+
+function unavailablePresence(reason, checkedAt = GENERATED_AT) {
+  return {
+    identityId: "stg-spiders",
+    displayName: "Spiders",
+    roleLabel: "Chief Agent",
+    workplace: {
+      id: "stg-chief-agent-office",
+      label: "Chief Agent Office",
+      relationship: "designated"
+    },
+    state: "unavailable",
+    freshness: "unavailable",
+    reason,
+    stateChangedAt: null,
+    observedAt: null,
+    checkedAt,
+    recordRef: null
+  };
+}
+
+function workingResponse() {
+  return {
+    schemaVersion: "1.0",
+    tenantId: TENANT_A,
+    generatedAt: PRIOR_CHECKED_AT,
+    presence: {
+      identityId: "stg-spiders",
+      displayName: "Spiders",
+      roleLabel: "Chief Agent",
+      workplace: {
+        id: "stg-chief-agent-office",
+        label: "Chief Agent Office",
+        relationship: "designated"
+      },
+      state: "working",
+      freshness: "live",
+      reason: null,
+      stateChangedAt: STATE_CHANGED_AT,
+      observedAt: OBSERVED_AT,
+      checkedAt: PRIOR_CHECKED_AT,
+      recordRef: {
+        recordId: RECORD_A,
+        href: `/api/private/tenants/${TENANT_A}/records/${RECORD_A}`
+      }
+    }
+  };
+}
+
+function retainedCache(overrides = {}) {
+  return {
+    schemaVersion: "1.0",
+    tenantId: TENANT_A,
+    subjectId: SUBJECT_A,
+    mappingRevision: 7,
+    recordId: RECORD_A,
+    action: "read_hosted_agent_presence",
+    authorizationRef: "synthetic_authorization",
+    policyRevision: 1,
+    projection: workingResponse(),
+    ...overrides
+  };
+}
+
+test("strictly increasing trusted clock samples use checkedAt before generatedAt on the fresh path", async () => {
+  let clockReads = 0;
+  let sourceReads = 0;
+  const freshProjection = {
+    ...workingResponse(),
+    generatedAt: LATER_GENERATED_AT,
+    presence: { ...workingResponse().presence, checkedAt: GENERATED_AT }
+  };
+  const result = await directRequest(boundary({
+    now() {
+      clockReads += 1;
+      return clockReads === 1 ? GENERATED_AT : LATER_GENERATED_AT;
+    },
+    readCurrentPresence(facts) {
+      sourceReads += 1;
+      assert.deepEqual(facts, {
+        tenantId: TENANT_A,
+        subjectId: SUBJECT_A,
+        mappingRevision: 7,
+        checkedAt: GENERATED_AT,
+        generatedAt: LATER_GENERATED_AT
+      });
+      return freshProjection;
+    },
+    authorizeRetainedPresence: () => true
+  }));
+
+  assert.equal(result.status, 200);
+  assert.deepEqual(result.body, freshProjection);
+  assert.deepEqual({ clockReads, sourceReads }, { clockReads: 2, sourceReads: 1 });
+  assert.equal(result.body.presence.state, "working");
+  assert.equal(result.body.presence.freshness, "live");
+  assert.equal(result.body.presence.reason, null);
+});
+
+test("invalid first trusted clock sample closes presence before source reads", async () => {
+  let accessorReads = 0;
+  let coercionReads = 0;
+  const mutatingClock = {
+    [Symbol.toPrimitive]() {
+      coercionReads += 1;
+      this.rejected = GENERATED_AT;
+      throw new Error("sensitive mutating clock text");
+    }
+  };
+  const cases = [
+    ["throwing", () => { throw new Error("sensitive first clock text"); }],
+    ["non-string", () => 0],
+    ["noncanonical", () => "2026-07-29T12:05:00Z"],
+    ["impossible", () => "2026-02-30T12:05:00.000Z"],
+    ["accessor-backed", () => Object.defineProperty({}, "value", {
+      get() {
+        accessorReads += 1;
+        return GENERATED_AT;
+      }
+    })],
+    ["mutating-object", () => mutatingClock]
+  ];
+
+  for (const [name, invalidClock] of cases) {
+    let clockReads = 0;
+    let sourceReads = 0;
+    const result = await directRequest(boundary({
+      now() {
+        clockReads += 1;
+        return clockReads === 1 ? invalidClock() : GENERATED_AT;
+      },
+      readCurrentPresence() {
+        sourceReads += 1;
+        throw new Error("source must not run after invalid first clock sample");
+      }
+    }));
+
+    assert.equal(result.status, 200, name);
+    assert.deepEqual(result.body, {
+      schemaVersion: "1.0",
+      tenantId: TENANT_A,
+      generatedAt: GENERATED_AT,
+      presence: unavailablePresence("clock_invalid")
+    }, name);
+    assert.deepEqual({ clockReads, sourceReads }, { clockReads: 2, sourceReads: 0 }, name);
+    const serialized = JSON.stringify(result);
+    assert.equal(serialized.includes("sensitive"), false, name);
+    assert.equal(serialized.includes("2026-02-30"), false, name);
+    assert.equal(serialized.includes("1970-01-01"), false, name);
+  }
+  assert.deepEqual({ accessorReads, coercionReads }, { accessorReads: 0, coercionReads: 0 });
+  assert.equal(Object.hasOwn(mutatingClock, "rejected"), false);
+});
+
+test("invalid first trusted clock sample denies authority changes during canonical closure", async () => {
+  for (const authorityChange of ["membership", "policy", "session", "mapping"]) {
+    const session = { authenticated: true, subjectId: SUBJECT_A, sessionId: "synthetic_session" };
+    const membership = {
+      active: true,
+      tenantId: TENANT_A,
+      subjectId: SUBJECT_A,
+      permissions: ["read_hosted_agent_presence"],
+      authorizationRef: "synthetic_authorization",
+      policyRevision: 1
+    };
+    let mappingRevision = 7;
+    let clockReads = 0;
+    let mappingReads = 0;
+    let sourceReads = 0;
+    const result = await directRequest(boundary({
+      session,
+      resolveMembership: () => membership,
+      readMappingCandidates() {
+        mappingReads += 1;
+        return [reviewedMapping({ registryRevision: mappingRevision })];
+      },
+      now() {
+        clockReads += 1;
+        if (clockReads === 1) return "sensitive rejected first clock value";
+        if (authorityChange === "membership") membership.active = false;
+        if (authorityChange === "policy") membership.policyRevision = 2;
+        if (authorityChange === "session") session.sessionId = "revoked_session";
+        if (authorityChange === "mapping") mappingRevision = 8;
+        return GENERATED_AT;
+      },
+      readCurrentPresence() {
+        sourceReads += 1;
+        throw new Error("sensitive source exception");
+      }
+    }));
+
+    assert.equal(result.status, 404, authorityChange);
+    assert.deepEqual(result.body, { error: "not_found" }, authorityChange);
+    assert.deepEqual({ clockReads, mappingReads, sourceReads }, {
+      clockReads: 2,
+      mappingReads: 2,
+      sourceReads: 0
+    }, authorityChange);
+    const serialized = JSON.stringify(result);
+    for (const rejectedField of [
+      TENANT_A,
+      "Spiders",
+      RECORD_A,
+      "synthetic_profile",
+      "sensitive rejected first clock value",
+      "sensitive source exception",
+      "task",
+      "run",
+      "pid",
+      "model",
+      "provider"
+    ]) assert.equal(serialized.includes(rejectedField), false, `${authorityChange}:${rejectedField}`);
+  }
+});
+
+test("invalid first clock closure denies authority revoked by the final mapping read", async () => {
+  for (const authorityChange of ["membership", "policy", "session"]) {
+    const session = { authenticated: true, subjectId: SUBJECT_A, sessionId: "synthetic_session" };
+    const membership = {
+      active: true,
+      tenantId: TENANT_A,
+      subjectId: SUBJECT_A,
+      permissions: ["read_hosted_agent_presence"],
+      authorizationRef: "synthetic_authorization",
+      policyRevision: 1
+    };
+    let clockReads = 0;
+    let mappingReads = 0;
+    let sourceReads = 0;
+    const result = await directRequest(boundary({
+      session,
+      resolveMembership: () => membership,
+      readMappingCandidates() {
+        mappingReads += 1;
+        if (mappingReads === 2) {
+          if (authorityChange === "membership") membership.active = false;
+          if (authorityChange === "policy") membership.policyRevision = 2;
+          if (authorityChange === "session") session.sessionId = "revoked_session";
+        }
+        return [reviewedMapping()];
+      },
+      now() {
+        clockReads += 1;
+        return clockReads === 1 ? "sensitive rejected first clock value" : GENERATED_AT;
+      },
+      readCurrentPresence() {
+        sourceReads += 1;
+        throw new Error("sensitive source exception");
+      }
+    }));
+
+    assert.equal(result.status, 404, authorityChange);
+    assert.deepEqual(result.body, { error: "not_found" }, authorityChange);
+    assert.deepEqual({ clockReads, mappingReads, sourceReads }, {
+      clockReads: 2,
+      mappingReads: 2,
+      sourceReads: 0
+    }, authorityChange);
+    const serialized = JSON.stringify(result);
+    for (const forbiddenField of [
+      TENANT_A,
+      SUBJECT_A,
+      RECORD_A,
+      "Spiders",
+      "synthetic_profile",
+      "synthetic_session",
+      "synthetic_authorization",
+      "sensitive rejected first clock value",
+      "sensitive source exception",
+      "task",
+      "run",
+      "pid",
+      "model",
+      "provider"
+    ]) assert.equal(serialized.includes(forbiddenField), false, `${authorityChange}:${forbiddenField}`);
+  }
+});
+
+test("invalid second trusted clock sample denies authority changes before clock-invalid serialization", async () => {
+  for (const authorityChange of ["membership", "policy", "session", "mapping"]) {
+    const session = { authenticated: true, subjectId: SUBJECT_A, sessionId: "synthetic_session" };
+    const membership = {
+      active: true,
+      tenantId: TENANT_A,
+      subjectId: SUBJECT_A,
+      permissions: ["read_hosted_agent_presence"],
+      authorizationRef: "synthetic_authorization",
+      policyRevision: 1
+    };
+    let mappingRevision = 7;
+    let clockReads = 0;
+    let sourceReads = 0;
+    const result = await directRequest(boundary({
+      session,
+      resolveMembership: () => membership,
+      readMappingCandidates: () => [reviewedMapping({ registryRevision: mappingRevision })],
+      now() {
+        clockReads += 1;
+        if (clockReads === 1) return GENERATED_AT;
+        if (authorityChange === "membership") membership.active = false;
+        if (authorityChange === "policy") membership.policyRevision = 2;
+        if (authorityChange === "session") session.sessionId = "revoked_session";
+        if (authorityChange === "mapping") mappingRevision = 8;
+        return "noncanonical rejected clock value";
+      },
+      readCurrentPresence() {
+        sourceReads += 1;
+        throw new Error("source must not run after invalid second clock sample");
+      }
+    }));
+
+    assert.equal(result.status, 404, authorityChange);
+    assert.deepEqual(result.body, { error: "not_found" }, authorityChange);
+    assert.deepEqual({ clockReads, sourceReads }, { clockReads: 2, sourceReads: 0 }, authorityChange);
+    const serialized = JSON.stringify(result);
+    assert.equal(serialized.includes(TENANT_A), false, authorityChange);
+    assert.equal(serialized.includes("Spiders"), false, authorityChange);
+    assert.equal(serialized.includes(RECORD_A), false, authorityChange);
+    assert.equal(serialized.includes("noncanonical rejected clock value"), false, authorityChange);
+    assert.equal(serialized.includes("task"), false, authorityChange);
+    assert.equal(serialized.includes("provider"), false, authorityChange);
+  }
+});
+
+test("fresh presence denies revocation during final awaited authorization", async () => {
+  const membership = {
+    active: true,
+    tenantId: TENANT_A,
+    subjectId: SUBJECT_A,
+    permissions: ["read_hosted_agent_presence"],
+    authorizationRef: "synthetic_authorization",
+    policyRevision: 1
+  };
+  let authorizationReads = 0;
+  const freshProjection = {
+    ...workingResponse(),
+    generatedAt: GENERATED_AT,
+    presence: { ...workingResponse().presence, checkedAt: GENERATED_AT }
+  };
+  const result = await directRequest(boundary({
+    resolveMembership: () => membership,
+    readCurrentPresence: () => freshProjection,
+    authorizeRetainedPresence() {
+      authorizationReads += 1;
+      if (authorizationReads === 2) {
+        membership.active = false;
+        membership.policyRevision = 2;
+      }
+      return true;
+    }
+  }));
+
+  assert.equal(result.status, 404);
+  assert.deepEqual(result.body, { error: "not_found" });
+  assert.equal(authorizationReads, 2);
+  assert.equal(JSON.stringify(result).includes(RECORD_A), false);
+  assert.equal(JSON.stringify(result).includes("working"), false);
+});
+
+test("malformed current-source completion denies authority changes before stale recovery", async () => {
+  for (const authorityChange of ["membership", "policy", "session", "mapping"]) {
+    const session = { authenticated: true, subjectId: SUBJECT_A, sessionId: "synthetic_session" };
+    const membership = {
+      active: true,
+      tenantId: TENANT_A,
+      subjectId: SUBJECT_A,
+      permissions: ["read_hosted_agent_presence"],
+      authorizationRef: "synthetic_authorization",
+      policyRevision: 1
+    };
+    let mappingRevision = 7;
+    let resolveSource;
+    let cacheReads = 0;
+    const pending = directRequest(boundary({
+      session,
+      resolveMembership: () => membership,
+      readMappingCandidates: () => [reviewedMapping({ registryRevision: mappingRevision })],
+      readCurrentPresence: () => new Promise((resolve) => { resolveSource = resolve; }),
+      readLastValidatedPresence() {
+        cacheReads += 1;
+        return retainedCache();
+      },
+      authorizeRetainedPresence: () => true,
+      evaluateStaleRetention: () => ({ verdict: "retain", policyRevision: 1 })
+    }));
+    assert.equal(typeof resolveSource, "function", authorityChange);
+    if (authorityChange === "membership") membership.active = false;
+    if (authorityChange === "policy") membership.policyRevision = 2;
+    if (authorityChange === "session") session.sessionId = "revoked_session";
+    if (authorityChange === "mapping") mappingRevision = 8;
+    resolveSource({});
+
+    const result = await pending;
+    assert.equal(result.status, 404, authorityChange);
+    assert.deepEqual(result.body, { error: "not_found" }, authorityChange);
+    assert.equal(cacheReads, 0, authorityChange);
+    assert.equal(JSON.stringify(result).includes(TENANT_A), false, authorityChange);
+    assert.equal(JSON.stringify(result).includes("Spiders"), false, authorityChange);
+    assert.equal(JSON.stringify(result).includes(RECORD_A), false, authorityChange);
+  }
+});
+
+test("missing and malformed cache completion deny authority changes before policy evaluation", async () => {
+  for (const [cacheOutcome, cacheValue] of [["missing", null], ["malformed", {}]]) {
+    for (const authorityChange of ["membership", "policy", "session", "mapping"]) {
+      const session = { authenticated: true, subjectId: SUBJECT_A, sessionId: "synthetic_session" };
+      const membership = {
+        active: true,
+        tenantId: TENANT_A,
+        subjectId: SUBJECT_A,
+        permissions: ["read_hosted_agent_presence"],
+        authorizationRef: "synthetic_authorization",
+        policyRevision: 1
+      };
+      let mappingRevision = 7;
+      let resolveCache;
+      let policyReads = 0;
+      const pending = directRequest(boundary({
+        session,
+        resolveMembership: () => membership,
+        readMappingCandidates: () => [reviewedMapping({ registryRevision: mappingRevision })],
+        readCurrentPresence() {
+          throw new Error("synthetic source outage");
+        },
+        readLastValidatedPresence: () => new Promise((resolve) => { resolveCache = resolve; }),
+        authorizeRetainedPresence: () => true,
+        evaluateStaleRetention() {
+          policyReads += 1;
+          return { verdict: "retain", policyRevision: 1 };
+        }
+      }));
+      const label = `${cacheOutcome}:${authorityChange}`;
+      assert.equal(typeof resolveCache, "function", label);
+      if (authorityChange === "membership") membership.active = false;
+      if (authorityChange === "policy") membership.policyRevision = 2;
+      if (authorityChange === "session") session.sessionId = "revoked_session";
+      if (authorityChange === "mapping") mappingRevision = 8;
+      resolveCache(cacheValue);
+
+      const result = await pending;
+      assert.equal(result.status, 404, label);
+      assert.deepEqual(result.body, { error: "not_found" }, label);
+      assert.equal(policyReads, 0, label);
+      assert.equal(JSON.stringify(result).includes(TENANT_A), false, label);
+      assert.equal(JSON.stringify(result).includes("Spiders"), false, label);
+      assert.equal(JSON.stringify(result).includes(RECORD_A), false, label);
+    }
+  }
+});
+
+test("malformed closed and rejected stale-policy completion deny authority changes", async () => {
+  for (const policyOutcome of ["malformed", "closed", "rejected"]) {
+    for (const authorityChange of ["membership", "policy", "session", "mapping"]) {
+      const session = { authenticated: true, subjectId: SUBJECT_A, sessionId: "synthetic_session" };
+      const membership = {
+        active: true,
+        tenantId: TENANT_A,
+        subjectId: SUBJECT_A,
+        permissions: ["read_hosted_agent_presence"],
+        authorizationRef: "synthetic_authorization",
+        policyRevision: 1
+      };
+      let mappingRevision = 7;
+      let settlePolicy;
+      let signalPolicyStarted;
+      const policyStarted = new Promise((resolve) => { signalPolicyStarted = resolve; });
+      let sessionReads = 0;
+      let membershipReads = 0;
+      const pending = directRequest(boundary({
+        resolveSession() {
+          sessionReads += 1;
+          return session;
+        },
+        resolveMembership() {
+          membershipReads += 1;
+          return membership;
+        },
+        readMappingCandidates: () => [reviewedMapping({ registryRevision: mappingRevision })],
+        readCurrentPresence() {
+          throw new Error("synthetic source outage");
+        },
+        readLastValidatedPresence: () => retainedCache(),
+        authorizeRetainedPresence: () => true,
+        evaluateStaleRetention: () => new Promise((resolve, reject) => {
+          settlePolicy = policyOutcome === "rejected" ? reject : resolve;
+          signalPolicyStarted();
+        })
+      }));
+      const label = `${policyOutcome}:${authorityChange}`;
+      await policyStarted;
+      assert.equal(typeof settlePolicy, "function", label);
+      const sessionReadsBeforeCompletion = sessionReads;
+      const readsBeforeCompletion = membershipReads;
+      if (authorityChange === "membership") membership.active = false;
+      if (authorityChange === "policy") membership.policyRevision = 2;
+      if (authorityChange === "session") session.sessionId = "revoked_session";
+      if (authorityChange === "mapping") mappingRevision = 8;
+      if (policyOutcome === "malformed") settlePolicy({});
+      if (policyOutcome === "closed") settlePolicy({ verdict: "closed", policyRevision: 1 });
+      if (policyOutcome === "rejected") settlePolicy(new Error("sensitive stale-policy rejection"));
+
+      const result = await pending;
+      assert.equal(result.status, 404, label);
+      assert.deepEqual(result.body, { error: "not_found" }, label);
+      assert.equal(sessionReads > sessionReadsBeforeCompletion, true, label);
+      if (authorityChange !== "session") assert.equal(membershipReads > readsBeforeCompletion, true, label);
+      assert.equal(JSON.stringify(result).includes(TENANT_A), false, label);
+      assert.equal(JSON.stringify(result).includes("Spiders"), false, label);
+      assert.equal(JSON.stringify(result).includes(RECORD_A), false, label);
+      assert.equal(JSON.stringify(result).includes("sensitive"), false, label);
+    }
+  }
+});
+
+test("retained and expired presence deny authority changes during final awaited authorization", async () => {
+  for (const verdict of ["retain", "expired"]) {
+    for (const authorityChange of ["membership", "policy", "session", "mapping"]) {
+      const session = { authenticated: true, subjectId: SUBJECT_A, sessionId: "synthetic_session" };
+      const membership = {
+        active: true,
+        tenantId: TENANT_A,
+        subjectId: SUBJECT_A,
+        permissions: ["read_hosted_agent_presence"],
+        authorizationRef: "synthetic_authorization",
+        policyRevision: 1
+      };
+      let mappingRevision = 7;
+      let authorizationReads = 0;
+      const result = await directRequest(boundary({
+        session,
+        resolveMembership: () => membership,
+        readMappingCandidates: () => [reviewedMapping({ registryRevision: mappingRevision })],
+        readCurrentPresence() {
+          throw new Error("synthetic source outage");
+        },
+        readLastValidatedPresence: () => retainedCache(),
+        authorizeRetainedPresence() {
+          authorizationReads += 1;
+          if (authorizationReads === 2) {
+            if (authorityChange === "membership") membership.active = false;
+            if (authorityChange === "policy") membership.policyRevision = 2;
+            if (authorityChange === "session") session.sessionId = "revoked_session";
+            if (authorityChange === "mapping") mappingRevision = 8;
+          }
+          return true;
+        },
+        evaluateStaleRetention: () => ({ verdict, policyRevision: 1 })
+      }));
+
+      assert.equal(result.status, 404, `${verdict}:${authorityChange}`);
+      assert.deepEqual(result.body, { error: "not_found" }, `${verdict}:${authorityChange}`);
+      assert.equal(authorizationReads, 2, `${verdict}:${authorityChange}`);
+      assert.equal(JSON.stringify(result).includes(RECORD_A), false, `${verdict}:${authorityChange}`);
+      assert.equal(JSON.stringify(result).includes("working"), false, `${verdict}:${authorityChange}`);
+    }
+  }
+});
+
+test("clock failure clears presence and source failure retains only authorized last-valid state until policy expiry", async () => {
+  let clockReads = 0;
+  let sourceReads = 0;
+  const result = await directRequest(boundary({
+    now() {
+      clockReads += 1;
+      if (clockReads === 1) return GENERATED_AT;
+      throw new Error("sensitive clock failure text");
+    },
+    readCurrentPresence() {
+      sourceReads += 1;
+      throw new Error("source must not run after clock failure");
+    }
+  }));
+
+  assert.equal(result.status, 200);
+  assert.deepEqual(result.body, {
+    schemaVersion: "1.0",
+    tenantId: TENANT_A,
+    generatedAt: GENERATED_AT,
+    presence: unavailablePresence("clock_invalid")
+  });
+  assert.deepEqual({ clockReads, sourceReads }, { clockReads: 2, sourceReads: 0 });
+  assert.equal(JSON.stringify(result).includes("sensitive clock failure text"), false);
+  assert.equal(JSON.stringify(result).includes("1970-01-01"), false);
+
+  const authorizationChecks = [];
+  const policyChecks = [];
+  const retained = await directRequest(boundary({
+    readCurrentPresence() {
+      throw new Error("sensitive source failure text");
+    },
+    readLastValidatedPresence: () => retainedCache(),
+    authorizeRetainedPresence(facts) {
+      authorizationChecks.push(facts);
+      return true;
+    },
+    evaluateStaleRetention(facts) {
+      policyChecks.push(facts);
+      return { verdict: "retain", policyRevision: 1 };
+    }
+  }));
+
+  assert.equal(retained.status, 200);
+  assert.deepEqual(retained.body, {
+    schemaVersion: "1.0",
+    tenantId: TENANT_A,
+    generatedAt: GENERATED_AT,
+    presence: {
+      ...workingResponse().presence,
+      freshness: "stale",
+      reason: "source_stale",
+      checkedAt: GENERATED_AT
+    }
+  });
+  assert.equal(authorizationChecks.length, 2);
+  assert.deepEqual(authorizationChecks[0], {
+    tenantId: TENANT_A,
+    subjectId: SUBJECT_A,
+    mappingRevision: 7,
+    recordId: RECORD_A,
+    action: "read_hosted_agent_presence",
+    authorizationRef: "synthetic_authorization",
+    policyRevision: 1
+  });
+  assert.deepEqual(policyChecks, [{
+    verdictRequired: "closed",
+    tenantId: TENANT_A,
+    subjectId: SUBJECT_A,
+    mappingRevision: 7,
+    recordId: RECORD_A,
+    action: "read_hosted_agent_presence",
+    authorizationRef: "synthetic_authorization",
+    policyRevision: 1,
+    observedAt: OBSERVED_AT,
+    stateChangedAt: STATE_CHANGED_AT,
+    checkedAt: GENERATED_AT
+  }]);
+  assert.equal(JSON.stringify(retained).includes("sensitive source failure text"), false);
+
+  let expiryAuthorizationChecks = 0;
+  const expired = await directRequest(boundary({
+    readCurrentPresence() {
+      throw new Error("synthetic source outage");
+    },
+    readLastValidatedPresence: () => retainedCache(),
+    authorizeRetainedPresence() {
+      expiryAuthorizationChecks += 1;
+      return true;
+    },
+    evaluateStaleRetention: () => ({ verdict: "expired", policyRevision: 1 })
+  }));
+  assert.equal(expired.status, 200);
+  assert.deepEqual(expired.body, {
+    schemaVersion: "1.0",
+    tenantId: TENANT_A,
+    generatedAt: GENERATED_AT,
+    presence: unavailablePresence("source_stale")
+  });
+  assert.equal(expiryAuthorizationChecks, 2);
+  assert.equal(JSON.stringify(expired).includes(RECORD_A), false);
+
+  const recoveredProjection = {
+    ...workingResponse(),
+    generatedAt: GENERATED_AT,
+    presence: { ...workingResponse().presence, checkedAt: GENERATED_AT }
+  };
+  const recovered = await directRequest(boundary({
+    readCurrentPresence: () => recoveredProjection,
+    readLastValidatedPresence: () => retainedCache({
+      projection: {
+        ...workingResponse(),
+        presence: { ...workingResponse().presence, state: "blocked" }
+      }
+    }),
+    authorizeRetainedPresence: () => true,
+    evaluateStaleRetention: () => ({ verdict: "retain", policyRevision: 1 })
+  }));
+  assert.equal(recovered.status, 200);
+  assert.deepEqual(recovered.body, recoveredProjection);
+  assert.equal(recovered.body.presence.state, "working");
+  assert.equal(recovered.body.presence.freshness, "live");
+
+  let recoveryAuthorizationReads = 0;
+  const failedRecoveryAuthorization = await directRequest(boundary({
+    readCurrentPresence: () => recoveredProjection,
+    readLastValidatedPresence: () => retainedCache(),
+    authorizeRetainedPresence() {
+      recoveryAuthorizationReads += 1;
+      if (recoveryAuthorizationReads === 1) throw new Error("private recovery authorization failure");
+      return true;
+    },
+    evaluateStaleRetention: () => ({ verdict: "retain", policyRevision: 1 })
+  }));
+  assert.equal(failedRecoveryAuthorization.status, 404);
+  assert.deepEqual(failedRecoveryAuthorization.body, { error: "not_found" });
+  assert.equal(recoveryAuthorizationReads, 1);
+
+  let mappingReads = 0;
+  const mappingDrift = await directRequest(boundary({
+    readMappingCandidates() {
+      mappingReads += 1;
+      return [reviewedMapping({ registryRevision: mappingReads === 1 ? 7 : 8 })];
+    },
+    readCurrentPresence() {
+      throw new Error("synthetic source outage");
+    },
+    readLastValidatedPresence: () => retainedCache(),
+    authorizeRetainedPresence: () => true,
+    evaluateStaleRetention: () => ({ verdict: "retain", policyRevision: 1 })
+  }));
+  assert.equal(mappingDrift.status, 404);
+  assert.deepEqual(mappingDrift.body, { error: "not_found" });
+  assert.equal(mappingReads, 2);
+
+  const boundaryTable = [];
+  for (const [name, invalidClock] of [
+    ["clock-throw", () => { throw new Error("private clock throw"); }],
+    ["clock-non-string", () => 0],
+    ["clock-noncanonical", () => "2026-07-29T12:05:00Z"],
+    ["clock-impossible", () => "2026-02-30T12:05:00.000Z"],
+    ["clock-accessor-backed", () => Object.defineProperty({}, "value", { get: () => GENERATED_AT })]
+  ]) {
+    let reads = 0;
+    const clockResult = await directRequest(boundary({
+      now() {
+        reads += 1;
+        return reads === 1 ? GENERATED_AT : invalidClock();
+      },
+      readCurrentPresence() {
+        throw new Error("must not read source");
+      }
+    }));
+    assert.equal(clockResult.status, 200);
+    assert.deepEqual(clockResult.body.presence, unavailablePresence("clock_invalid"));
+    boundaryTable.push({ name, status: clockResult.status, reason: clockResult.body.presence.reason });
+  }
+
+  const closedCacheCases = [
+    ["no-cache", null],
+    ["unknown-cache-field", retainedCache({ sourceId: "private_source" })],
+    ["chronology-contradiction", retainedCache({
+      projection: {
+        ...workingResponse(),
+        presence: { ...workingResponse().presence, observedAt: "2026-07-29T12:00:00.000Z" }
+      }
+    })]
+  ];
+  let getterReads = 0;
+  const getterCache = retainedCache();
+  Object.defineProperty(getterCache, "projection", {
+    enumerable: true,
+    get() {
+      getterReads += 1;
+      return workingResponse();
+    }
+  });
+  closedCacheCases.push(["accessor-cache", getterCache]);
+  for (const [name, cache] of closedCacheCases) {
+    const closed = await directRequest(boundary({
+      readCurrentPresence() {
+        throw new Error("private source failure");
+      },
+      readLastValidatedPresence: () => cache,
+      authorizeRetainedPresence: () => true,
+      evaluateStaleRetention: () => ({ verdict: "retain", policyRevision: 1 })
+    }));
+    assert.equal(closed.status, 200);
+    assert.deepEqual(closed.body.presence, unavailablePresence("source_stale"));
+    assert.equal(JSON.stringify(closed).includes("private_"), false);
+    boundaryTable.push({ name, status: closed.status, reason: closed.body.presence.reason });
+  }
+  assert.equal(getterReads, 0);
+
+  let policyMembershipReads = 0;
+  const policyDrift = await directRequest(boundary({
+    resolveMembership() {
+      policyMembershipReads += 1;
+      return {
+        active: true,
+        tenantId: TENANT_A,
+        subjectId: SUBJECT_A,
+        permissions: ["read_hosted_agent_presence"],
+        authorizationRef: "synthetic_authorization",
+        policyRevision: policyMembershipReads < 3 ? 1 : 2
+      };
+    },
+    readCurrentPresence() {
+      throw new Error("synthetic source outage");
+    },
+    readLastValidatedPresence: () => retainedCache(),
+    authorizeRetainedPresence: () => true,
+    evaluateStaleRetention: () => ({ verdict: "retain", policyRevision: 1 })
+  }));
+  assert.equal(policyDrift.status, 404);
+  assert.deepEqual(policyDrift.body, { error: "not_found" });
+  boundaryTable.push({ name: "policy-drift", status: policyDrift.status, reason: null });
+  boundaryTable.push({ name: "mapping-drift", status: mappingDrift.status, reason: null });
+  boundaryTable.push({ name: "authorized-retained", status: retained.status, reason: retained.body.presence.reason });
+  boundaryTable.push({ name: "expired", status: expired.status, reason: expired.body.presence.reason });
+  boundaryTable.push({ name: "recovery", status: recovered.status, reason: recovered.body.presence.reason });
+  console.log(`PRIVATE_PRESENCE_CLOCK_STALE_BOUNDARY ${JSON.stringify(boundaryTable)}`);
+});
 
 test("private presence route denies wrong tenant direct ID alternate route and revoked membership identically", async () => {
   const context = await fixture();
