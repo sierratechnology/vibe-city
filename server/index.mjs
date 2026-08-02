@@ -2,11 +2,20 @@ import { createReadStream, existsSync, mkdirSync, statSync } from "node:fs";
 import { createServer } from "node:http";
 import { dirname, extname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import { isProxy } from "node:util/types";
+import { createPrivateMeetingSessionsRepository } from "./privateMeetingSessions.mjs";
+import { createPrivateMeetingSessionsApiHandler } from "./privateMeetingSessionsApi.mjs";
 import { createWorkRecordsApiHandler } from "./workRecordsApi.mjs";
 import { WorkRecordStore } from "./workRecords.mjs";
 
+const objectGetOwnPropertyDescriptors = Object.getOwnPropertyDescriptors;
+const objectGetPrototypeOf = Object.getPrototypeOf;
+const objectPrototype = Object.prototype;
+const reflectOwnKeys = Reflect.ownKeys;
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "::1", "localhost"]);
+const PRIVATE_MEETING_SESSIONS_ROUTE = /^\/api\/private\/tenants\/[^/]+\/meeting-sessions(?:\/[^/]+(?:\/(?:history|end))?)?$/;
+const PRIVATE_MEETING_SESSIONS_NAMESPACE = /^\/api\/private\/tenants\/[^/]+\/meeting-sessions(?:\/|%2[fF]|$)/;
 const MIME_TYPES = new Map([
   [".css", "text/css; charset=utf-8"],
   [".html", "text/html; charset=utf-8"],
@@ -29,6 +38,52 @@ function serveFile(response, path) {
     "x-content-type-options": "nosniff"
   });
   createReadStream(path).pipe(response);
+}
+
+function denyPrivateMeetingRoute(response) {
+  const payload = JSON.stringify({ error: "not_found" });
+  response.writeHead(404, {
+    "cache-control": "private, no-store",
+    "content-length": Buffer.byteLength(payload),
+    "content-type": "application/json; charset=utf-8",
+    vary: "Authorization",
+    "x-content-type-options": "nosniff"
+  });
+  response.end(payload);
+}
+
+function composePrivateMeetingSessions(input) {
+  let repository;
+  try {
+    if (input === null || typeof input !== "object" || isProxy(input) || objectGetPrototypeOf(input) !== objectPrototype) return null;
+    const keys = ["databasePath", "now", "resolveTrustedSession", "resolveTrustedMembership", "evaluatePolicy"];
+    const descriptors = objectGetOwnPropertyDescriptors(input);
+    if (reflectOwnKeys(input).length !== keys.length) return null;
+    for (const key of keys) {
+      const descriptor = descriptors[key];
+      if (!descriptor || !("value" in descriptor) || !descriptor.enumerable) return null;
+    }
+    const databasePath = descriptors.databasePath.value;
+    const now = descriptors.now.value;
+    const resolveTrustedSession = descriptors.resolveTrustedSession.value;
+    const resolveTrustedMembership = descriptors.resolveTrustedMembership.value;
+    const evaluatePolicy = descriptors.evaluatePolicy.value;
+    if (typeof databasePath !== "string" || databasePath.length === 0 ||
+        typeof now !== "function" || typeof resolveTrustedSession !== "function" ||
+        typeof resolveTrustedMembership !== "function" || typeof evaluatePolicy !== "function") return null;
+    repository = createPrivateMeetingSessionsRepository(databasePath);
+    const handler = createPrivateMeetingSessionsApiHandler({
+      repository,
+      now,
+      resolveTrustedSession,
+      resolveTrustedMembership,
+      evaluatePolicy
+    });
+    return { handler, repository };
+  } catch {
+    if (repository) repository.close();
+    return null;
+  }
 }
 
 function createProductionHandler() {
@@ -55,46 +110,90 @@ export async function startWorkRecordsServer({
   host = process.env.VIBE_WORK_RECORD_HOST ?? "127.0.0.1",
   port = safePort(process.env.VIBE_WORK_RECORD_PORT),
   databasePath = process.env.VIBE_WORK_RECORD_DB ?? join(ROOT, ".runtime", "work-records.sqlite"),
-  token = process.env.VIBE_WORK_RECORD_TOKEN
+  token = process.env.VIBE_WORK_RECORD_TOKEN,
+  meetingSessions
 } = {}) {
   if (!LOOPBACK_HOSTS.has(host)) throw new Error("Work-record prototype only permits loopback binding");
   mkdirSync(dirname(databasePath), { recursive: true, mode: 0o700 });
   const store = new WorkRecordStore(databasePath);
   const api = createWorkRecordsApiHandler({ store, expectedToken: token });
+  let privateMeetings;
   let applicationHandler;
   let vite;
-  if (development) {
-    const { createServer: createViteServer } = await import("vite");
-    vite = await createViteServer({ root: ROOT, appType: "spa", server: { middlewareMode: true } });
-    applicationHandler = (request, response) => new Promise((resolveRequest) => {
-      vite.middlewares(request, response, () => {
-        if (!response.headersSent) response.writeHead(404).end();
-        resolveRequest();
+  let resourcesClosed = false;
+  const closeResources = async () => {
+    if (resourcesClosed) return;
+    resourcesClosed = true;
+    let failure;
+    if (vite) {
+      try { await vite.close(); } catch (error) { failure = error; }
+    }
+    try { store.close(); } catch (error) { failure ??= error; }
+    if (privateMeetings) {
+      try { privateMeetings.repository.close(); } catch (error) { failure ??= error; }
+    }
+    if (failure) throw failure;
+  };
+  let server;
+  try {
+    privateMeetings = composePrivateMeetingSessions(meetingSessions);
+    if (development) {
+      const { createServer: createViteServer } = await import("vite");
+      vite = await createViteServer({ root: ROOT, appType: "spa", server: { middlewareMode: true } });
+      applicationHandler = (request, response) => new Promise((resolveRequest) => {
+        vite.middlewares(request, response, () => {
+          if (!response.headersSent) response.writeHead(404).end();
+          resolveRequest();
+        });
+      });
+    } else {
+      applicationHandler = createProductionHandler();
+    }
+    server = createServer(async (request, response) => {
+      const pathname = new URL(request.url ?? "/", "http://127.0.0.1").pathname;
+      if (pathname === "/api/work-events") await api(request, response);
+      else if (PRIVATE_MEETING_SESSIONS_ROUTE.test(pathname)) {
+        if (privateMeetings) await privateMeetings.handler(request, response);
+        else denyPrivateMeetingRoute(response);
+      }
+      else if (PRIVATE_MEETING_SESSIONS_NAMESPACE.test(pathname)) denyPrivateMeetingRoute(response);
+      else await applicationHandler(request, response);
+    });
+    await new Promise((resolveListen, reject) => {
+      const rejectListen = (error) => reject(error);
+      server.once("error", rejectListen);
+      server.listen(port, host, () => {
+        server.off("error", rejectListen);
+        resolveListen();
       });
     });
-  } else {
-    applicationHandler = createProductionHandler();
+  } catch (error) {
+    if (server?.listening) {
+      await new Promise((resolveClose) => server.close(() => resolveClose()));
+    }
+    try { await closeResources(); } catch { /* preserve startup failure */ }
+    throw error;
   }
-  const server = createServer(async (request, response) => {
-    const pathname = new URL(request.url ?? "/", "http://127.0.0.1").pathname;
-    if (pathname === "/api/work-events") await api(request, response);
-    else await applicationHandler(request, response);
-  });
-  await new Promise((resolveListen, reject) => {
-    server.once("error", reject);
-    server.listen(port, host, resolveListen);
-  });
   const address = server.address();
   const boundPort = typeof address === "object" && address ? address.port : port;
   console.log(`Vibe City local work-record prototype listening on http://${host}:${boundPort}`);
   if (!token) console.log("Authenticated ingestion is disabled until VIBE_WORK_RECORD_TOKEN is set.");
+  let closePromise;
   return {
     host,
     port: boundPort,
-    close: async () => {
-      await new Promise((resolveClose, reject) => server.close((error) => error ? reject(error) : resolveClose()));
-      if (vite) await vite.close();
-      store.close();
+    close: () => {
+      closePromise ??= (async () => {
+        let failure;
+        try {
+          await new Promise((resolveClose, reject) => server.close((error) => error ? reject(error) : resolveClose()));
+        } catch (error) {
+          failure = error;
+        }
+        try { await closeResources(); } catch (error) { failure ??= error; }
+        if (failure) throw failure;
+      })();
+      return closePromise;
     }
   };
 }
