@@ -1598,3 +1598,111 @@ body.city-entered .private-records-access {
     animation: none;
   }
 }
+
+.private-meeting-world-open,
+.private-meeting-access {
+  position: fixed;
+  z-index: 3;
+  min-height: 44px;
+  padding: 0.65rem 0.85rem;
+  border: 1px solid #58737c;
+  border-radius: 0.35rem;
+  background: #10191d;
+  color: #f4f7f8;
+  font: inherit;
+  font-weight: 700;
+}
+
+.private-meeting-world-open {
+  right: max(1rem, env(safe-area-inset-right));
+  bottom: max(1rem, env(safe-area-inset-bottom));
+}
+
+.private-meeting-access {
+  left: max(1rem, env(safe-area-inset-left));
+  bottom: max(1rem, env(safe-area-inset-bottom));
+}
+
+#private-meeting-dialog {
+  box-sizing: border-box;
+  width: min(44rem, calc(100vw - 2rem));
+  max-height: calc(100vh - 2rem);
+  overflow: auto;
+  overflow-wrap: anywhere;
+  padding: 1.25rem;
+  border: 1px solid #58737c;
+  border-radius: 0.65rem;
+  background: #10191d;
+  color: #f4f7f8;
+}
+
+#private-meeting-dialog::backdrop {
+  background: rgb(3 8 10 / 78%);
+}
+
+.private-meeting-header,
+.private-meeting-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.private-meeting-kicker,
+.private-meeting-note {
+  color: #b8cbd1;
+  line-height: 1.5;
+}
+
+#private-meeting-status {
+  padding: 0.75rem;
+  border-left: 3px solid #8fb3bd;
+  background: #172329;
+  line-height: 1.5;
+}
+
+.private-meeting-fields > div {
+  display: grid;
+  grid-template-columns: minmax(8rem, 0.4fr) minmax(0, 1fr);
+  gap: 0.75rem;
+  padding-block: 0.55rem;
+  border-bottom: 1px solid #2d424a;
+}
+
+.private-meeting-fields dd {
+  margin: 0;
+  white-space: pre-line;
+}
+
+#private-meeting-dialog button {
+  min-height: 44px;
+  padding: 0.65rem 0.85rem;
+  border: 1px solid #58737c;
+  border-radius: 0.35rem;
+  background: #1b2a30;
+  color: #f4f7f8;
+  font: inherit;
+}
+
+@media (max-width: 640px) {
+  #private-meeting-dialog {
+    width: calc(100vw - 1rem);
+    max-height: calc(100vh - 1rem);
+    padding: 1rem;
+  }
+
+  .private-meeting-fields > div {
+    grid-template-columns: 1fr;
+    gap: 0.2rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #private-meeting-dialog,
+  #private-meeting-dialog * {
+    scroll-behavior: auto;
+    transition: none;
+    animation: none;
+  }
+}
