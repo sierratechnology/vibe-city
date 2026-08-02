@@ -236,6 +236,32 @@
       </div>
       <p class="private-records-note">Private fields remain unavailable unless a trusted authenticated session supplies an authorized tenant-scoped read model. This interface does not grant access.</p>
     </dialog>
+    <button id="private-meeting-world-open" class="private-meeting-world-open" type="button" hidden disabled>Open Boardroom private meeting</button>
+    <button id="private-meeting-access" class="private-meeting-access" type="button" hidden disabled>Private meeting access</button>
+    <dialog id="private-meeting-dialog" aria-labelledby="private-meeting-title" aria-describedby="private-meeting-status">
+      <header class="private-meeting-header">
+        <div>
+          <p class="private-meeting-kicker">STG Headquarters / Boardroom / Private</p>
+          <h2 id="private-meeting-title">Private meeting session</h2>
+        </div>
+        <button id="private-meeting-close" type="button" aria-label="Close private meeting">Close</button>
+      </header>
+      <p id="private-meeting-status" role="status" aria-live="polite">Private meetings are not configured in this runtime.</p>
+      <dl class="private-meeting-fields">
+        <div><dt>Purpose</dt><dd id="private-meeting-purpose"></dd></div>
+        <div><dt>Participants</dt><dd id="private-meeting-participants"></dd></div>
+        <div><dt>Materials</dt><dd id="private-meeting-materials"></dd></div>
+        <div><dt>Lifecycle</dt><dd id="private-meeting-lifecycle"></dd></div>
+        <div><dt>Started</dt><dd id="private-meeting-started"></dd></div>
+        <div><dt>Ended</dt><dd id="private-meeting-ended"></dd></div>
+        <div><dt>Outcome</dt><dd id="private-meeting-outcome"></dd></div>
+        <div><dt>Current occupancy</dt><dd id="private-meeting-occupancy"></dd></div>
+      </dl>
+      <div class="private-meeting-actions">
+        <button id="private-meeting-refresh" type="button">Refresh authorized meeting</button>
+      </div>
+      <p class="private-meeting-note">Hosted meeting access is unavailable until a trusted local authenticated adapter supplies an authorized tenant-scoped target. This interface does not grant access.</p>
+    </dialog>
     <button id="private-hosted-presence-open" class="private-hosted-presence-open" type="button" hidden>Open private hosted presence</button>
     <dialog id="private-hosted-presence-dialog" aria-labelledby="private-hosted-presence-title" aria-describedby="private-hosted-presence-status" data-presentation-mode="desktop">
       <header class="private-hosted-presence-header">

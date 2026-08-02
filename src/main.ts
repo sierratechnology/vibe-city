@@ -26,6 +26,8 @@ import { HEADQUARTERS_OFFICES, officeAccessText, officeSignText, type Headquarte
 import { PlayerPresence, PresenceDebugState, createPresenceAdapter } from "./multiplayer/presence";
 import { createOperationsDirectoryController } from "./operations/operationsDirectory";
 import { createWorldOperationsSnapshot, deriveRealtimeObservation, type RecordsObservation } from "./operations/worldOperationsSnapshot";
+import { createPrivateMeetingInterfaces } from "./meetings/privateMeetingInterfaces";
+import { createPrivateMeetingSessionInterfaceController } from "./meetings/privateMeetingSessionInterface";
 import { createRecordsTerminalController } from "./records/recordsTerminal";
 import { createPrivateRecordsInterfaceController } from "./records/privateRecordsInterface";
 import { loadWorkEventRecords } from "./records/workEventRecords";
@@ -78,7 +80,7 @@ type DoorAction =
   | "enter_headquarters"
   | "leave_headquarters";
 type OperationsContextAction = "inspect_reception_status" | "inspect_chief_identity" | "inspect_executive_authority";
-type ContextAction = DoorAction | "inspect_records" | OperationsContextAction;
+type ContextAction = DoorAction | "inspect_records" | "inspect_private_meeting" | OperationsContextAction;
 type VoiceState = "muted" | "listening" | "speaking" | "unavailable";
 type AudioZoneId = "reception" | "assistant_office" | "boardroom" | "devon_executive_office" | "projects_updates_office" | "outside";
 
@@ -106,6 +108,7 @@ const HEADQUARTERS_SIGN_POSITIONS: Record<HeadquartersOfficeId, { readonly x: nu
   "reserved-departments": { x: 7.2, z: -7.6 }
 };
 const RECORDS_TERMINAL_INTERACTION_POSITION = { x: 6.4, z: 4.65 } as const;
+const PRIVATE_MEETING_INTERACTION_POSITION = { x: -6.4, z: -1.7 } as const;
 const RECEPTION_STATUS_INTERACTION_POSITION = { x: 3.25, z: 6.3 } as const;
 const CHIEF_AGENT_IDENTITY_INTERACTION_POSITION = { x: -6.4, z: 5.0 } as const;
 const EXECUTIVE_AUTHORITY_INTERACTION_POSITION = { x: 2.6, z: -0.7 } as const;
@@ -299,6 +302,28 @@ const recordsTerminalDialog = document.querySelector<HTMLDialogElement>("#record
 const privateRecordsDialog = document.querySelector<HTMLDialogElement>("#private-records-dialog")!;
 const privateRecordsAccess = document.querySelector<HTMLButtonElement>("#private-records-access")!;
 const privateRecordsWorldOpen = document.querySelector<HTMLButtonElement>("#private-records-world-open")!;
+const privateMeetingDialog = document.querySelector<HTMLDialogElement>("#private-meeting-dialog")!;
+const privateMeetingInterfaces = createPrivateMeetingInterfaces({
+  worldEntry: document.querySelector<HTMLButtonElement>("#private-meeting-world-open")!,
+  nonSpatialEntry: document.querySelector<HTMLButtonElement>("#private-meeting-access")!,
+  dialog: privateMeetingDialog,
+  status: document.querySelector<HTMLElement>("#private-meeting-status")!,
+  purpose: document.querySelector<HTMLElement>("#private-meeting-purpose")!,
+  participants: document.querySelector<HTMLElement>("#private-meeting-participants")!,
+  materials: document.querySelector<HTMLElement>("#private-meeting-materials")!,
+  lifecycle: document.querySelector<HTMLElement>("#private-meeting-lifecycle")!,
+  startedAt: document.querySelector<HTMLElement>("#private-meeting-started")!,
+  endedAt: document.querySelector<HTMLElement>("#private-meeting-ended")!,
+  outcome: document.querySelector<HTMLElement>("#private-meeting-outcome")!,
+  occupancy: document.querySelector<HTMLElement>("#private-meeting-occupancy")!,
+  refresh: document.querySelector<HTMLButtonElement>("#private-meeting-refresh")!,
+  close: document.querySelector<HTMLButtonElement>("#private-meeting-close")!
+}, {
+  getTrustedMeetingTarget: () => null,
+  getTrustedSession: () => null,
+  readAuthorizedMeetingSession: async () => { throw new Error("Private meeting adapter is not configured."); }
+}, createPrivateMeetingSessionInterfaceController);
+void privateMeetingInterfaces;
 const privateRecords = createPrivateRecordsInterfaceController({
   dialog: privateRecordsDialog,
   status: document.querySelector<HTMLElement>("#private-records-status")!,
@@ -313,6 +338,7 @@ const privateRecords = createPrivateRecordsInterfaceController({
 privateRecordsWorldOpen.addEventListener("click", () => void privateRecords.open(privateRecordsWorldOpen, ""));
 privateRecordsAccess.addEventListener("click", () => void privateRecords.open(privateRecordsAccess, ""));
 privateRecordsDialog.addEventListener("close", updateTouchControlVisibility);
+privateMeetingDialog.addEventListener("close", updateTouchControlVisibility);
 const workRecordsPanel = createWorkRecordsPanelController({
   state: document.querySelector<HTMLElement>("#work-records-state")!,
   freshness: document.querySelector<HTMLElement>("#work-records-freshness")!,
@@ -1209,7 +1235,7 @@ function updateTouchControlVisibility(): void {
     cityEntered,
     mobileCapable: shouldShowTouchControls(),
     typing,
-    interactionBlocked: recordsTerminalDialog.open || operationsDirectoryDialog.open || privateRecordsDialog.open,
+    interactionBlocked: recordsTerminalDialog.open || operationsDirectoryDialog.open || privateRecordsDialog.open || privateMeetingDialog.open,
     transitionBlocked: sceneState.transitioning,
     activeContextAction: activeContextAction !== null
   });
@@ -1223,6 +1249,7 @@ function updateTouchControlVisibility(): void {
 
 function contextActionLabel(action: ContextAction | null): string {
   if (action === "inspect_records") return "Inspect";
+  if (action === "inspect_private_meeting") return "Meeting";
   const operationsFixture = OPERATIONS_FIXTURES.find((fixture) => fixture.action === action);
   if (operationsFixture) return operationsFixture.actionLabel;
   return "Action";
@@ -1232,6 +1259,7 @@ function contextActionAriaLabel(action: ContextAction | null): string {
   if (action === "enter_headquarters") return "Enter STG Headquarters";
   if (action === "leave_headquarters") return "Exit STG Headquarters";
   if (action === "inspect_records") return "Inspect Records Terminal";
+  if (action === "inspect_private_meeting") return "Open authorized Boardroom private meeting";
   const operationsFixture = OPERATIONS_FIXTURES.find((fixture) => fixture.action === action);
   if (operationsFixture) return operationsFixture.ariaLabel;
   return "Interact";
@@ -1625,7 +1653,7 @@ function updateCitizenMeshes(): void {
 }
 
 function movePlayer(delta: number): void {
-  if (!cityEntered || sceneState.transitioning || recordsTerminalDialog.open || operationsDirectoryDialog.open || privateRecordsDialog.open) {
+  if (!cityEntered || sceneState.transitioning || recordsTerminalDialog.open || operationsDirectoryDialog.open || privateRecordsDialog.open || privateMeetingDialog.open) {
     playerVelocity.lerp(new THREE.Vector3(), 1 - Math.pow(0.00003, delta));
     return;
   }
@@ -1714,6 +1742,14 @@ function canInspectRecordsTerminal(): boolean {
   );
 }
 
+function canInspectPrivateMeeting(): boolean {
+  return (
+    privateMeetingInterfaces.isAvailable() &&
+    sceneState.activeScene === "headquarters" &&
+    distance2D({ x: player.position.x, z: player.position.z }, PRIVATE_MEETING_INTERACTION_POSITION) < 2.15
+  );
+}
+
 function canInspectOperationsFixture(fixture: OperationsFixture): boolean {
   return (
     sceneState.activeScene === "headquarters" &&
@@ -1730,6 +1766,7 @@ function updateNavigationContext(): void {
   } else if (sceneState.activeScene === "headquarters") {
     if (distance2D(playerPoint, headquartersPortal.interiorPosition) < 2.4) activeContextAction = "leave_headquarters";
     else if (canInspectRecordsTerminal()) activeContextAction = "inspect_records";
+    else if (canInspectPrivateMeeting()) activeContextAction = "inspect_private_meeting";
     else {
       const operationsFixture = OPERATIONS_FIXTURES.find(canInspectOperationsFixture);
       if (operationsFixture) activeContextAction = operationsFixture.action;
@@ -1954,6 +1991,9 @@ function handleNavigationAction(): void {
     void switchToScene("outside", { x: headquartersPortal.exteriorPosition.x, z: headquartersPortal.exteriorPosition.z + 1.1 });
   } else if (activeContextAction === "inspect_records" && canInspectRecordsTerminal()) {
     void recordsTerminal.open();
+  } else if (activeContextAction === "inspect_private_meeting" && canInspectPrivateMeeting()) {
+    const opener = shouldShowTouchControls() ? touchActionButton : renderer.domElement;
+    void privateMeetingInterfaces.openWorld(opener);
   } else {
     const operationsFixture = OPERATIONS_FIXTURES.find(
       (fixture) => fixture.action === activeContextAction && canInspectOperationsFixture(fixture)
