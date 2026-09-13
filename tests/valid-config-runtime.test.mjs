@@ -133,10 +133,21 @@ test("valid Supabase configuration does not deadlock production startup", { skip
     };
     const moveAxisTo = async (axis, target, positiveCode, positiveKey, negativeCode, negativeKey, maxAttempts = 100) => {
       let position;
+      let stableFrames = 0;
       for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
         position = await evaluate("window.__vibeCity3DHealth.player");
         const delta = target - position[axis];
-        if (Math.abs(delta) <= 0.2) return position;
+        if (Math.abs(delta) <= 0.2) {
+          const nextPosition = await evaluate(
+            "new Promise((resolve) => requestAnimationFrame(() => resolve(window.__vibeCity3DHealth.player)))",
+            true
+          );
+          stableFrames = Math.abs(nextPosition[axis] - position[axis]) <= 0.01 ? stableFrames + 1 : 0;
+          position = nextPosition;
+          if (stableFrames >= 3 && Math.abs(target - position[axis]) <= 0.2) return position;
+          continue;
+        }
+        stableFrames = 0;
         await cdp.send("Input.dispatchKeyEvent", { type: "keyDown", code: delta > 0 ? positiveCode : negativeCode, key: delta > 0 ? positiveKey : negativeKey });
         await new Promise((resolve) => setTimeout(resolve, 45));
         await cdp.send("Input.dispatchKeyEvent", { type: "keyUp", code: delta > 0 ? positiveCode : negativeCode, key: delta > 0 ? positiveKey : negativeKey });
@@ -397,9 +408,14 @@ test("valid Supabase configuration does not deadlock production startup", { skip
         };
       })()`);
       if (mobileProximity.label === "Inspect" && !mobileProximity.hidden) break;
-      if (mobileProximity.player.x < 5.7) await touchJoystick(46, 0);
-      else if (mobileProximity.player.z > 6.5) await touchJoystick(0, -46);
-      else await touchJoystick(30, -20, 180);
+      const deltaX = 6.4 - mobileProximity.player.x;
+      const deltaZ = 4.65 - mobileProximity.player.z;
+      const distance = Math.hypot(deltaX, deltaZ);
+      await touchJoystick(
+        (deltaX / distance) * 46,
+        (deltaZ / distance) * 46,
+        Math.min(260, Math.max(80, distance * 60))
+      );
     }
     assert.equal(mobileProximity.label, "Inspect");
     assert.equal(mobileProximity.hidden, false);
