@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { isProxy } from "node:util/types";
 import { createPrivateMeetingSessionsRepository } from "./privateMeetingSessions.mjs";
 import { createPrivateMeetingSessionsApiHandler } from "./privateMeetingSessionsApi.mjs";
+import { createTenantSkyscraperNavigationApiHandler } from "./tenantSkyscraperNavigationApi.mjs";
 import { createWorkRecordsApiHandler } from "./workRecordsApi.mjs";
 import { WorkRecordStore } from "./workRecords.mjs";
 
@@ -12,10 +13,16 @@ const objectGetOwnPropertyDescriptors = Object.getOwnPropertyDescriptors;
 const objectGetPrototypeOf = Object.getPrototypeOf;
 const objectPrototype = Object.prototype;
 const reflectOwnKeys = Reflect.ownKeys;
+const weakSetAdd = Function.call.bind(WeakSet.prototype.add);
+const weakSetDelete = Function.call.bind(WeakSet.prototype.delete);
+const weakSetHas = Function.call.bind(WeakSet.prototype.has);
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "::1", "localhost"]);
 const PRIVATE_MEETING_SESSIONS_ROUTE = /^\/api\/private\/tenants\/[^/]+\/meeting-sessions(?:\/[^/]+(?:\/(?:history|end))?)?$/;
 const PRIVATE_MEETING_SESSIONS_NAMESPACE = /^\/api\/private\/tenants\/[^/]+\/meeting-sessions(?:\/|%2[fF]|$)/;
+const PRIVATE_NAVIGATION_ROUTE = /^\/api\/private\/tenants\/id_[a-f0-9]{16,64}\/skyscraper-navigation\/decision$/;
+const PRIVATE_NAVIGATION_NAMESPACE = /^\/api\/private\/tenants\/[^/]+(?:\/|%2[fF]|%5[cC])skyscraper-navigation(?:\/|%2[fF]|%5[cC]|$)/;
+const PRIVATE_TENANT_NAMESPACE = /^\/api\/private\/tenants(?:[/%\\]|$)/i;
 const MIME_TYPES = new Map([
   [".css", "text/css; charset=utf-8"],
   [".html", "text/html; charset=utf-8"],
@@ -86,6 +93,29 @@ function composePrivateMeetingSessions(input) {
   }
 }
 
+function composeTenantSkyscraperNavigation(input, ownsListenerRequest) {
+  try {
+    if (input === null || typeof input !== "object" || isProxy(input) ||
+        objectGetPrototypeOf(input) !== objectPrototype) return null;
+    const keys = ["now", "resolveTrustedSession", "resolveTrustedNavigationFacts"];
+    const descriptors = objectGetOwnPropertyDescriptors(input);
+    if (reflectOwnKeys(input).length !== keys.length) return null;
+    for (const key of keys) {
+      const descriptor = descriptors[key];
+      if (!descriptor || !("value" in descriptor) || descriptor.enumerable !== true ||
+          typeof descriptor.value !== "function") return null;
+    }
+    return createTenantSkyscraperNavigationApiHandler({
+      now: descriptors.now.value,
+      resolveTrustedSession: descriptors.resolveTrustedSession.value,
+      resolveTrustedNavigationFacts: descriptors.resolveTrustedNavigationFacts.value,
+      ownsListenerRequest
+    });
+  } catch {
+    return null;
+  }
+}
+
 function createProductionHandler() {
   const distribution = join(ROOT, "dist");
   const indexPath = join(distribution, "index.html");
@@ -111,7 +141,8 @@ export async function startWorkRecordsServer({
   port = safePort(process.env.VIBE_WORK_RECORD_PORT),
   databasePath = process.env.VIBE_WORK_RECORD_DB ?? join(ROOT, ".runtime", "work-records.sqlite"),
   token = process.env.VIBE_WORK_RECORD_TOKEN,
-  meetingSessions
+  meetingSessions,
+  tenantSkyscraperNavigation
 } = {}) {
   if (!LOOPBACK_HOSTS.has(host)) throw new Error("Work-record prototype only permits loopback binding");
   mkdirSync(dirname(databasePath), { recursive: true, mode: 0o700 });
@@ -136,6 +167,12 @@ export async function startWorkRecordsServer({
   };
   let server;
   try {
+    const listenerRequests = new WeakSet();
+    const ownsListenerRequest = Object.freeze((candidate) => {
+      try { return weakSetHas(listenerRequests, candidate); } catch { return false; }
+    });
+    const navigationHandler = composeTenantSkyscraperNavigation(
+      tenantSkyscraperNavigation, ownsListenerRequest);
     privateMeetings = composePrivateMeetingSessions(meetingSessions);
     if (development) {
       const { createServer: createViteServer } = await import("vite");
@@ -150,14 +187,42 @@ export async function startWorkRecordsServer({
       applicationHandler = createProductionHandler();
     }
     server = createServer(async (request, response) => {
-      const pathname = new URL(request.url ?? "/", "http://127.0.0.1").pathname;
-      if (pathname === "/api/work-events") await api(request, response);
-      else if (PRIVATE_MEETING_SESSIONS_ROUTE.test(pathname)) {
-        if (privateMeetings) await privateMeetings.handler(request, response);
-        else denyPrivateMeetingRoute(response);
+      try {
+        try {
+          weakSetAdd(listenerRequests, request);
+          request.socket.once("close", () => weakSetDelete(listenerRequests, request));
+        } catch {
+          denyPrivateMeetingRoute(response);
+          return;
+        }
+        const pathname = new URL(request.url ?? "/", "http://127.0.0.1").pathname;
+        if (pathname === "/api/work-events") await api(request, response);
+        else if (PRIVATE_MEETING_SESSIONS_ROUTE.test(pathname)) {
+          if (privateMeetings) await privateMeetings.handler(request, response);
+          else denyPrivateMeetingRoute(response);
+        }
+        else if (PRIVATE_MEETING_SESSIONS_NAMESPACE.test(pathname)) denyPrivateMeetingRoute(response);
+        else if (PRIVATE_NAVIGATION_ROUTE.test(request.url ?? "")) {
+          if (navigationHandler) await navigationHandler(request, response);
+          else denyPrivateMeetingRoute(response);
+        }
+        else if (PRIVATE_NAVIGATION_NAMESPACE.test(pathname)) denyPrivateMeetingRoute(response);
+        else if (PRIVATE_TENANT_NAMESPACE.test(pathname)) denyPrivateMeetingRoute(response);
+        else await applicationHandler(request, response);
+      } catch {
+        let headersSent = true;
+        try { headersSent = response.headersSent === true; } catch { /* assume partial write */ }
+        if (!headersSent) {
+          try {
+            denyPrivateMeetingRoute(response);
+            return;
+          } catch { /* fall through to connection destruction */ }
+        }
+        try { response.destroy(); } catch { /* response unavailable */ }
       }
-      else if (PRIVATE_MEETING_SESSIONS_NAMESPACE.test(pathname)) denyPrivateMeetingRoute(response);
-      else await applicationHandler(request, response);
+    });
+    server.on("clientError", (_error, socket) => {
+      try { socket.destroy(); } catch {}
     });
     await new Promise((resolveListen, reject) => {
       const rejectListen = (error) => reject(error);

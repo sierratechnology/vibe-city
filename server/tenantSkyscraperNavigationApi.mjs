@@ -43,7 +43,7 @@ const weakSetAdd = Function.call.bind(WeakSet.prototype.add);
 const weakSetHas = Function.call.bind(WeakSet.prototype.has);
 
 const DEPENDENCY_KEYS = objectFreeze([
-  "now", "resolveTrustedSession", "resolveTrustedNavigationFacts"
+  "now", "resolveTrustedSession", "resolveTrustedNavigationFacts", "ownsListenerRequest"
 ]);
 const PRIVATE_HEADERS = objectFreeze({
   "Cache-Control": "private, no-store",
@@ -286,7 +286,7 @@ async function readBody(request, expectedLength) {
       if (size > expectedLength || size > 2048) return null;
       arrayPush(chunks, chunk);
     }
-    if (request.aborted === true || request.destroyed === true || size !== expectedLength) return null;
+    if (request.aborted === true || size !== expectedLength) return null;
     const decoder = new TextDecoderIntrinsic("utf-8", { fatal: true });
     return textDecoderDecode(decoder, bufferConcat(chunks, size));
   } catch {
@@ -578,9 +578,34 @@ function equalFacts(left, right) {
     objectIs(left.policyRevision, right.policyRevision);
 }
 
-function sameRequestShell(request, rawUrl, method, rawHeadersSource, rawHeaders) {
-  if (request.url !== rawUrl || request.method !== method || request.rawHeaders !== rawHeadersSource ||
-      request.aborted === true || request.destroyed === true) return false;
+function requestSocket(request) {
+  try {
+    const descriptor = objectGetOwnPropertyDescriptor(request, "socket");
+    if (!descriptor || !("value" in descriptor) || descriptor.writable !== true ||
+        descriptor.enumerable !== true || descriptor.configurable !== true ||
+        descriptor.value === null || typeof descriptor.value !== "object" || isProxy(descriptor.value) ||
+        descriptor.value.destroyed !== false) return null;
+    return descriptor.value;
+  } catch {
+    return null;
+  }
+}
+
+function sameRequestShell(request, originalRequest, capturedSocket, ownsListenerRequest,
+    rawUrl, method, rawHeadersSource, rawHeaders) {
+  let descriptor;
+  try {
+    if (request !== originalRequest || ownsListenerRequest(request) !== true) return false;
+    descriptor = objectGetOwnPropertyDescriptor(request, "socket");
+  } catch {
+    return false;
+  }
+  if (!descriptor || !("value" in descriptor) || descriptor.writable !== true ||
+      descriptor.enumerable !== true || descriptor.configurable !== true ||
+      descriptor.value !== capturedSocket || capturedSocket.destroyed !== false ||
+      request.aborted !== false || request.complete !== true || request.readableEnded !== true ||
+      request.readableAborted !== false || request.url !== rawUrl || request.method !== method ||
+      request.rawHeaders !== rawHeadersSource) return false;
   const currentHeaders = snapshotRawHeaders(request.rawHeaders);
   if (currentHeaders === null || currentHeaders.length !== rawHeaders.length) return false;
   for (let index = 0; index < rawHeaders.length; index += 1) {
@@ -596,6 +621,11 @@ export function createTenantSkyscraperNavigationApiHandler(input) {
   }
   return objectFreeze(async function tenantSkyscraperNavigationApiHandler(request, response) {
     try {
+      if (request === null || typeof request !== "object" || isProxy(request)) return deny(response);
+      if (dependencies.ownsListenerRequest(request) !== true) return deny(response);
+      const originalRequest = request;
+      const capturedSocket = requestSocket(request);
+      if (capturedSocket === null) return deny(response);
       const rawUrl = request.url;
       const method = request.method;
       const route = parseRoute(rawUrl);
@@ -605,10 +635,14 @@ export function createTenantSkyscraperNavigationApiHandler(input) {
         const headers = rawHeaders === null ? null : inspectHeaders(rawHeaders);
         const bodyText = headers === null ? null : await readBody(request, headers.contentLength);
         const body = bodyText === null ? null : snapshotRequest(parseUnambiguousJson(bodyText));
-        if (body !== null) {
+        if (body !== null && sameRequestShell(request, originalRequest, capturedSocket,
+            dependencies.ownsListenerRequest, rawUrl, method, rawHeadersSource, rawHeaders) &&
+            sameRequestShell(request, originalRequest, capturedSocket,
+              dependencies.ownsListenerRequest, rawUrl, method, rawHeadersSource, rawHeaders)) {
           const sourceSession = await dependencies.resolveTrustedSession(request);
           const session = snapshotSession(sourceSession);
-          if (session !== null && sameRequestShell(request, rawUrl, method, rawHeadersSource, rawHeaders)) {
+          if (session !== null && sameRequestShell(request, originalRequest, capturedSocket,
+              dependencies.ownsListenerRequest, rawUrl, method, rawHeadersSource, rawHeaders)) {
             const factsSource = await dependencies.resolveTrustedNavigationFacts(objectFreeze({
               session: sourceSession,
               tenantId: route.tenantId
@@ -619,7 +653,8 @@ export function createTenantSkyscraperNavigationApiHandler(input) {
                 (destination.accessState === "public"
                   ? destination.ownerTenantId === null
                   : destination.ownerTenantId === route.tenantId) &&
-                sameRequestShell(request, rawUrl, method, rawHeadersSource, rawHeaders)) {
+                sameRequestShell(request, originalRequest, capturedSocket,
+                  dependencies.ownsListenerRequest, rawUrl, method, rawHeadersSource, rawHeaders)) {
               const evaluatedAt = dependencies.now();
               const evaluatedMilliseconds = timestampMilliseconds(evaluatedAt);
               if (evaluatedMilliseconds !== null) {
@@ -629,11 +664,13 @@ export function createTenantSkyscraperNavigationApiHandler(input) {
                 const result = authorizer.decideNavigation(body);
                 const decision = exactSuccessDecision(result);
                 if (decision !== null &&
-                    sameRequestShell(request, rawUrl, method, rawHeadersSource, rawHeaders)) {
+                    sameRequestShell(request, originalRequest, capturedSocket,
+                      dependencies.ownsListenerRequest, rawUrl, method, rawHeadersSource, rawHeaders)) {
                   const secondSourceSession = await dependencies.resolveTrustedSession(request);
                   const secondSession = snapshotSession(secondSourceSession);
                   if (secondSession !== null && equalExactRecord(session, secondSession, SESSION_KEYS) &&
-                      sameRequestShell(request, rawUrl, method, rawHeadersSource, rawHeaders)) {
+                      sameRequestShell(request, originalRequest, capturedSocket,
+                        dependencies.ownsListenerRequest, rawUrl, method, rawHeadersSource, rawHeaders)) {
                     const secondFactsSource = await dependencies.resolveTrustedNavigationFacts(objectFreeze({
                       session: secondSourceSession,
                       tenantId: route.tenantId
@@ -641,9 +678,13 @@ export function createTenantSkyscraperNavigationApiHandler(input) {
                     const secondFacts = snapshotFacts(secondFactsSource, secondSession, route.tenantId);
                     const finalTime = dependencies.now();
                     const finalMilliseconds = timestampMilliseconds(finalTime);
+                    const invitationExpiry = decision.accessState === "invited"
+                      ? timestampMilliseconds(decision.validUntil) : null;
                     if (secondFacts !== null && equalFacts(facts, secondFacts) &&
-                        sameRequestShell(request, rawUrl, method, rawHeadersSource, rawHeaders) &&
-                        finalMilliseconds !== null && finalMilliseconds >= evaluatedMilliseconds) {
+                        sameRequestShell(request, originalRequest, capturedSocket,
+                          dependencies.ownsListenerRequest, rawUrl, method, rawHeadersSource, rawHeaders) &&
+                        finalMilliseconds !== null && finalMilliseconds >= evaluatedMilliseconds &&
+                        (decision.accessState !== "invited" || invitationExpiry !== null && finalMilliseconds < invitationExpiry)) {
                       return sendDecision(response, decision, body, session, facts, evaluatedAt);
                     }
                   }
