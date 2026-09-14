@@ -633,19 +633,16 @@ test("posts_one_start_and_receives_one_bounded_synthetic_body", async t => {
   const peerStarts = [];
   let resolveStart;
   const startObserved = new Promise(resolve => { resolveStart = resolve; });
-  peerPort.on("message", record => {
+  peerPort.on("message", async record => {
     if (record?.kind !== "start") return;
     peerStarts.push(record);
-    resolveStart(true);
+    await new Promise(resolve => setTimeout(resolve, 50));
+    resolveStart();
     peerPort.postMessage({ kind: "chunk", chunk: body });
     peerPort.postMessage({ kind: "complete" });
   });
   const pending = module.retrieveServiceConditionSnapshot(sourcePort, inertClock());
-  const started = await Promise.race([
-    startObserved,
-    new Promise(resolve => setTimeout(() => resolve(false), 25))
-  ]);
-  if (!started) peerPort.postMessage({ kind: "transport_unavailable" });
+  await startObserved;
   const result = await pending;
 
   assert.equal(peerStarts.length, 1);
