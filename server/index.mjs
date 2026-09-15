@@ -6,13 +6,19 @@ import { isProxy } from "node:util/types";
 import { createPrivateMeetingSessionsRepository } from "./privateMeetingSessions.mjs";
 import { createPrivateMeetingSessionsApiHandler } from "./privateMeetingSessionsApi.mjs";
 import { createTenantSkyscraperNavigationApiHandler } from "./tenantSkyscraperNavigationApi.mjs";
+import { createTenantSkyscraperNavigationTrustedSourceAdapter } from "./tenantSkyscraperNavigationTrustedSourceAdapter.mjs";
 import { createWorkRecordsApiHandler } from "./workRecordsApi.mjs";
 import { WorkRecordStore } from "./workRecords.mjs";
 
 const objectGetOwnPropertyDescriptors = Object.getOwnPropertyDescriptors;
 const objectGetPrototypeOf = Object.getPrototypeOf;
 const objectPrototype = Object.prototype;
+const reflectApply = Reflect.apply;
 const reflectOwnKeys = Reflect.ownKeys;
+const regexpTest = RegExp.prototype.test;
+const setImmediateIntrinsic = setImmediate;
+const weakMapGet = Function.call.bind(WeakMap.prototype.get);
+const weakMapSet = Function.call.bind(WeakMap.prototype.set);
 const weakSetAdd = Function.call.bind(WeakSet.prototype.add);
 const weakSetDelete = Function.call.bind(WeakSet.prototype.delete);
 const weakSetHas = Function.call.bind(WeakSet.prototype.has);
@@ -23,6 +29,7 @@ const PRIVATE_MEETING_SESSIONS_NAMESPACE = /^\/api\/private\/tenants\/[^/]+\/mee
 const PRIVATE_NAVIGATION_ROUTE = /^\/api\/private\/tenants\/id_[a-f0-9]{16,64}\/skyscraper-navigation\/decision$/;
 const PRIVATE_NAVIGATION_NAMESPACE = /^\/api\/private\/tenants\/[^/]+(?:\/|%2[fF]|%5[cC])skyscraper-navigation(?:\/|%2[fF]|%5[cC]|$)/;
 const PRIVATE_TENANT_NAMESPACE = /^\/api\/private\/tenants(?:[/%\\]|$)/i;
+const RAW_PRIVATE_TENANT_NAMESPACE = /^(?:\/|\\)+api(?:\/|\\|%2f|%5c)+private(?:\/|\\|%2f|%5c)+tenants(?:\/|\\|%2f|%5c|$)/i;
 const MIME_TYPES = new Map([
   [".css", "text/css; charset=utf-8"],
   [".html", "text/html; charset=utf-8"],
@@ -95,20 +102,12 @@ function composePrivateMeetingSessions(input) {
 
 function composeTenantSkyscraperNavigation(input, ownsListenerRequest) {
   try {
-    if (input === null || typeof input !== "object" || isProxy(input) ||
-        objectGetPrototypeOf(input) !== objectPrototype) return null;
-    const keys = ["now", "resolveTrustedSession", "resolveTrustedNavigationFacts"];
-    const descriptors = objectGetOwnPropertyDescriptors(input);
-    if (reflectOwnKeys(input).length !== keys.length) return null;
-    for (const key of keys) {
-      const descriptor = descriptors[key];
-      if (!descriptor || !("value" in descriptor) || descriptor.enumerable !== true ||
-          typeof descriptor.value !== "function") return null;
-    }
+    const adapter = createTenantSkyscraperNavigationTrustedSourceAdapter(input);
+    if (adapter === null) return null;
     return createTenantSkyscraperNavigationApiHandler({
-      now: descriptors.now.value,
-      resolveTrustedSession: descriptors.resolveTrustedSession.value,
-      resolveTrustedNavigationFacts: descriptors.resolveTrustedNavigationFacts.value,
+      now: adapter.now,
+      resolveTrustedSession: adapter.resolveTrustedSession,
+      resolveTrustedNavigationFacts: adapter.resolveTrustedNavigationFacts,
       ownsListenerRequest
     });
   } catch {
@@ -142,14 +141,25 @@ export async function startWorkRecordsServer({
   databasePath = process.env.VIBE_WORK_RECORD_DB ?? join(ROOT, ".runtime", "work-records.sqlite"),
   token = process.env.VIBE_WORK_RECORD_TOKEN,
   meetingSessions,
-  tenantSkyscraperNavigation
+  tenantSkyscraperNavigation,
+  applicationHandler: injectedApplicationHandler,
+  tenantSkyscraperNavigationDispatchObserver: injectedNavigationDispatchObserver
 } = {}) {
   if (!LOOPBACK_HOSTS.has(host)) throw new Error("Work-record prototype only permits loopback binding");
+  if (injectedApplicationHandler !== undefined && typeof injectedApplicationHandler !== "function") {
+    throw new TypeError("applicationHandler must be a function");
+  }
+  if (injectedNavigationDispatchObserver !== undefined &&
+      (typeof injectedNavigationDispatchObserver !== "function" ||
+       typeof injectedApplicationHandler !== "function")) {
+    throw new TypeError("tenantSkyscraperNavigationDispatchObserver requires an applicationHandler");
+  }
+  const navigationDispatchObserver = injectedNavigationDispatchObserver;
   mkdirSync(dirname(databasePath), { recursive: true, mode: 0o700 });
   const store = new WorkRecordStore(databasePath);
   const api = createWorkRecordsApiHandler({ store, expectedToken: token });
   let privateMeetings;
-  let applicationHandler;
+  let applicationHandler = injectedApplicationHandler;
   let vite;
   let resourcesClosed = false;
   const closeResources = async () => {
@@ -168,13 +178,16 @@ export async function startWorkRecordsServer({
   let server;
   try {
     const listenerRequests = new WeakSet();
+    const socketStates = new WeakMap();
     const ownsListenerRequest = Object.freeze((candidate) => {
       try { return weakSetHas(listenerRequests, candidate); } catch { return false; }
     });
     const navigationHandler = composeTenantSkyscraperNavigation(
       tenantSkyscraperNavigation, ownsListenerRequest);
     privateMeetings = composePrivateMeetingSessions(meetingSessions);
-    if (development) {
+    if (applicationHandler) {
+      // Test-local final fallback supplied by the server caller.
+    } else if (development) {
       const { createServer: createViteServer } = await import("vite");
       vite = await createViteServer({ root: ROOT, appType: "spa", server: { middlewareMode: true } });
       applicationHandler = (request, response) => new Promise((resolveRequest) => {
@@ -195,7 +208,16 @@ export async function startWorkRecordsServer({
           denyPrivateMeetingRoute(response);
           return;
         }
-        const pathname = new URL(request.url ?? "/", "http://127.0.0.1").pathname;
+        let socketState = weakMapGet(socketStates, request.socket);
+        if (!socketState) {
+          socketState = { privateClaimed: false, parserFailed: false };
+          weakMapSet(socketStates, request.socket, socketState);
+        } else if (socketState.privateClaimed) {
+          return;
+        }
+        const requestTarget = request.url ?? "";
+        const rawPrivateTenantNamespace = reflectApply(regexpTest, RAW_PRIVATE_TENANT_NAMESPACE, [requestTarget]);
+        const pathname = new URL(requestTarget || "/", "http://127.0.0.1").pathname;
         if (pathname === "/api/work-events") await api(request, response);
         else if (PRIVATE_MEETING_SESSIONS_ROUTE.test(pathname)) {
           if (privateMeetings) await privateMeetings.handler(request, response);
@@ -203,11 +225,22 @@ export async function startWorkRecordsServer({
         }
         else if (PRIVATE_MEETING_SESSIONS_NAMESPACE.test(pathname)) denyPrivateMeetingRoute(response);
         else if (PRIVATE_NAVIGATION_ROUTE.test(request.url ?? "")) {
-          if (navigationHandler) await navigationHandler(request, response);
+          socketState.privateClaimed = true;
+          response.shouldKeepAlive = false;
+          response.setHeader("Connection", "close");
+          await new Promise((resolveImmediate) => setImmediateIntrinsic(resolveImmediate));
+          if (socketState.parserFailed) {
+            response.destroy();
+            return;
+          }
+          if (navigationHandler) {
+            if (navigationDispatchObserver) reflectApply(navigationDispatchObserver, undefined, []);
+            await navigationHandler(request, response);
+          }
           else denyPrivateMeetingRoute(response);
         }
         else if (PRIVATE_NAVIGATION_NAMESPACE.test(pathname)) denyPrivateMeetingRoute(response);
-        else if (PRIVATE_TENANT_NAMESPACE.test(pathname)) denyPrivateMeetingRoute(response);
+        else if (PRIVATE_TENANT_NAMESPACE.test(pathname) || rawPrivateTenantNamespace) denyPrivateMeetingRoute(response);
         else await applicationHandler(request, response);
       } catch {
         let headersSent = true;
@@ -222,6 +255,13 @@ export async function startWorkRecordsServer({
       }
     });
     server.on("clientError", (_error, socket) => {
+      let socketState = weakMapGet(socketStates, socket);
+      if (!socketState) {
+        socketState = { privateClaimed: false, parserFailed: true };
+        weakMapSet(socketStates, socket, socketState);
+      } else {
+        socketState.parserFailed = true;
+      }
       try { socket.destroy(); } catch {}
     });
     await new Promise((resolveListen, reject) => {
@@ -250,11 +290,20 @@ export async function startWorkRecordsServer({
     close: () => {
       closePromise ??= (async () => {
         let failure;
+        let resolveServerClose;
+        let rejectServerClose;
+        const serverClose = new Promise((resolveClose, rejectClose) => {
+          resolveServerClose = resolveClose;
+          rejectServerClose = rejectClose;
+        });
         try {
-          await new Promise((resolveClose, reject) => server.close((error) => error ? reject(error) : resolveClose()));
+          server.close((error) => error ? rejectServerClose(error) : resolveServerClose());
         } catch (error) {
-          failure = error;
+          rejectServerClose(error);
         }
+        try { server.closeIdleConnections?.(); } catch (error) { failure = error; }
+        try { server.closeAllConnections?.(); } catch (error) { failure ??= error; }
+        try { await serverClose; } catch (error) { failure ??= error; }
         try { await closeResources(); } catch (error) { failure ??= error; }
         if (failure) throw failure;
       })();
