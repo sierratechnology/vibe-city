@@ -203,13 +203,21 @@ test("C021 captured reflection intrinsics resist replacement", async () => {
   }
   exactUnavailable(unavailableResult);
   const originalCreate = Object.create;
+  const expectation = copy(BASE_EXPECTATION);
+  const authority = copy(BASE_AUTHORITY);
+  const response = responseFor();
+  let firstAvailableResult;
+  let secondAvailableResult;
   try {
     Object.create = () => { throw new Error("hostile Object.create"); };
-    unavailableResult = create(copy(BASE_EXPECTATION), copy(BASE_AUTHORITY)).decode();
+    firstAvailableResult = create(expectation, authority).decode(response, TRUSTED_MS);
+    secondAvailableResult = create(expectation, authority).decode(response, TRUSTED_MS);
   } finally {
     Object.create = originalCreate;
   }
-  exactUnavailable(unavailableResult);
+  exactAvailable(firstAvailableResult, "public");
+  exactAvailable(secondAvailableResult, "public");
+  assert.notEqual(firstAvailableResult, secondAvailableResult);
 });
 
 test("C022 captured structured clone resists replacement", async () => {

@@ -12,6 +12,7 @@ const reflectOwnKeys = Reflect.ownKeys;
 const objectGetPrototypeOf = Object.getPrototypeOf;
 const objectGetOwnPropertyDescriptor = Object.getOwnPropertyDescriptor;
 const objectIs = Object.is;
+const objectCreate = Object.create;
 const arrayIsArray = Array.isArray;
 const objectPrototype = Object.prototype;
 const cloneRecord = structuredClone;
@@ -25,13 +26,13 @@ const dateToISOString = Function.call.bind(Date.prototype.toISOString) as (date:
 const freeze = Object.freeze;
 
 function unavailable() {
-  const result = Object.create(null);
+  const result = objectCreate(null);
   result.status = "unavailable";
   return freeze(result);
 }
 
 function available(accessState: string) {
-  const result = Object.create(null);
+  const result = objectCreate(null);
   result.status = "available";
   result.accessState = accessState;
   return freeze(result);
@@ -285,7 +286,7 @@ export function createPrivateTenantNavigationDecisionDecoder(expectation?: unkno
   const decode = freeze(function decode(response?: unknown, trustedPostResponseMs?: unknown) {
     return decodeCanonical(construction, response, trustedPostResponseMs);
   });
-  const decoder = Object.create(null);
+  const decoder = objectCreate(null);
   decoder.decode = decode;
   return freeze(decoder);
 }
