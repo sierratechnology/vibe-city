@@ -103,4 +103,4 @@ The free storage plan has usage limits; it is suitable for an initial playtest, 
 
 ### Mouse and touch controls
 
-No keyboard is required. Click/tap terrain to walk toward it; drag the world to orbit. Drag the movement pad for precise steering. Use Gather/Scan (hold to repeat), Sprint, Build, Place, Rotate, Dismantle, and +/− buttons. Open Field Guide for crafting. The hotbar selects construction pieces. Click-to-walk follows a straight line and stops at obstacles; use the pad to steer around them.
+No keyboard is required. Click/tap terrain to walk toward it; drag the world to orbit. On touch-capable devices, drag the movement pad for precise steering. The pad is hidden on non-touch computers. Use Gather/Scan (hold to repeat), Sprint, Build, Place, Rotate, Dismantle, and +/− buttons. Open Field Guide for crafting. The hotbar selects construction pieces. Click-to-walk follows a straight line and stops at obstacles; use the pad to steer around them.

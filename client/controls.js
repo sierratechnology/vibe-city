@@ -1,5 +1,6 @@
 // Pointer Events support mouse, pen and simultaneous touch contacts without mouse capture.
 export function bindControls({canvas,orbit,groundClick,interact,build,rotate,place,dismantle,zoom}) {
+ document.documentElement.classList.toggle('touch-enabled',navigator.maxTouchPoints>0);
  const input={x:0,z:0,gather:false,sprint:false};
  const stick=document.getElementById('stick'),knob=document.getElementById('stickKnob');let stickId=null,look=null;
  function reset(){input.x=input.z=0;input.gather=false;stickId=null;look=null;knob.style.transform='translate(0,0)';}
