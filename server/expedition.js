@@ -1,10 +1,10 @@
-import {travel,atmosphere,breathable,MONUMENTS,nearbyResources,planetDistance,nearbyWrecks,steering} from '../shared/planet.js';
+import {solarProfile,travel,atmosphere,breathable,MONUMENTS,nearbyResources,planetDistance,nearbyWrecks,steering} from '../shared/planet.js';
 import {roomStatus,rooms,stepRooms,airlockCheck,doorSides,roomAt} from '../shared/rooms.js';
 import {DEFAULT_SETTINGS} from '../shared/settings.js';
 import {dist,RESOURCES,RECIPES,canAfford,pay,itemCount,freeSpace,blocked} from '../shared/world.js';
 import {scryptSync,randomBytes,timingSafeEqual} from 'node:crypto';
 export const VEHICLES={scout:{name:'Scout rover',seats:1,cargo:100,bays:2,speed:6.7,cost:{ferrite:16,copper:4,scrap:6}},rover:{name:'Expedition rover',seats:4,cargo:300,bays:4,speed:6.2,cost:{ferrite:30,copper:8,scrap:12}},crawler:{name:'Transport crawler',seats:10,cargo:800,bays:8,speed:5.3,cost:{ferrite:40,copper:10,scrap:10}}};
-export function initExpedition(w){w.settings={...DEFAULT_SETTINGS,...w.settings};w.depleted??={};w.vehicles??=[];w.nextVehicle??=1;w.locks??={};w.pinAttempts??={};w.roomAir??={};w.atmosphere??=atmosphere(w.seed);w.audit??=[];for(const p of Object.values(w.players))initPlayer(p);}
+export function initExpedition(w){w.planet??=solarProfile(w.seed);w.settings={...DEFAULT_SETTINGS,...w.settings,daySeconds:w.planet.daySeconds,nightSeconds:w.planet.nightSeconds};w.depleted??={};w.vehicles??=[];w.nextVehicle??=1;w.locks??={};w.pinAttempts??={};w.roomAir??={};w.atmosphere??=atmosphere(w.seed);w.audit??=[];for(const p of Object.values(w.players))initPlayer(p);}
 export function initPlayer(p){for(const key of Object.keys(RESOURCES))p.inventory[key]??=0;p.oxygen??=100;p.water??=100;p.food??=100;p.stamina??=100;p.suit??=true;p.skills??={mining:0,construction:0,combat:0,piloting:0};p.belt??=Array(10).fill(null);p.survey??=[];p.markers??=[];p.vehicle??=null;p.sleeping??=false;}
 export function resourcesFor(w,p){const generated=nearbyResources(w.seed,p,w.depleted);return [...w.resources.filter(n=>dist(n,p)<320),...generated];}
 export function skill(p,key,amount=1){p.skills[key]=Math.min(10000,(p.skills[key]||0)+amount);}

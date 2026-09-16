@@ -27,3 +27,7 @@ export function nearbyResources(seed,p,depleted={}){return nearbyTiles(p).flatMa
 
 export function nearbyWrecks(seed,p){return nearbyTiles(p).flatMap(t=>tileContent(seed,t).wrecks).filter(v=>planetDistance(v,p)<320);}
 export function steering(input,p){if(![input.vx,input.vy,input.vz].every(Number.isFinite))return input;const b=basis(p.x,p.z),x=input.vx*b.east.x+input.vy*b.east.y+input.vz*b.east.z,z=input.vx*b.south.x+input.vy*b.south.y+input.vz*b.south.z,n=Math.max(1,Math.hypot(x,z));return{...input,x:x/n,z:z/n};}
+
+// Gameplay world-generation rule, not a physical law: size and solar distance
+// influence the generated rotation period. One shared clock for this milestone.
+export function solarProfile(seed,circumference=CIRCUMFERENCE,solarDistanceAU){const r=random(hash('solar:'+seed));const distance=solarDistanceAU??Number((.7+r()*2.1).toFixed(2));const rotationSeconds=Math.round(clamp(900*Math.sqrt(circumference/CIRCUMFERENCE)*Math.pow(distance,.35),480,3600));const daySeconds=Math.floor(rotationSeconds/2);return{version:1,circumference,solarDistanceAU:distance,rotationSeconds,daySeconds,nightSeconds:rotationSeconds-daySeconds};}
