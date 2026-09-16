@@ -1,4 +1,4 @@
-# Planetary Expedition verification — development build
+# Planetary Expedition verification — released September 16, 2026
 
 ## Passed
 - 34 automated rule/integration tests: fifty verified clients and overflow/released-seat handling; concurrent cloud admission; saved progression; great-circle circumnavigation math, longitude/pole crossing; deterministic streamed deposits and depletion save/reload; room sealing, airlocks, breach behavior, safe sleep quorum; PIN access/redaction/revocation/guess limits; rover driving and passengers; PvP/settings checks; email verification replay and duplicate-email protection; unprivileged admin denial.
@@ -20,7 +20,8 @@
 - The wiki DNS-only CNAME resolves publicly to the project's Vercel DNS target.
 - MASTER_ADMIN_EMAIL, PUBLIC_URL, MAIL_FROM and RESEND_API_KEY are configured. Master access still requires verified ownership of the designated email.
 - A separate durable pre-release world backup was created at 2026-09-16T22:25:47.846Z (9 structures, 10 saved players). The live save key was not reset.
-- Production deployment and public smoke checks are pending at the time of this release-candidate commit.
+- Production deployment `dpl_8m7mDio9ZGwk9m4E6ggVdFAQv8e9` (code commit `9fc12ed`) was promoted. Public game/account/server directory smoke checks passed; the directory advertises 50 players with new-server creation disabled. The wiki HTTPS certificate was issued and its public page rendered correctly. Existing account session displayed the email-enrollment gate.
+- The immediate Vercel error-log query returned no logs; this is a short smoke check, not sustained production-load validation. The owner still needs to verify their email personally before master access is active.
 
 ## Explicit scope limits
 The first monument locations are authored around the landing region; richer randomized interiors and distant variants remain future work. Construction is currently one storey; structural weight, stairs and multi-level rooms are not implemented. Vehicle attachment machinery and automated pipes are future work. There are no offline sleeper bodies or corpse-loot mechanics. The six-hour rover journey is derived from size/speed and traversal math; nobody has driven a full six-hour circuit during testing. Local tangent construction grids were checked for three-metre spacing and sealed rooms at polar and longitude-seam locations; larger bases still need human playtesting.
