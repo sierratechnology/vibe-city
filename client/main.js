@@ -3,6 +3,7 @@ import {accountUI} from './account.js';
 import {daylight,SPECIES} from '/shared/ecology.js';
 import {wildlifeRenderer} from './wildlife.js';
 import {bindControls} from './controls.js';
+import {createReconnectController} from './reconnect.js';
 import {height,surface,generate,rng,RUIN,RECIPES,RESOURCES,shape,dist,placementError,canAfford,itemCount,sheltered,powered,blocked} from '/shared/world.js';
 const account=accountUI();
 const $=id=>document.getElementById(id),canvas=$('world');
@@ -52,19 +53,19 @@ function guideOpen(open){controls.reset();moveTarget=null;guide=open;$('guide').
 function capture(){canvas.requestPointerLock?.()?.catch?.(()=>notify('Mouse capture unavailable. Drag on the world to orbit.'));}
 $('menuButton').onclick=()=>guideOpen(true);$('closeGuide').onclick=()=>guideOpen(false);
 let recipeState='';
-let reconnectWanted=false,reconnectTimer=null;
-$('leave').onclick=()=>{reconnectWanted=false;clearTimeout(reconnectTimer);send({type:'input',x:0,z:0});ws?.close();location.reload();};
+const reconnect=createReconnectController({attempt:connectExplorer,exhausted:()=>{$('network').textContent='OFFLINE';$('joinError').textContent='Connection lost. Rejoin manually.';$('enter').disabled=false;notify('Automatic reconnect stopped. Rejoin when the server is available.');}});
+$('leave').onclick=()=>{reconnect.stop();send({type:'input',x:0,z:0});ws?.close();location.reload();};
 function connectExplorer(){$('enter').disabled=true;$('joinError').textContent='Connecting to the expedition server…';
  const character=$('character').value;if(!character){$('joinError').textContent='Create or select a character first.';$('enter').disabled=false;return;}localStorage.setItem('vc-selected-character',character);
  ws=new WebSocket(`${location.protocol==='https:'?'wss':'ws'}://${location.host}/api/ws`);
  ws.onopen=()=>ws.send(JSON.stringify({type:'join',character,server:'quiet-basin'}));
  ws.onmessage=e=>{const m=JSON.parse(e.data);if(m.type==='error'){notify(m.message);$('joinError').textContent=m.message;$('enter').disabled=false;ws.close();return;}
  if(m.type==='notice')notify(m.message);
- if(m.type==='welcome'){reconnectWanted=true;id=m.id;state=m.state;joined=true;localPos.set(me().x,surface(state,me().x,me().z),me().z);buildEnvironment(state.seed);$('landing').classList.add('hidden');$('hud').classList.remove('hidden');notify('Drag to look. Tap terrain or use the movement pad to walk.');}
+ if(m.type==='welcome'){reconnect.connected();id=m.id;state=m.state;joined=true;localPos.set(me().x,surface(state,me().x,me().z),me().z);buildEnvironment(state.seed);$('landing').classList.add('hidden');$('hud').classList.remove('hidden');notify('Drag to look. Tap terrain or use the movement pad to walk.');}
  if(m.type==='state'){state=m.state;const p=me();if(p&&Math.hypot(localPos.x-p.x,localPos.z-p.z)>1){localPos.x=p.x;localPos.z=p.z;}updateGeometry();if(storageId)renderStorage();if(guide){const key=JSON.stringify([p?.inventory,p?.cutter,p?.flashlightOwned,p?.unlocked]);if(key!==recipeState){recipeState=key;renderRecipes();}}$('saveStatus').textContent=m.saveError||`Saved · ${m.lastSaved?new Date(m.lastSaved).toLocaleTimeString():'pending'}`;}
  if(m.type==='result'){notify(m.message);if(guide)renderRecipes();}
  updateHUD();};
- ws.onclose=()=>{$('enter').disabled=false;joined=false;keys={};controls.reset();moveTarget=null;$('network').textContent='RECONNECTING';if(reconnectWanted){notify('Reconnecting to the expedition…');clearTimeout(reconnectTimer);reconnectTimer=setTimeout(connectExplorer,4000);}else if(!$('joinError').textContent)$('joinError').textContent='Server unavailable. Please try again.';};ws.onerror=()=>{$('joinError').textContent='Could not reach the expedition server.';};
+ ws.onclose=()=>{$('enter').disabled=false;joined=false;keys={};controls.reset();moveTarget=null;if(reconnect.active){$('network').textContent='RECONNECTING';notify('Reconnecting to the expedition…');reconnect.disconnected();}else if(!$('joinError').textContent)$('joinError').textContent='Server unavailable. Please try again.';};ws.onerror=()=>{$('joinError').textContent='Could not reach the expedition server.';};
 }
 
 async function showServers(){ $('findGame').classList.add('hidden');$('serverBrowser').classList.remove('hidden');$('serverInfo').textContent='Checking server…';try{const res=await fetch('/api/servers',{cache:'no-store'});if(!res.ok)throw Error();const data=await res.json(),server=data.servers[0];$('serverInfo').textContent=`${server.players} / ${server.maxPlayers} explorers online · Seeded planetary expedition`;$('enter').disabled=server.players>=server.maxPlayers||!$('character').value;}catch{$('serverInfo').textContent='Unable to check occupancy. You can still try joining.';$('enter').disabled=!$('character').value;}}
