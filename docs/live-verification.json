@@ -1,0 +1,14 @@
+{
+  "at": "2026-09-16T18:52:01.437Z",
+  "url": "https://vibe-city.net",
+  "passed": true,
+  "checks": [
+    "HTTPS website renders",
+    "two real deployed WebSocket clients",
+    "remote avatars",
+    "mouse-only movement synchronized to phone-sized client",
+    "reload restores identity and position"
+  ],
+  "pageErrors": [],
+  "physicalPhoneTested": false
+}

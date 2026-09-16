@@ -1,5 +1,7 @@
 # Vibe City: First Signal
 
+**Live: https://vibe-city.net — up to 10 simultaneous explorers, mouse or phone touch.**
+
 An original, small, playable 3D survival and construction game. No Hermes integration, accounts, paid services, downloaded art, or external game assets. A real Node server owns a shared world; browsers render it with Three.js.
 
 ## Launch on your Mac
@@ -7,7 +9,7 @@ An original, small, playable 3D survival and construction game. No Hermes integr
 Requires Node.js 22 or newer. In Terminal:
 
 ```sh
-cd "/Users/devon/Documents/Codex/2026-09-14/t/outputs/vibe-city-first-signal"
+cd "/Users/devon/Documents/GitHub/vibe-city"
 npm ci
 npm start
 ```

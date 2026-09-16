@@ -55,7 +55,7 @@ function connectExplorer(){$('enter').disabled=true;$('joinError').textContent='
  ws.onmessage=e=>{const m=JSON.parse(e.data);if(m.type==='error'){notify(m.message);$('joinError').textContent=m.message;$('enter').disabled=false;ws.close();return;}
  if(m.type==='notice')notify(m.message);
  if(m.type==='welcome'){reconnectWanted=true;id=m.id;state=m.state;joined=true;localPos.set(me().x,surface(state,me().x,me().z),me().z);buildEnvironment(state.seed);$('landing').classList.add('hidden');$('hud').classList.remove('hidden');notify('Drag to look. Tap terrain or use the movement pad to walk.');}
- if(m.type==='state'){state=m.state;const p=me();if(p&&Math.hypot(localPos.x-p.x,localPos.z-p.z)>1){localPos.x=p.x;localPos.z=p.z;}updateGeometry();$('saveStatus').textContent=m.saveError||`Saved locally · ${m.lastSaved?new Date(m.lastSaved).toLocaleTimeString():'pending'}`;}
+ if(m.type==='state'){state=m.state;const p=me();if(p&&Math.hypot(localPos.x-p.x,localPos.z-p.z)>1){localPos.x=p.x;localPos.z=p.z;}updateGeometry();$('saveStatus').textContent=m.saveError||`Saved · ${m.lastSaved?new Date(m.lastSaved).toLocaleTimeString():'pending'}`;}
  if(m.type==='result'){notify(m.message);if(guide)renderRecipes();}
  updateHUD();};
  ws.onclose=()=>{$('enter').disabled=false;joined=false;keys={};controls.reset();moveTarget=null;$('network').textContent='RECONNECTING';if(reconnectWanted){notify('Reconnecting to the expedition…');clearTimeout(reconnectTimer);reconnectTimer=setTimeout(connectExplorer,4000);}else if(!$('joinError').textContent)$('joinError').textContent='Server unavailable. Please try again.';};ws.onerror=()=>{$('joinError').textContent='Could not reach the expedition server.';};

@@ -34,3 +34,9 @@ Run `npm test`, then `npm run test:browser`. The browser test requires Chrome; `
 - Mouse-only movement pad verified; keyboard shortcuts remain optional.
 - Two independent server instances connected to the actual Upstash resource using a disposable world key. Shared movement and persisted coordinates verified; test key removed afterward.
 - Shared-cloud transaction tests verify ten-seat concurrency, cooldown persistence, reconnect progression, expired sessions and rejection of stale sessions.
+
+## Live domain verification
+- https://vibe-city.net deployed on September 16, 2026. Public HTTPS health check confirms maxPlayers=10 and Redis persistence.
+- Two real Chrome browser clients joined the deployed WebSocket endpoint. Mouse-only movement on one client was observed by the other, phone-sized client. Reload restored the explorer identity and saved position. No browser page errors.
+- See live-verification.json and screenshots/live-*.png. Physical-phone testing and a sustained ten-rendered-client load test remain outstanding. The ten-player admission test uses real network sockets, not ten rendered browsers.
+- Original source backed up in vibe-city-previous-project.zip outside the repository; full previous history retained in Git.
