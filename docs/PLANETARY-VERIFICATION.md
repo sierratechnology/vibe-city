@@ -1,7 +1,7 @@
 # Planetary Expedition verification — released September 16, 2026
 
 ## Passed
-- 34 automated rule/integration tests: fifty verified clients and overflow/released-seat handling; concurrent cloud admission; saved progression; great-circle circumnavigation math, longitude/pole crossing; deterministic streamed deposits and depletion save/reload; room sealing, airlocks, breach behavior, safe sleep quorum; PIN access/redaction/revocation/guess limits; rover driving and passengers; PvP/settings checks; email verification replay and duplicate-email protection; unprivileged admin denial.
+- 42 automated rule/integration tests: fifty verified clients and overflow/released-seat handling; concurrent cloud admission; saved progression; great-circle circumnavigation math, longitude/pole crossing; deterministic streamed deposits and depletion save/reload; room sealing, airlocks, breach behavior, safe sleep quorum; PIN access/redaction/revocation/guess limits; rover driving and passengers; PvP/settings checks; email verification replay and duplicate-email protection; unprivileged admin denial.
 - Two local rendered browsers completed real gather → cutter → ruin → four-piece construction → powered shelter, then restarted the server with persistent inventory and structures. No fixture materials for this core-loop test. Sample: 60 FPS, 71 draw calls, 31,828 triangles.
 - Explicit fixture browser tests covered account verification through the real token flow, three characters, shared cargo, night creatures/lights/food, rover construction and driver/passenger movement, map markers, atmosphere scans, persistent tips, restricted admin controls, and rendering at quarter-planet, polar and longitude-seam positions.
 - Browser screenshots inspected. Fixed vehicle Euler orientation, rover camera distance and local surface lighting during visual review.
@@ -10,7 +10,7 @@
 - Production build passed. No credentials or save data in browser output.
 
 ## Latest rerun
-- All 34 automated tests and the production build passed after the tangent-grid and camera/input changes.
+- All 42 automated tests and the production build passed after the tangent-grid and camera/input changes.
 - Expedition browser checks passed, including tips remaining off after reload.
 - The core two-browser check passed through construction and restart persistence on rerun. Its first run timed out while steering to a target (0.74 m short); the cause is not established, so movement automation remains a reliability follow-up.
 
@@ -25,3 +25,10 @@
 
 ## Explicit scope limits
 The first monument locations are authored around the landing region; richer randomized interiors and distant variants remain future work. Construction is currently one storey; structural weight, stairs and multi-level rooms are not implemented. Vehicle attachment machinery and automated pipes are future work. There are no offline sleeper bodies or corpse-loot mechanics. The six-hour rover journey is derived from size/speed and traversal math; nobody has driven a full six-hour circuit during testing. Local tangent construction grids were checked for three-metre spacing and sealed rooms at polar and longitude-seam locations; larger bases still need human playtesting.
+
+## Upstream reliability integration
+- Preserved upstream ws 8.21.0 security patch, browser-engine harness, bounded reconnect controller, and per-connection input sequence acknowledgements.
+- Adapted position correction to great-circle distance and tangent movement so it takes the short path at longitude/polar seams; added a focused test.
+- Real browser packet reorder check passed without page errors. Server-restart reconnect preserved identity, inventory and construction in 1.589 seconds without reloading the page.
+- Two independent cloud processes passed the guarded disposable Redis test at 17.99 metres over five seconds. An earlier join returned an unspecified error and the retry passed; this was not a sustained load test.
+- Updated the older browser journey for verified accounts and explicit Build mode. Short input pulses near target coordinates avoid steering overshoot in the browser test driver; final arrival assertions remain strict.

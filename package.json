@@ -13,7 +13,7 @@
   },
   "dependencies": {
     "three": "0.181.2",
-    "ws": "8.18.3"
+    "ws": "8.21.0"
   },
   "devDependencies": {
     "playwright": "1.55.1"
