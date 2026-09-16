@@ -4,6 +4,7 @@ import {daylight,SPECIES} from '/shared/ecology.js';
 import {wildlifeRenderer} from './wildlife.js';
 import {bindControls} from './controls.js';
 import {createReconnectController} from './reconnect.js';
+import {createInputReconciler} from './reconciliation.js';
 import {height,surface,generate,rng,RUIN,RECIPES,RESOURCES,shape,dist,placementError,canAfford,itemCount,sheltered,powered,blocked} from '/shared/world.js';
 const account=accountUI();
 const $=id=>document.getElementById(id),canvas=$('world');
@@ -45,27 +46,28 @@ function clearGroup(group){for(const obj of [...group.children]){obj.traverse(o=
 function updateGeometry(){const rk=state.resources.map(n=>n.amount).join(',');if(rk!==resourceKey){resourceKey=rk;for(const type of ['ferrite','fiber','crystal','meat']){let i=0;for(const n of state.resources.filter(n=>n.type===type&&n.amount>0)){const size=.6+n.amount*.1;dummy.position.set(n.x,n.y+(type==='fiber'?.8:.6),n.z);dummy.rotation.set(0,n.x*1.7,type==='crystal'?.12:0);dummy.scale.setScalar(size);dummy.updateMatrix();resourceMeshes[type].setMatrixAt(i++,dummy.matrix);}resourceMeshes[type].count=i;resourceMeshes[type].instanceMatrix.needsUpdate=true;resourceMeshes[type].computeBoundingSphere();}}
  const sk=state.structures.map(s=>s.id).join(',');if(sk!==structureKey){structureKey=sk;clearGroup(structuresGroup);for(const s of state.structures)structuresGroup.add(pieceMesh(s));}}
 function astronaut(color){const group=new THREE.Group(),suit=mat(color);const torso=box(.62,.75,.4,suit,group);torso.position.y=1.05;const head=mesh(new THREE.IcosahedronGeometry(.36,1),materials.wall,group);head.position.y=1.65;const visor=box(.47,.19,.11,materials.dark,group);visor.position.set(0,1.66,.3);const pack=box(.45,.55,.25,materials.trim,group);pack.position.set(0,1.08,-.3);const legs=[];for(const x of [-.18,.18]){const leg=box(.2,.58,.22,materials.dark,group);leg.position.set(x,.38,0);legs.push(leg);const arm=box(.17,.68,.2,suit,group);arm.position.set(x*2.3,1.02,0);}group.userData.legs=legs;return group;}
-const avatars=new Map();let localPos=new THREE.Vector3(0,0,3),yaw=0,pitch=.42,distance=5.5,keys={},buildMode=false,selected='floor',rotation=0,piece=null,lastInput=0,lastGather=0,guide=false,toastTimer;
+const avatars=new Map(),inputReconciler=createInputReconciler();let localPos=new THREE.Vector3(0,0,3),yaw=0,pitch=.42,distance=5.5,keys={},buildMode=false,selected='floor',rotation=0,piece=null,lastInput=0,lastGather=0,guide=false,toastTimer;
 function me(){return state.players.find(p=>p.id===id);}
 function send(m){if(ws?.readyState===1&&joined)ws.send(JSON.stringify(m));}
+function sendInput(input){if(ws?.readyState!==1||!joined)return;const message=inputReconciler.queue({type:'input',...input});if(message)ws.send(JSON.stringify(message));}
 function notify(msg){$('toast').textContent=msg;$('toast').classList.add('show');clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('toast').classList.remove('show'),3500);}
-function guideOpen(open){controls.reset();moveTarget=null;guide=open;$('guide').classList.toggle('hidden',!open);keys={};send({type:'input',x:0,z:0});if(open){document.exitPointerLock?.();renderRecipes();}}
+function guideOpen(open){controls.reset();moveTarget=null;guide=open;$('guide').classList.toggle('hidden',!open);keys={};sendInput({x:0,z:0});if(open){document.exitPointerLock?.();renderRecipes();}}
 function capture(){canvas.requestPointerLock?.()?.catch?.(()=>notify('Mouse capture unavailable. Drag on the world to orbit.'));}
 $('menuButton').onclick=()=>guideOpen(true);$('closeGuide').onclick=()=>guideOpen(false);
 let recipeState='';
 const reconnect=createReconnectController({attempt:connectExplorer,exhausted:()=>{$('network').textContent='OFFLINE';$('joinError').textContent='Connection lost. Rejoin manually.';$('enter').disabled=false;notify('Automatic reconnect stopped. Rejoin when the server is available.');}});
-$('leave').onclick=()=>{reconnect.stop();send({type:'input',x:0,z:0});ws?.close();location.reload();};
+$('leave').onclick=()=>{reconnect.stop();sendInput({x:0,z:0});ws?.close();location.reload();};
 function connectExplorer(){$('enter').disabled=true;$('joinError').textContent='Connecting to the expedition server…';
  const character=$('character').value;if(!character){$('joinError').textContent='Create or select a character first.';$('enter').disabled=false;return;}localStorage.setItem('vc-selected-character',character);
- ws=new WebSocket(`${location.protocol==='https:'?'wss':'ws'}://${location.host}/api/ws`);
- ws.onopen=()=>ws.send(JSON.stringify({type:'join',character,server:'quiet-basin'}));
- ws.onmessage=e=>{const m=JSON.parse(e.data);if(m.type==='error'){notify(m.message);$('joinError').textContent=m.message;$('enter').disabled=false;ws.close();return;}
+ const socket=new WebSocket(`${location.protocol==='https:'?'wss':'ws'}://${location.host}/api/ws`);ws=socket;
+ socket.onopen=()=>socket.send(JSON.stringify({type:'join',character,server:'quiet-basin'}));
+ socket.onmessage=e=>{if(ws!==socket)return;const m=JSON.parse(e.data);if(m.type==='error'){notify(m.message);$('joinError').textContent=m.message;$('enter').disabled=false;socket.close();return;}
  if(m.type==='notice')notify(m.message);
- if(m.type==='welcome'){reconnect.connected();id=m.id;state=m.state;joined=true;localPos.set(me().x,surface(state,me().x,me().z),me().z);buildEnvironment(state.seed);$('landing').classList.add('hidden');$('hud').classList.remove('hidden');notify('Drag to look. Tap terrain or use the movement pad to walk.');}
- if(m.type==='state'){state=m.state;const p=me();if(p&&Math.hypot(localPos.x-p.x,localPos.z-p.z)>1){localPos.x=p.x;localPos.z=p.z;}updateGeometry();if(storageId)renderStorage();if(guide){const key=JSON.stringify([p?.inventory,p?.cutter,p?.flashlightOwned,p?.unlocked]);if(key!==recipeState){recipeState=key;renderRecipes();}}$('saveStatus').textContent=m.saveError||`Saved · ${m.lastSaved?new Date(m.lastSaved).toLocaleTimeString():'pending'}`;}
+ if(m.type==='welcome'){reconnect.connected();inputReconciler.reset();id=m.id;state=m.state;joined=true;localPos.set(me().x,surface(state,me().x,me().z),me().z);buildEnvironment(state.seed);$('landing').classList.add('hidden');$('hud').classList.remove('hidden');notify('Drag to look. Tap terrain or use the movement pad to walk.');}
+ if(m.type==='state'){state=m.state;const p=me();if(p){const corrected=inputReconciler.reconcile(localPos,p,m.inputAck);localPos.x=corrected.x;localPos.z=corrected.z;}updateGeometry();if(storageId)renderStorage();if(guide){const key=JSON.stringify([p?.inventory,p?.cutter,p?.flashlightOwned,p?.unlocked]);if(key!==recipeState){recipeState=key;renderRecipes();}}$('saveStatus').textContent=m.saveError||`Saved · ${m.lastSaved?new Date(m.lastSaved).toLocaleTimeString():'pending'}`;}
  if(m.type==='result'){notify(m.message);if(guide)renderRecipes();}
  updateHUD();};
- ws.onclose=()=>{$('enter').disabled=false;joined=false;keys={};controls.reset();moveTarget=null;if(reconnect.active){$('network').textContent='RECONNECTING';notify('Reconnecting to the expedition…');reconnect.disconnected();}else if(!$('joinError').textContent)$('joinError').textContent='Server unavailable. Please try again.';};ws.onerror=()=>{$('joinError').textContent='Could not reach the expedition server.';};
+ socket.onclose=()=>{if(ws!==socket)return;$('enter').disabled=false;joined=false;inputReconciler.reset();keys={};controls.reset();moveTarget=null;if(reconnect.active){$('network').textContent='RECONNECTING';notify('Reconnecting to the expedition…');reconnect.disconnected();}else if(!$('joinError').textContent)$('joinError').textContent='Server unavailable. Please try again.';};socket.onerror=()=>{if(ws===socket)$('joinError').textContent='Could not reach the expedition server.';};
 }
 
 async function showServers(){ $('findGame').classList.add('hidden');$('serverBrowser').classList.remove('hidden');$('serverInfo').textContent='Checking server…';try{const res=await fetch('/api/servers',{cache:'no-store'});if(!res.ok)throw Error();const data=await res.json(),server=data.servers[0];$('serverInfo').textContent=`${server.players} / ${server.maxPlayers} explorers online · Seeded planetary expedition`;$('enter').disabled=server.players>=server.maxPlayers||!$('character').value;}catch{$('serverInfo').textContent='Unable to check occupancy. You can still try joining.';$('enter').disabled=!$('character').value;}}
@@ -98,7 +100,7 @@ window.addEventListener('keydown',e=>{if(!joined||['INPUT','SELECT'].includes(do
  if(e.code==='KeyF')send({type:'light'});if(e.code==='KeyH')send({type:'eat'});if(e.code==='Space')attack();
  if(e.code==='KeyB'){buildMode=!buildMode;updateHUD();}if(/^Digit[1-7]$/.test(e.code)){selected=pieces[+e.code.slice(-1)-1];buildMode=true;updateHUD();}if(e.code==='KeyR')rotation=(rotation+1)%4;if(e.code==='KeyE'){interact();lastGather=performance.now();}
  if(e.code==='KeyX'){const p=me(),s=state.structures.filter(s=>s.owner===id&&dist(s,p)<6).sort((a,b)=>dist(a,p)-dist(b,p)||Number(a.type==='floor')-Number(b.type==='floor'))[0];if(s)send({type:'dismantle',id:s.id});}
-});window.addEventListener('keyup',e=>keys[e.code]=false);window.addEventListener('blur',()=>{keys={};send({type:'input',x:0,z:0});});document.addEventListener('visibilitychange',()=>{if(document.hidden){keys={};send({type:'input',x:0,z:0});}});
+});window.addEventListener('keyup',e=>keys[e.code]=false);window.addEventListener('blur',()=>{keys={};sendInput({x:0,z:0});});document.addEventListener('visibilitychange',()=>{if(document.hidden){keys={};sendInput({x:0,z:0});}});
 let moveTarget=null,stuckTime=0;
 function dismantleNearest(){const p=me();if(!p)return;const s=state.structures.filter(s=>s.owner===id&&dist(s,p)<6).sort((a,b)=>dist(a,p)-dist(b,p)||Number(a.type==='floor')-Number(b.type==='floor'))[0];if(s)send({type:'dismantle',id:s.id});else notify('No nearby piece belongs to you.');}
 
@@ -130,7 +132,7 @@ function animate(now){requestAnimationFrame(animate);const dt=Math.min(.05,(now-
  if(!blocked(state,localPos.x+mx*dt*speed,localPos.z))localPos.x+=mx*dt*speed;if(!blocked(state,localPos.x,localPos.z+mz*dt*speed))localPos.z+=mz*dt*speed;
  if(moveTarget){stuckTime=localPos.distanceTo(beforeMove)<.001?stuckTime+dt:0;if(stuckTime>.7){moveTarget=null;notify('Path blocked. Steer around the obstacle.');}}
  if(!mx&&!mz){localPos.x=THREE.MathUtils.lerp(localPos.x,p.x,dt*12);localPos.z=THREE.MathUtils.lerp(localPos.z,p.z,dt*12);}
- localPos.y=surface(state,localPos.x,localPos.z);if(now-lastInput>50){send({type:'input',x:mx,z:mz,sprint,yaw,aimYaw:yaw+Math.PI});lastInput=now;}
+ localPos.y=surface(state,localPos.x,localPos.z);if(now-lastInput>50){sendInput({x:mx,z:mz,sprint,yaw,aimYaw:yaw+Math.PI});lastInput=now;}
  if((keys.KeyE||controls.input.gather)&&!guide&&now-lastGather>(p.cutter?420:800)){interact();lastGather=now;}
  const focus=new THREE.Vector3(localPos.x,localPos.y+1.4,localPos.z);const desired=new THREE.Vector3(localPos.x+Math.sin(yaw)*distance*Math.cos(pitch),localPos.y+1.4+distance*Math.sin(pitch),localPos.z+Math.cos(yaw)*distance*Math.cos(pitch));desired.y=Math.max(desired.y,height(desired.x,desired.z,state.seed)+.45);
  const arm=desired.clone().sub(focus);cameraRay.set(focus,arm.clone().normalize());cameraRay.far=arm.length();const obstruction=cameraRay.intersectObjects([...structuresGroup.children,terrain],true).find(h=>h.distance>.15&&h.object.geometry?.type!=='RingGeometry');if(obstruction)desired.copy(focus).addScaledVector(arm.normalize(),Math.max(.4,obstruction.distance-.3));
@@ -148,4 +150,4 @@ function animate(now){requestAnimationFrame(animate);const dt=Math.min(.05,(now-
 }
 buildEnvironment(state.seed);requestAnimationFrame(animate);
 // Read-only diagnostics for repeatable browser verification; no gameplay mutation API.
-Object.defineProperty(window,'vibeDiagnostics',{get:()=>({connected:joined,id,player:me()?structuredClone(me()):null,state:structuredClone(state),fps,drawCalls:renderer.info.render.calls,triangles:renderer.info.render.triangles,avatars:avatars.size,creatures:wildlife.count(),night:daylight(state.time).night,webgl:renderer.capabilities.isWebGL2,buildMode,selected,preview:piece?{...piece}:null})});
+Object.defineProperty(window,'vibeDiagnostics',{get:()=>({connected:joined,id,player:me()?structuredClone(me()):null,state:structuredClone(state),fps,drawCalls:renderer.info.render.calls,triangles:renderer.info.render.triangles,avatars:avatars.size,creatures:wildlife.count(),night:daylight(state.time).night,webgl:renderer.capabilities.isWebGL2,buildMode,selected,preview:piece?{...piece}:null,inputAck:inputReconciler.latestAck,pendingInputs:inputReconciler.pendingCount})});
