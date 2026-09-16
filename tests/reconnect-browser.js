@@ -95,6 +95,7 @@ try {
   await page.keyboard.press('KeyB');
 
   const before = await diagnostics();
+  assert.ok(Number.isSafeInteger(before.inputAck), 'pre-reconnect input must be acknowledged');
   const pageMarker = await page.evaluate(() => window.__reconnectPageMarker = crypto.randomUUID());
   const disconnectedAt = Date.now();
   await app.close();
@@ -119,12 +120,15 @@ try {
   assert.equal(after.state.players.length, 1, 'server snapshot must contain one player presence');
   assert.equal(new Set(after.state.players.map(player => player.id)).size, 1, 'player presence must not be duplicated');
   assert.equal(after.avatars, 1, 'browser must render one avatar');
+  assert.ok(after.pendingInputs <= 1, 'reconnect must reset the pending input epoch');
   assert.ok(reconnectMs <= 6000, `reconnect exceeded technical test ceiling: ${reconnectMs} ms`);
 
   const xBeforeMovement = after.player.x;
   await walkByKey('KeyD', x => window.vibeDiagnostics.player.x > x + 1, xBeforeMovement);
   const moved = await diagnostics();
   assert.ok(moved.player.x > xBeforeMovement + 1, 'post-reconnect movement must be accepted by the server');
+  assert.ok(Number.isSafeInteger(moved.inputAck) && moved.inputAck < before.inputAck, 'reconnect must begin a fresh acknowledged sequence epoch');
+  assert.ok(moved.pendingInputs <= 32, 'post-reconnect pending inputs must remain bounded');
   assert.equal(errors.length, 0, errors.join('\n'));
   console.log(JSON.stringify({browserEngine, reconnectMs, retryCeilingMs: 6000, playerId: after.id, players: after.state.players.length, avatars: after.avatars, structures: after.state.structures.length, pageErrors: errors.length}));
 } finally {
