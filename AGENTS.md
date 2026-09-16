@@ -4,9 +4,14 @@ This repository is an original sci-fi survival and construction game. It replace
 
 - Keep local play free and runnable with `npm ci && npm start`.
 - Shared rules live in `shared/`; server actions are authoritative.
-- Support ten simultaneous players, mouse-only controls and phone touch controls.
+- Support fifty simultaneous players, mouse-only controls and phone touch controls.
 - Preserve seeded world and player saves. Never publish credentials or local save data.
 - Vercel production uses the cloud adapter and durable Redis transactions; local play uses JSON disk saves.
 - Test gameplay, concurrency and save/reconnect behavior. Distinguish emulated touch from physical-device tests.
 - Keep larger ambitions in docs/DESIGN.md and docs/ROADMAP.md without speculative infrastructure.
 - Do not change production world keys or delete saves as part of routine deployment.
+
+- Account identity requires verified email before world entry. Never grant admin rights based on a username or unverified address.
+- Keep optional marketing consent separate from required terms acceptance.
+- Maintain wiki/ feature pages and changelog alongside game updates; distinguish shipped features from plans.
+- Preserve the live release while provider/DNS setup is pending. Do not bypass verification to ship.

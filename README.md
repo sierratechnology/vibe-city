@@ -1,6 +1,6 @@
 # Vibe City: First Signal
 
-**Live: https://vibe-city.net — up to 10 simultaneous explorers, mouse or phone touch.**
+**Live: https://vibe-city.net — up to 50 simultaneous explorers, mouse or phone touch.**
 
 An original, small, playable 3D survival and construction game. Original procedural art and no Hermes integration. Username/password accounts support three characters each. A real Node server owns a shared world; browsers render it with Three.js.
 
@@ -14,7 +14,7 @@ npm ci
 npm start
 ```
 
-Open **http://localhost:4173** in Chrome. Once dependencies are installed, internet is not required. Stop the server with **Control-C** to save and shut down cleanly. Alternatively double-click `Launch Vibe City.command` on macOS (Terminal may request permission).
+Open **http://localhost:4173** in Chrome. New accounts require a configured verification-email provider. Set `RESEND_API_KEY`, `MAIL_FROM` (a verified sender), and `PUBLIC_URL` for email links. Existing local accounts and world saves remain on disk. The offline test suite uses an explicitly isolated email transport fixture. Stop the server with **Control-C** to save and shut down cleanly. Alternatively double-click `Launch Vibe City.command` on macOS (Terminal may request permission).
 
 ## Play together in real time
 
@@ -22,7 +22,7 @@ Open **http://localhost:4173** in Chrome. Once dependencies are installed, inter
 2. Choose **Find / Join Game**, create an account, create a character, and join. For a second player, use a separate browser profile/account or select a different character.
 3. On a second computer on the same Wi-Fi/LAN, visit `http://HOST_IP:4173`. Find the Mac's IP in System Settings → Wi-Fi → Details → TCP/IP, or run `ipconfig getifaddr en0`.
 4. Allow Node/Terminal through the macOS firewall if prompted. Guest Wi-Fi with client isolation may prevent devices from reaching each other.
-5. Both players see one another, share deposits and construction, and keep separate inventories. The server supports ten simultaneous explorers; admission was verified with ten WebSocket clients. Two rendered clients remain the full-loop performance test.
+5. Both players see one another, share deposits and construction, and keep separate inventories. The server supports fifty simultaneous explorers; admission was verified with fifty authenticated WebSocket clients. Two rendered clients remain the full-loop performance test.
 
 The public game is available at https://vibe-city.net with HTTPS, secure account cookies and server-validated character ownership. Local development is intended for your trusted LAN. Mouse-only and phone touch controls are implemented; physical phone performance still needs verification.
 
@@ -99,7 +99,7 @@ No build/bundle step is needed. All browser code and dependencies are served loc
 
 ## Online deployment (September 16 update)
 
-The repository now supports Vercel Functions WebSockets at `/api/ws`, with an Upstash Redis world shared across function instances. `server/cloud-store.js` uses optimistic compare-and-set transactions so competing instances cannot fork the room or admit more than ten players. `server/cloud-room.js` advances the world and validates actions; sessions expire after lost connections. Browsers reconnect automatically when a platform connection is recycled.
+The repository now supports Vercel Functions WebSockets at `/api/ws`, with an Upstash Redis world shared across function instances. `server/cloud-store.js` uses optimistic compare-and-set transactions so competing instances cannot fork the room or admit more than fifty players. `server/cloud-room.js` advances the world and validates actions; sessions expire after lost connections. Browsers reconnect automatically when a platform connection is recycled.
 
 `KV_REST_API_URL` and `KV_REST_API_TOKEN` are server-only environment variables supplied by the Vercel integration. Never put them in client code. Production and preview use distinct world keys. Local `npm start` still uses the free disk-backed server and does not require Redis.
 
@@ -111,7 +111,7 @@ No keyboard is required. Click/tap terrain to walk toward it; drag the world to 
 
 ## The Living Basin update
 
-From the title choose **Find / Join Game**, then join **The Quiet Basin**. The directory shows live occupancy (10-player maximum). **Create Server** is deliberately disabled until the owner enables additional servers; there is no create-server endpoint.
+From the title choose **Find / Join Game**, then join **The Quiet Basin**. The directory shows live occupancy (50-player maximum). **Create Server** is deliberately disabled until the owner enables additional servers; there is no create-server endpoint.
 
 - **Day/night:** six minutes of daylight and four minutes of night per shared simulation cycle. All players see the same phase; cloud simulation pauses when empty.
 - **Mossback:** neutral at all hours. Hunt with Attack to obtain meat. Prepare a Field meal using 1 meat + 1 ribbon fiber; Eat restores 35 health.
@@ -129,3 +129,19 @@ From the title choose **Find / Join Game**, then join **The Quiet Basin**. The d
 Frequent transactional cloud saves and local five-second saves remain enabled. An additional Vercel Cron job runs at **00:00 UTC daily** and stores an immutable snapshot with eight-day retention. The `/api/daily-save` endpoint requires the server-only `CRON_SECRET`; it is not an anonymous backup or reset endpoint. The same date cannot overwrite an earlier snapshot. Local servers create dated backups when crossing UTC midnight while running. A stopped local server cannot execute a scheduled backup.
 
 Existing worlds upgrade in place: player items, structures, world time and resource depletion are preserved. The first successful cloud transaction persists the new creature population and player item fields.
+
+## Planetary Expedition update
+
+This release expands the world into a streamed 145 km-circumference sphere. Verified email is required before server entry; existing accounts retain their characters and progress.
+
+- Fifty concurrent characters; verified-email access before the title screen. Existing accounts enroll an email without losing characters. Marketing consent is separate and optional.
+- Terminal / M: exploration map, markers, atmosphere analyzer, suit controls, skills and ten belt slots, habitats, vehicles, and server settings.
+- Additional resources: ice, water, conductive ore, silica, carbon and salvage. Procedural rover wrecks can be repaired. The starting region includes Broken Relay, Cryowell Station and Crawler Graveyard.
+- Scout (1 seat), expedition rover (4), crawler (10), with shared cargo and battery/cargo/oxygen expansion bays. The crawler accessory area is reserved for later functional attachments.
+- Sealed-room checks, powered life support, doors/airlocks, ice processing, hydroponics and sleeping. Use Habitat in the terminal to operate nearby equipment. Outer door → sealed chamber → airlock door → powered base. Chamber limit: nine floor cells.
+- PvP and structure/vehicle damage, optional offline structure protection, PIN cargo lockers, carbine and repair tool. Player death still returns carried items intact; corpse loot and offline sleeper bodies are later work.
+- Field Guide → Settings → Show tips. The preference persists per browser and hides tutorial panels, not warnings.
+- Owner/admin changes are authorized on the server. `MASTER_ADMIN_EMAIL` bootstraps the owner only after email verification. Only the owner appoints admins. Bans revalidate active sessions every 30 seconds.
+- Public creation is disabled. Mutable settings include player limit, gathering and survival multipliers, PvP, structure damage, offline raiding, day/night duration, sleep quorum and rover speed. Generation parameters are fixed for the current world; future creation must apply them before generating it.
+
+Wiki source lives in `wiki/` and ships with the same build. Update its matching feature pages and changelog with each release. The wiki is hosted at https://wiki.vibe-city.net with verified Cloudflare DNS. See `docs/PLANETARY-VERIFICATION.md` for tested behavior and remaining checks.

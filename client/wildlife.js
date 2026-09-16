@@ -1,3 +1,5 @@
+import {vector,orient} from './planet-renderer.js';
+import {travel} from '/shared/planet.js';
 import * as THREE from 'three';
 import {SPECIES,daylight} from '/shared/ecology.js';
 import {surface} from '/shared/world.js';
@@ -11,11 +13,11 @@ export function wildlifeRenderer(scene){
  }
  return {update(state,dt,self,yaw,shape){
  const active=new Set((state.creatures||[]).map(c=>c.id));for(const [id,g] of actors)if(!active.has(id)){scene.remove(g);g.traverse(o=>{o.geometry?.dispose();});g.userData.geometryMaterial.dispose();actors.delete(id);}
- for(const c of state.creatures||[]){let g=actors.get(c.id);if(!g){g=creature(c);g.position.set(c.x,surface(state,c.x,c.z),c.z);scene.add(g);actors.set(c.id,g);}g.position.lerp(new THREE.Vector3(c.x,surface(state,c.x,c.z),c.z),Math.min(1,dt*10));g.rotation.y=c.yaw;}
- const ids=new Set(state.players.map(p=>p.id));for(const [id,b] of beams)if(!ids.has(id)){scene.remove(b,b.target);b.dispose();beams.delete(id);}
- for(const p of state.players){let b=beams.get(p.id);if(!b){b=new THREE.SpotLight(0xd7f4ff,0,25,.48,.55,1);scene.add(b,b.target);beams.set(p.id,b);}const on=p.flashlightOn&&p.charge>0;b.intensity=on?35:0;b.position.set(p.x,surface(state,p.x,p.z)+1.4,p.z);const angle=p.id===self?yaw+Math.PI:(p.aimYaw??p.yaw);b.target.position.set(p.x+Math.sin(angle)*14,surface(state,p.x,p.z)+.4,p.z+Math.cos(angle)*14);}
+ for(const c of state.creatures||[]){let g=actors.get(c.id);if(!g){g=creature(c);g.position.copy(vector(c.x,c.z,surface(state,c.x,c.z)));scene.add(g);actors.set(c.id,g);}g.position.lerp(vector(c.x,c.z,surface(state,c.x,c.z)),Math.min(1,dt*10));orient(g,c.x,c.z);g.rotateY(c.yaw);}
+ const selfPlayer=state.players.find(p=>p.id===self),litPlayers=state.players.filter(p=>p.flashlightOn).sort((a,b)=>Math.hypot(a.x-(selfPlayer?.x||0),a.z-(selfPlayer?.z||0))-Math.hypot(b.x-(selfPlayer?.x||0),b.z-(selfPlayer?.z||0))).slice(0,4);const ids=new Set(litPlayers.map(p=>p.id));for(const [id,b] of beams)if(!ids.has(id)){scene.remove(b,b.target);b.dispose();beams.delete(id);}
+ for(const p of litPlayers){let b=beams.get(p.id);if(!b){b=new THREE.SpotLight(0xd7f4ff,0,25,.48,.55,1);scene.add(b,b.target);beams.set(p.id,b);}const on=p.flashlightOn&&p.charge>0;b.intensity=on?35:0;b.position.copy(vector(p.x,p.z,surface(state,p.x,p.z)+1.4));const angle=p.id===self?yaw+Math.PI:(p.aimYaw??p.yaw);const aim=travel(p,Math.sin(angle)*14,Math.cos(angle)*14);b.target.position.copy(vector(aim.x,aim.z,surface(state,p.x,p.z)+.4));}
  const near=state.structures.filter(s=>s.type==='lamp').map(s=>shape(s,state.seed)).sort((a,b)=>a.x*a.x+a.z*a.z-b.x*b.x-b.z*b.z); // Render a bounded light pool on mobile.
  const p=state.players.find(p=>p.id===self);if(p)near.sort((a,b)=>Math.hypot(a.x-p.x,a.z-p.z)-Math.hypot(b.x-p.x,b.z-p.z));
- lampPool.forEach((l,i)=>{l.intensity=near[i]?12:0;if(near[i])l.position.set(near[i].x,near[i].y,near[i].z);});
+ lampPool.forEach((l,i)=>{l.intensity=near[i]?12:0;if(near[i])l.position.copy(vector(near[i].x,near[i].z,near[i].y));});
  },count:()=>actors.size};
 }

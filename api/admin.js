@@ -1,0 +1,2 @@
+import {Accounts} from '../server/accounts.js';import {RedisStore,transaction} from '../server/cloud-store.js';import {adminHandler} from '../server/admin.js';
+export default async function handler(req,res){try{const store=new RedisStore();return await adminHandler(new Accounts(store),async fn=>transaction(store,room=>{fn(room.world);return true;}))(req,res);}catch{res.status(503).json({error:'Admin service unavailable.'});}}

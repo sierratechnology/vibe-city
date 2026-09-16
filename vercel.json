@@ -15,5 +15,17 @@
       "path": "/api/daily-save",
       "schedule": "0 0 * * *"
     }
+  ],
+  "rewrites": [
+    {
+      "source": "/",
+      "has": [
+        {
+          "type": "host",
+          "value": "wiki.vibe-city.net"
+        }
+      ],
+      "destination": "/wiki/index.html"
+    }
   ]
 }

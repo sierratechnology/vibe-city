@@ -1,8 +1,11 @@
+import {validSite,gridPoint,localOffset,anchor,withinTile,floorHeight} from './build-grid.js';
+import {planetHeight,planetDistance} from './planet.js';
 // Shared deterministic world and collision rules. No renderer or network dependencies.
 export const VERSION = 1;
 export const LIMIT = 58;
 export const RUIN = {x:24,z:-24};
 export const RESOURCES = {
+  ice:{name:'Ice',color:0x9bdcea},water:{name:'Water canister',color:0x5bacdc},copper:{name:'Conductive ore',color:0xc98052},silica:{name:'Silica',color:0xe9d8ab},carbon:{name:'Carbon mineral',color:0x454953},scrap:{name:'Salvaged alloy',color:0x869094},
   ferrite:{name:'Ferrite',color:0xf5ae76},
   fiber:{name:'Ribbon fiber',color:0x80c7b6},
   meat:{name:'Mossback meat',color:0xc48678},
@@ -10,6 +13,14 @@ export const RESOURCES = {
   crystal:{name:'Flux crystal',color:0x9b9afa}
 };
 export const RECIPES = {
+  rifle:{name:'Arc carbine',cost:{ferrite:6,copper:3,crystal:2},description:'Ranged weapon. Each shot consumes one flux crystal.'},
+  repair:{name:'Repair tool',cost:{ferrite:3,copper:1},description:'Repairs nearby structures using ferrite.'},
+  door:{name:'Sealed door',cost:{ferrite:3,fiber:1},description:'An airtight outer door. Open using Operate.'},
+  airlock:{name:'Airlock door',cost:{ferrite:4,copper:2},description:'Inner door between a sealed chamber and a habitable base.'},
+  lifeSupport:{name:'Life support',cost:{ferrite:5,copper:2,crystal:2},description:'Makes a sealed room habitable. Refuel with flux crystals.'},
+  bed:{name:'Bunk',cost:{ferrite:2,fiber:4},description:'Sleep indoors with your suit removed.'},
+  iceProcessor:{name:'Ice processor',cost:{ferrite:4,copper:2},description:'Melt ice into a water tank, then fill canisters.'},
+  garden:{name:'Hydroponic bed',cost:{ferrite:3,fiber:2,silica:2},description:'Grows food and fiber with water inside a habitable room.'},
   cutter:{name:'Field cutter',cost:{ferrite:3,fiber:2},description:'Gather twice as fast. Required to scan the ruin.'},
   cargo:{name:'Cargo locker',cost:{ferrite:6,fiber:2},description:'Freestanding shared storage. Holds 200 item units. Open nearby with Storage.'},
   flashlight:{name:'Suit flashlight',cost:{ferrite:2,crystal:1},description:'Craft once; toggle Light. Uses 0.65 suit charge per second.'},
@@ -22,7 +33,7 @@ export const RECIPES = {
   heater:{name:'Resonance anchor',cost:{ferrite:4,crystal:3},unlock:true,description:'Ruin technology. Restores suit charge within 7 m.'}
 };
 export function rng(seed) { let a=seed>>>0; return ()=>{a+=0x6D2B79F5;let t=a;t=Math.imul(t^t>>>15,t|1);t^=t+Math.imul(t^t>>>7,t|61);return ((t^t>>>14)>>>0)/4294967296;}; }
-export function height(x,z,seed=7319){const p=(seed%97)*.04;return Math.sin(x*.072+p)*1.25+Math.cos(z*.088-p)*1.05+Math.sin((x+z)*.13)*.32;}
+export const height=planetHeight;
 export function generate(seed){
  const rand=rng(seed), nodes=[];
  const add=(type,x,z)=>nodes.push({id:`r${nodes.length}`,type,x,z,y:height(x,z,seed),amount:type==='crystal'?3:4});
@@ -32,43 +43,45 @@ export function generate(seed){
  for(let i=0;i<112;i++){let x=(rand()-.5)*104,z=(rand()-.5)*104;if(Math.hypot(x,z)<10||Math.hypot(x-RUIN.x,z-RUIN.z)<5)continue;add(['ferrite','fiber','crystal'][Math.floor(rand()*3)],x,z);}
  return nodes;
 }
-export const dist=(a,b)=>Math.hypot(a.x-b.x,a.z-b.z);
+export const dist=planetDistance;
 export function makeWorld(seed=7319){return {version:VERSION,seed,time:0,structures:[],resources:generate(seed),players:{},nextStructure:1};}
 export function makePlayer(id,name){return {id,name,x:0,z:3,yaw:0,health:100,charge:100,inventory:{ferrite:0,fiber:0,crystal:0},cutter:false,unlocked:false,completed:false};}
 export function shape(piece,seed){
- const x=piece.x,z=piece.z,y=height(x,z,seed)+.25,r=((piece.rotation||0)%4+4)%4;
- if(piece.type==='cargo')return{x,z,y:y+.55,w:1.5,d:1,h:1.1};
- if(piece.type==='lamp')return {x:x+[0,1.3,0,-1.3][r],z:z+[-1.3,0,1.3,0][r],y:y+1.85,w:.28,d:.28,h:.45};
- if(['wall','perimeter'].includes(piece.type)) return {x:x+[0,1.5,0,-1.5][r],z:z+[-1.5,0,1.5,0][r],y:y+1.3,w:r%2?.18:3,d:r%2?3:.18,h:2.6};
- if(piece.type==='roof')return{x,z,y:y+2.75,w:3.15,d:3.15,h:.18};
- if(piece.type==='heater')return{x,z,y:y+.7,w:.65,d:.65,h:1.4};
- return{x,z,y:y-.08,w:3,d:3,h:.18};
+ const r=((piece.rotation||0)%4+4)%4;let dx=0,dz=0,dy=.17,w=3,d=3,h=.18;
+ if(['lifeSupport','iceProcessor','garden','bed'].includes(piece.type)){dy=.85;w=piece.type==='bed'?1.2:1.5;d=piece.type==='bed'?2:1.2;h=1.2;}
+ if(piece.type==='cargo'){dy=.8;w=1.5;d=1;h=1.1;}
+ if(piece.type==='lamp'){dx=[0,1.3,0,-1.3][r];dz=[-1.3,0,1.3,0][r];dy=2.1;w=.28;d=.28;h=.45;}
+ if(['wall','perimeter','door','airlock'].includes(piece.type)){dx=[0,1.5,0,-1.5][r];dz=[-1.5,0,1.5,0][r];dy=1.55;w=r%2?.18:3;d=r%2?3:.18;h=2.6;}
+ if(piece.type==='roof'){dy=3;w=d=3.15;h=.18;}
+ if(piece.type==='heater'){dy=.95;w=d=.65;h=1.4;}
+ const centre=piece.site?gridPoint(piece.site,piece.gx+dx/3,piece.gz+dz/3,seed,dy):{x:piece.x+dx,z:piece.z+dz,y:height(piece.x,piece.z,seed)+dy};return{...centre,w,d,h,frame:piece.site?anchor(piece.site):{x:piece.x,z:piece.z}};
 }
+
 export function blocked(world,x,z){
- if(Math.abs(x)>LIMIT||Math.abs(z)>LIMIT)return true;
+ if(!Number.isFinite(x)||!Number.isFinite(z))return true;
  // Ruin columns; its open central console is reachable.
  for(const [dx,dz] of [[-3,-3],[3,-3],[-3,3],[3,3]])if(Math.hypot(x-RUIN.x-dx,z-RUIN.z-dz)<.95)return true;
- return world.structures.some(s=>{if(!['wall','perimeter','heater','cargo'].includes(s.type))return false;const b=shape(s,world.seed);return Math.abs(x-b.x)<b.w/2+.32&&Math.abs(z-b.z)<b.d/2+.32;});
+ return world.structures.some(s=>{if(!['wall','perimeter','door','airlock','heater','cargo','lifeSupport','iceProcessor','garden','bed'].includes(s.type)||s.open)return false;const b=shape(s,world.seed);if(dist(b,{x,z})>4)return false;const o=localOffset(b,{x,z},b.frame);return Math.abs(o.x)<b.w/2+.32&&Math.abs(o.z)<b.d/2+.32;});
 }
-export function surface(world,x,z){let y=height(x,z,world.seed);for(const s of world.structures)if(s.type==='floor'&&Math.abs(x-s.x)<=1.5&&Math.abs(z-s.z)<=1.5)y=Math.max(y,height(s.x,s.z,world.seed)+.27);return y;}
-export function sheltered(world,p){return world.structures.some(s=>s.type==='roof'&&Math.abs(p.x-s.x)<1.5&&Math.abs(p.z-s.z)<1.5);}
+export function surface(world,x,z){let y=height(x,z,world.seed);for(const s of world.structures)if(s.type==='floor'&&withinTile(s,{x,z}))y=Math.max(y,floorHeight(s,{x,z},world.seed));return y;}
+export function sheltered(world,p){return world.structures.some(s=>s.type==='roof'&&withinTile(s,p));}
 export function powered(world,p){return world.structures.some(s=>s.type==='heater'&&dist(s,p)<7);}
 export function placementError(world,p,piece,people=[]){
- if(!['floor','wall','roof','heater','perimeter','lamp','cargo'].includes(piece.type))return 'Choose a construction piece.';
+ if(!['floor','wall','roof','heater','perimeter','lamp','cargo','door','airlock','lifeSupport','iceProcessor','garden','bed'].includes(piece.type))return 'Choose a construction piece.';
  if(!Number.isFinite(piece.x)||!Number.isFinite(piece.z)||!Number.isInteger(piece.rotation)||piece.rotation<0||piece.rotation>3)return 'Invalid placement.';
- if(piece.x%3||piece.z%3)return 'Use the 3 m construction grid.';
- if(Math.abs(piece.x)>LIMIT-3||Math.abs(piece.z)>LIMIT-3)return 'Outside the survey boundary.';
+ if(piece.site){if(!validSite(piece.site)||!Number.isInteger(piece.gx)||!Number.isInteger(piece.gz)||Math.abs(piece.gx)>128||Math.abs(piece.gz)>128)return 'Invalid local construction grid.';const expected=gridPoint(piece.site,piece.gx,piece.gz,world.seed);if(dist(piece,expected)>.01)return 'Invalid grid position.';if(Math.abs(expected.y-height(piece.x,piece.z,world.seed))>2)return 'Terrain too steep for this foundation. Choose flatter ground.';}else if(piece.x%3||piece.z%3)return 'Use the 3 m construction grid.';
+
  if(dist(p,piece)>7)return 'Move closer (within 7 m).';
  if(dist(piece,RUIN)<7||Math.hypot(piece.x,piece.z)<3)return 'Keep the ruin and landing point clear.';
  if(piece.type==='heater'&&!p.unlocked)return 'Scan the distant ruin first.';
- const same=world.structures.filter(s=>s.x===piece.x&&s.z===piece.z);
- if(same.some(s=>s.type===piece.type&&(!['wall','perimeter','lamp'].includes(s.type)||s.rotation===piece.rotation)))return 'This slot is occupied.';
+ const same=world.structures.filter(s=>dist(s,piece)<.05);if(piece.type==='floor'&&world.structures.some(s=>s.type==='floor'&&dist(s,piece)<2.85))return 'A foundation already occupies this space.';
+ if(same.some(s=>s.type===piece.type&&(!['wall','perimeter','door','airlock','lamp'].includes(s.type)||s.rotation===piece.rotation)))return 'This slot is occupied.';
  // Opposite edges on neighboring tiles represent the same physical wall.
  const b=shape(piece,world.seed);
- if(['wall','perimeter'].includes(piece.type)&&world.structures.some(s=>['wall','perimeter'].includes(s.type)&&dist(shape(s,world.seed),b)<.1))return 'This edge is occupied.';
- if(piece.type==='lamp'&&!same.some(s=>['wall','perimeter'].includes(s.type)&&s.rotation===piece.rotation))return 'A wall is required on this edge.';
+ if(['wall','perimeter','door','airlock'].includes(piece.type)&&world.structures.some(s=>['wall','perimeter','door','airlock'].includes(s.type)&&dist(shape(s,world.seed),b)<.1))return 'This edge is occupied.';
+ if(piece.type==='lamp'&&!same.some(s=>['wall','perimeter','door','airlock'].includes(s.type)&&s.rotation===piece.rotation))return 'A wall is required on this edge.';
  if(!['floor','perimeter','lamp','cargo'].includes(piece.type)&&!same.some(s=>s.type==='floor'))return 'Place a deck underneath first.';
- if(['wall','perimeter','heater','cargo'].includes(piece.type))if(people.some(q=>Math.abs(q.x-b.x)<b.w/2+.5&&Math.abs(q.z-b.z)<b.d/2+.5))return 'A player is in the way.';
+ if(['wall','perimeter','door','airlock','heater','cargo','lifeSupport','iceProcessor','garden','bed'].includes(piece.type))if(people.some(q=>{if(dist(q,b)>5)return false;const o=localOffset(b,q,b.frame);return Math.abs(o.x)<b.w/2+.5&&Math.abs(o.z)<b.d/2+.5;}))return 'A player is in the way.';
  if(piece.type==='floor'&&world.resources.some(n=>n.amount>0&&Math.abs(n.x-piece.x)<1.7&&Math.abs(n.z-piece.z)<1.7))return 'Gather the resources on this tile first.';
  return '';
 }
