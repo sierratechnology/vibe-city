@@ -1,0 +1,24 @@
+{
+  "at": "2026-09-16T18:44:45.504Z",
+  "passed": true,
+  "browsers": 2,
+  "renderer": "Chrome headless / Metal requested",
+  "checks": [
+    "two visible avatars",
+    "keyboard movement",
+    "remote movement",
+    "shared resource depletion",
+    "gather/craft/scan loop",
+    "four modular pieces via preview and clicks",
+    "shared construction",
+    "completion",
+    "server restart persistence"
+  ],
+  "renderSample": {
+    "fps": 60,
+    "drawCalls": 39,
+    "triangles": 23542,
+    "avatars": 2
+  },
+  "pageErrors": []
+}

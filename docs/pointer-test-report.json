@@ -1,0 +1,15 @@
+{
+  "at": "2026-09-16T18:41:41.585Z",
+  "passed": true,
+  "checks": [
+    "touch movement",
+    "hold to gather",
+    "tap fabrication menu",
+    "construction buttons and invalid placement",
+    "simultaneous move/look",
+    "touch cancellation stops movement",
+    "portrait controls in viewport",
+    "mouse-only movement"
+  ],
+  "physicalPhoneTested": false
+}
