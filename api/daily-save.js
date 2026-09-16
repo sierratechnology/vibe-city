@@ -1,0 +1,2 @@
+import {RedisStore} from '../server/cloud-store.js';import {dailyBackup} from '../server/daily-save.js';
+export default async function handler(req,res){res.setHeader('Cache-Control','no-store');if(req.method!=='GET')return res.status(405).end();if(!process.env.CRON_SECRET||req.headers.authorization!==`Bearer ${process.env.CRON_SECRET}`)return res.status(401).json({error:'Unauthorized'});try{res.status(200).json(await dailyBackup(new RedisStore()));}catch{res.status(503).json({error:'Daily backup failed; current world save is unchanged.'});}}

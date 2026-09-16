@@ -1,5 +1,5 @@
 {
-  "at": "2026-09-16T18:44:45.504Z",
+  "at": "2026-09-16T19:30:03.586Z",
   "passed": true,
   "browsers": 2,
   "renderer": "Chrome headless / Metal requested",
@@ -16,8 +16,8 @@
   ],
   "renderSample": {
     "fps": 60,
-    "drawCalls": 39,
-    "triangles": 23542,
+    "drawCalls": 59,
+    "triangles": 24108,
     "avatars": 2
   },
   "pageErrors": []

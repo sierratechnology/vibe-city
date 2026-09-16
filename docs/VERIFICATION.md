@@ -40,3 +40,21 @@ Run `npm test`, then `npm run test:browser`. The browser test requires Chrome; `
 - Two real Chrome browser clients joined the deployed WebSocket endpoint. Mouse-only movement on one client was observed by the other, phone-sized client. Reload restored the explorer identity and saved position. No browser page errors.
 - See live-verification.json and screenshots/live-*.png. Physical-phone testing and a sustained ten-rendered-client load test remain outstanding. The ten-player admission test uses real network sockets, not ten rendered browsers.
 - Original source backed up in vibe-city-previous-project.zip outside the repository; full previous history retained in Git.
+
+## Living Basin update
+
+- 21 rule/network tests pass, including server-directory restrictions, day/night activation, neutral and hostile AI, walls blocking attacks, meat/meal use, flashlight drain, legacy-save upgrade and idempotent daily snapshots.
+- Full two-client keyboard/UI gameplay loop and actual disk-server restart passed after the camera, creature and construction changes.
+- Mouse/touch controls passed after the server-browser and expanded-action layout changes.
+- Additional isolated browser fixture verifies crafted flashlight use/battery drain, food use, barrier and lamp construction, and medium-creature visibility changing at daybreak. These fixtures never modify the live world.
+- Physical phone playtesting, sustained ten-player combat load, and observing the next naturally scheduled midnight backup remain manual/future checks. Triggering a backup endpoint manually does not prove the scheduled midnight run has occurred.
+
+## Accounts and cargo update — September 16
+- 24 rule/integration tests passed, including concurrent three-character creation, password verification, foreign-character rejection in the ownership service, logout, disk persistence, ten authenticated WebSocket clients, backpack limits, shared locker conservation and capacity/range restrictions.
+- Two real local browsers completed gathering, crafting, ruin unlock, shared construction and server restart persistence with zero page errors. Sample: 60 FPS, 59 draw calls, 24,108 triangles. This is a sample, not a hardware guarantee.
+- Isolated fixture browser tests verified account registration, three selectable characters, cargo construction, two-client deposits/withdrawals and reload persistence. Fixture materials were used only in temporary test worlds.
+- Night fixture test verified flashlight crafting/drain, food, barriers, wall lighting and day/night creature visibility.
+- Touch emulation passed movement, gathering, multitouch cancellation, controls and storage layout. A physical phone and Safari still require manual testing.
+- Two independent server processes authenticated distinct accounts and shared movement/state through a disposable real Redis world; test keys were removed.
+- Production deployment verified at https://vibe-city.net: two new accounts joined with separate characters, saw remote movement, and reloaded into saved progress with zero browser errors.
+- Live server catalog reports one server, ten-player capacity and creation disabled. Vercel confirms the 00:00 UTC cron definition. Anonymous backup calls return 401. A direct authorized invocation of the same backup writer created today's production snapshot. The provider redacts the sensitive cron secret on export, so the authenticated HTTP cron path and a naturally scheduled midnight run have not been independently observed.

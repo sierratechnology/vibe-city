@@ -1,1 +1,19 @@
-{"framework":null,"buildCommand":"npm run build","outputDirectory":"dist","functions":{"api/ws.js":{"maxDuration":300}},"regions":["iad1"]}
+{
+  "framework": null,
+  "buildCommand": "npm run build",
+  "outputDirectory": "dist",
+  "functions": {
+    "api/ws.js": {
+      "maxDuration": 300
+    }
+  },
+  "regions": [
+    "iad1"
+  ],
+  "crons": [
+    {
+      "path": "/api/daily-save",
+      "schedule": "0 0 * * *"
+    }
+  ]
+}

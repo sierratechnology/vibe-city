@@ -1,5 +1,7 @@
+import {Accounts,cookieToken} from './accounts.js';
+import {LocalAccountStore} from './local-accounts.js';
+import {catalog,SERVER_ID} from './catalog.js';
 import http from 'node:http';
-import {createHash} from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -8,10 +10,12 @@ import {Game} from './game.js';
 import {loadWorld,saveWorld} from './persistence.js';
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 export function startServer({port=Number(process.env.PORT||4173),host=process.env.HOST||'0.0.0.0',saveFile=process.env.SAVE_FILE||path.join(root,'data/world.json'),seed=Number(process.env.SEED||7319)}={}){
- const game=new Game(loadWorld(saveFile,seed));let saveError=null,lastSaved=null;
+ const accounts=new Accounts(new LocalAccountStore(path.join(path.dirname(saveFile),'accounts.json')));const game=new Game(loadWorld(saveFile,seed));let saveError=null,lastSaved=null;
  const save=()=>{try{saveWorld(saveFile,game.world);saveError=null;lastSaved=new Date().toISOString();}catch(e){saveError='World save failed; check server disk permissions.';console.error(saveError,e.message);}};
  const server=http.createServer((req,res)=>{
  const pathname=new URL(req.url,'http://localhost').pathname;
+ if(pathname==='/api/account')return accounts.handle(req,res);
+ if(pathname==='/api/servers'){res.setHeader('Content-Type','application/json');if(req.method!=='GET'){res.writeHead(405);return res.end(JSON.stringify({error:'Creating servers is disabled.'}));}return res.end(JSON.stringify(catalog(game.online.size)));}
  if(pathname==='/health'){res.setHeader('Content-Type','application/json');return res.end(JSON.stringify({ok:!saveError,players:game.online.size,seed:game.world.seed,lastSaved,saveError}));}
  let rel=pathname==='/'?'client/index.html':pathname.slice(1);
  if(!/^(client\/|shared\/|node_modules\/three\/build\/)/.test(rel)){res.writeHead(404);return res.end('Not found');}
@@ -20,22 +24,24 @@ export function startServer({port=Number(process.env.PORT||4173),host=process.en
  });
  const wss=new WebSocketServer({server,maxPayload:4096});const sockets=new Map();
  function send(ws,data){if(ws.readyState===WebSocket.OPEN&&ws.bufferedAmount<262144)ws.send(JSON.stringify(data));}
- wss.on('connection',ws=>{
- let id=null,count=0;const deadline=setTimeout(()=>{if(!id)ws.close(1008,'Join timeout');},10000);
+ wss.on('connection',(ws,req)=>{
+ if(req.headers.origin){try{if(new URL(req.headers.origin).host!==req.headers.host){ws.close(1008,'Origin not allowed');return;}}catch{ws.close(1008,'Invalid origin');return;}}
+ let id=null,count=0,joining=false;const deadline=setTimeout(()=>{if(!id)ws.close(1008,'Join timeout');},10000);
  const limiter=setInterval(()=>count=0,1000);
- ws.on('message',raw=>{if(++count>80){ws.close(1008,'Too many messages');return;}let m;try{m=JSON.parse(raw);}catch{return;}if(!m||typeof m!=='object')return;
+ ws.on('message',async raw=>{if(++count>80){ws.close(1008,'Too many messages');return;}let m;try{m=JSON.parse(raw);}catch{return;}if(!m||typeof m!=='object')return;
  if(m.type==='join'){
- if(id)return;if(typeof m.token!=='string'||!/^\w[\w-]{15,79}$/.test(m.token)){send(ws,{type:'error',message:'Invalid explorer identity.'});return;}
- id=createHash('sha256').update(m.token).digest('hex');if(sockets.has(id)){send(ws,{type:'error',message:'This explorer is already online. Use a different pilot slot.'});id=null;return;}
- if(sockets.size>=10){id=null;send(ws,{type:'error',message:'Prototype server full (10 explorers).'});return;}
- const name=String(m.name||'Explorer').replace(/[^\p{L}\p{N} _-]/gu,'').slice(0,20)||'Explorer';game.join(id,name);sockets.set(id,ws);clearTimeout(deadline);send(ws,{type:'welcome',id,state:game.snapshot()});save();return;
+ if(id||joining)return;joining=true;let character;try{character=await accounts.character(cookieToken(req),m.character);}catch{send(ws,{type:'error',message:'Account service unavailable.'});joining=false;return;}joining=false;if(!character){send(ws,{type:'error',message:'Sign in and select one of your characters.'});return;}if(ws.readyState!==WebSocket.OPEN)return;
+ if(m.server&&m.server!==SERVER_ID){send(ws,{type:'error',message:'Unknown server.'});return;}
+ id=character.id;if(sockets.has(id)){send(ws,{type:'error',message:'This character is already online.'});id=null;return;}
+ if(sockets.size>=10){id=null;send(ws,{type:'error',message:'Server full (10 explorers).'});return;}
+ game.join(id,character.name);sockets.set(id,ws);clearTimeout(deadline);send(ws,{type:'welcome',id,state:game.snapshot()});save();return;
  }
  if(!id)return;
  if(m.type==='input')game.input(id,m);else{const result=game.action(id,m);if(result.ok)save();send(ws,{type:'result',...result});}
  });
  ws.on('close',()=>{clearTimeout(deadline);clearInterval(limiter);if(id){game.leave(id);sockets.delete(id);save();}});ws.on('error',()=>{});
  });
- let ticks=0;const tick=setInterval(()=>{game.tick(.05);if(++ticks%2===0){const packet={type:'state',state:game.snapshot(),saveError,lastSaved};for(const ws of sockets.values())send(ws,packet);}if(ticks%100===0)save();},50);
+ let backupDay=new Date().toISOString().slice(0,10);let ticks=0;const tick=setInterval(()=>{game.tick(.05);if(++ticks%2===0){const packet={type:'state',state:game.snapshot(),saveError,lastSaved};for(const ws of sockets.values())send(ws,packet);}if(ticks%100===0){save();const day=new Date().toISOString().slice(0,10);if(day!==backupDay){try{const dir=path.join(path.dirname(saveFile),'daily');saveWorld(path.join(dir,day+'.json'),game.world);backupDay=day;for(const file of fs.readdirSync(dir).filter(f=>/^\d{4}-\d{2}-\d{2}\.json$/.test(f)).sort().slice(0,-8))fs.unlinkSync(path.join(dir,file));}catch(e){console.error('Daily backup failed:',e.message);}}}},50);
  server.listen(port,host,()=>console.log(`Vibe City: First Signal → http://localhost:${server.address().port} | seed ${game.world.seed}`));
  const close=()=>new Promise(resolve=>{clearInterval(tick);save();for(const ws of wss.clients)ws.terminate();wss.close();server.close(resolve);});
  return{server,game,close,save};

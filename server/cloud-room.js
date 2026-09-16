@@ -9,7 +9,7 @@ export function advance(room,now=Date.now()){
 }
 export function finish(room,game){room.world=game.world;room.cooldowns=Object.fromEntries(game.cooldowns);}
 export function joinRoom(room,{id,session,name},now=Date.now()){
- const game=advance(room,now);if(room.leases[id])return{ok:false,message:'This explorer is already online. Use a different pilot slot.'};if(Object.keys(room.leases).length>=10)return{ok:false,message:'Server full (10 explorers).'};
+ const game=advance(room,now);if(room.leases[id])return{ok:false,message:'This explorer is already online. Select a different character.'};if(Object.keys(room.leases).length>=10)return{ok:false,message:'Server full (10 explorers).'};
  // Bound a public prototype's finite save. Existing explorers can always return.
  if(!room.world.players[id]&&Object.keys(room.world.players).length>=500)return{ok:false,message:'This expedition has reached its saved-explorer limit.'};
  game.join(id,name);room.leases[id]={session,until:now+8000};room.inputs[id]={x:0,z:0,at:now};finish(room,game);return{ok:true,state:game.snapshot()};

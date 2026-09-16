@@ -7,10 +7,10 @@
 - Preserve the small reproducible loop as a regression target.
 
 ## 1 — A dependable shared settlement
-- Real account/session recovery, reconnect/resume, save migration/backup and administrative controls.
+- Password recovery, character deletion, administrative controls, and an explicit migration path for legacy anonymous pilots. Accounts, three-character selection, reconnect and daily world backups are implemented.
 - Input sequence acknowledgment and reconciliation, delta snapshots, latency/loss tests, build ownership permissions and collaborative dismantling.
 - Richer modular snapping: doors, stairs, angled roofs, multi-level structures, structural support and room enclosure.
-- Workbenches, crafting queues, storage containers and resource transfer between players.
+- Workbenches, crafting queues and storage permissions. Shared cargo lockers and item transfers are implemented.
 - Accessible remapping, touch/controller controls and sound with individual volume settings.
 
 ## 2 — A planet worth exploring
@@ -30,7 +30,7 @@
 - Define world sizes, server budgets and simulation fidelity from measurements.
 
 ## 5 — Connected worlds
-- Public deployment, access control, moderation, recovery, hosting costs and abuse defenses.
+- Expand moderation, recovery, hosting capacity and abuse defenses beyond the current authenticated public playtest.
 - Decide whether interstellar travel connects servers, creates instances or remains within larger server domains.
 - Reassess engine/native packaging and cross-platform requirements using evidence from actual players.
 

@@ -22,7 +22,7 @@ A seeded 116 m playable basin contains ferrite, ribbon fiber, flux crystals, a l
 
 The ruin fragment — “We did not build the signal. We only taught it to wait.” — offers a mystery without assigning a quest giver or explaining the universe. The milestone can be finished, but the world remains open for construction afterward.
 
-Four modular pieces are enough to test footprint placement, shared building and shelter usefulness. No voxel terrain destruction, spherical planets, flight, enemies, NPCs, logistics, farming or offline simulation are included yet.
+The current palette includes decks, bulkheads, canopies, anchors, perimeter barriers, wall lights and shared cargo lockers. Three original wildlife species, a shared day/night cycle, combat, meals and battery-powered flashlights add preparation and risk. Accounts support three selectable characters, each with a 60-item backpack. No voxel terrain destruction, spherical planets, flight, NPCs, logistics, farming or offline simulation are included yet.
 
 ## Technical decision
 
@@ -38,9 +38,12 @@ The renderer uses instanced resource/decorative meshes, low-poly geometry, a cap
 
 - Real-time multiplayer and saved player progress are present now.
 - Touch and mouse controls are implemented. Physical phones, controllers and every browser are not yet verified.
-- Local persistence does not yet mean public hosting, portable accounts or offline automation.
+- Public hosting and portable accounts are available; offline automation remains future work.
 - A finite seeded terrain patch is not a full simulated planet or solar system.
 - A fully enclosed room is not required for shelter in this slice: a canopy tile is enough.
 - Completion requires the unlocked player to stand beneath a canopy inside an anchor field.
 
 References consulted for the stack decision: [Three.js renderer](https://threejs.org/docs/pages/WebGLRenderer.html), [Godot web export](https://docs.godotengine.org/en/4.5/tutorials/export/exporting_for_web.html).
+
+## Public prototype update
+The public deployment uses Vercel WebSockets and an Upstash Redis world shared through atomic compare-and-set transactions. Local development remains disk-backed. Admission is capped at ten simultaneous characters. Passwords use salted scrypt hashes; HttpOnly sessions gate character ownership. Daily world snapshots run at 00:00 UTC alongside frequent active-world saves. Password recovery, admin account tools and resource regeneration need follow-up.

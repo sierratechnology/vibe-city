@@ -1,3 +1,4 @@
+import {browserAccount} from './auth-helper.js';
 // Real browsers + real WebSocket server. No inventory grants, teleports or gameplay hooks.
 import {chromium} from 'playwright';import assert from 'node:assert/strict';import fs from 'node:fs';import os from 'node:os';import path from 'node:path';import {startServer} from '../server/index.js';
 const tmp=fs.mkdtempSync(path.join(os.tmpdir(),'vibe-browser-')),saveFile=path.join(tmp,'world.json');
@@ -6,7 +7,7 @@ const browser=await chromium.launch({headless:true,executablePath:process.env.CH
 const c1=await browser.newContext({viewport:{width:1440,height:900}}),c2=await browser.newContext({viewport:{width:1440,height:900}}),a=await c1.newPage(),b=await c2.newPage();const errors=[];for(const p of [a,b])p.on('pageerror',e=>errors.push(e.message));
 const pause=ms=>new Promise(r=>setTimeout(r,ms));
 const diag=p=>p.evaluate(()=>window.vibeDiagnostics);
-async function join(p,name){await p.goto(`http://127.0.0.1:${port}`);await p.locator('#name').fill(name);await p.locator('#enter').click();await p.waitForFunction(()=>window.vibeDiagnostics?.connected);}
+async function join(p,name){await p.goto(`http://127.0.0.1:${port}`);await p.locator('#findGame').click();await browserAccount(p,name);await p.locator('#enter').click();await p.waitForFunction(()=>window.vibeDiagnostics?.connected);}
 async function walk(p,x,z){const start=Date.now();let held=[];while(Date.now()-start<22000){const d=await diag(p),q=d.player,dx=x-q.x,dz=z-q.z;if(Math.hypot(dx,dz)<.3)break;const desired=[];if(Math.abs(dx)>.18)desired.push(dx>0?'KeyD':'KeyA');if(Math.abs(dz)>.18)desired.push(dz>0?'KeyS':'KeyW');for(const k of held)if(!desired.includes(k))await p.keyboard.up(k);for(const k of desired)if(!held.includes(k))await p.keyboard.down(k);held=desired;await pause(70);}for(const k of held)await p.keyboard.up(k);await pause(200);const q=(await diag(p)).player;assert.ok(Math.hypot(q.x-x,q.z-z)<.7,`Walk failed: ${q.x},${q.z} → ${x},${z}`);}
 async function gather(p,index){const node=(await diag(p)).state.resources[index];await walk(p,node.x,node.z);await p.keyboard.down('KeyE');await p.waitForFunction(id=>window.vibeDiagnostics.state.resources.find(n=>n.id===id).amount===0,node.id,{timeout:7000});await p.keyboard.up('KeyE');await pause(250);console.log('Gathered',node.type,node.id);}
 try{

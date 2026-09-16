@@ -5,10 +5,17 @@ export const RUIN = {x:24,z:-24};
 export const RESOURCES = {
   ferrite:{name:'Ferrite',color:0xf5ae76},
   fiber:{name:'Ribbon fiber',color:0x80c7b6},
+  meat:{name:'Mossback meat',color:0xc48678},
+  ration:{name:'Field meal',color:0xd9b873},
   crystal:{name:'Flux crystal',color:0x9b9afa}
 };
 export const RECIPES = {
   cutter:{name:'Field cutter',cost:{ferrite:3,fiber:2},description:'Gather twice as fast. Required to scan the ruin.'},
+  cargo:{name:'Cargo locker',cost:{ferrite:6,fiber:2},description:'Freestanding shared storage. Holds 200 item units. Open nearby with Storage.'},
+  flashlight:{name:'Suit flashlight',cost:{ferrite:2,crystal:1},description:'Craft once; toggle Light. Uses 0.65 suit charge per second.'},
+  ration:{name:'Field meal',cost:{meat:1,fiber:1},description:'Prepare gathered meat. Eat to restore 35 health.'},
+  perimeter:{name:'Camp barrier',cost:{ferrite:3,fiber:1},description:'Freestanding perimeter wall. No deck needed. R rotates its edge.'},
+  lamp:{name:'Wall lumen',cost:{ferrite:1,crystal:1},description:'A permanent wall light. Requires a bulkhead or camp barrier on the same edge.'},
   floor:{name:'Deck',cost:{ferrite:2,fiber:1},description:'A 3 m foundation. Snap to the ground grid.'},
   wall:{name:'Bulkhead',cost:{ferrite:2},description:'An edge wall. R rotates to another edge.'},
   roof:{name:'Canopy',cost:{fiber:3,ferrite:1},description:'Requires a deck; shelters the tile beneath it.'},
@@ -30,7 +37,9 @@ export function makeWorld(seed=7319){return {version:VERSION,seed,time:0,structu
 export function makePlayer(id,name){return {id,name,x:0,z:3,yaw:0,health:100,charge:100,inventory:{ferrite:0,fiber:0,crystal:0},cutter:false,unlocked:false,completed:false};}
 export function shape(piece,seed){
  const x=piece.x,z=piece.z,y=height(x,z,seed)+.25,r=((piece.rotation||0)%4+4)%4;
- if(piece.type==='wall') return {x:x+[0,1.5,0,-1.5][r],z:z+[-1.5,0,1.5,0][r],y:y+1.3,w:r%2?.18:3,d:r%2?3:.18,h:2.6};
+ if(piece.type==='cargo')return{x,z,y:y+.55,w:1.5,d:1,h:1.1};
+ if(piece.type==='lamp')return {x:x+[0,1.3,0,-1.3][r],z:z+[-1.3,0,1.3,0][r],y:y+1.85,w:.28,d:.28,h:.45};
+ if(['wall','perimeter'].includes(piece.type)) return {x:x+[0,1.5,0,-1.5][r],z:z+[-1.5,0,1.5,0][r],y:y+1.3,w:r%2?.18:3,d:r%2?3:.18,h:2.6};
  if(piece.type==='roof')return{x,z,y:y+2.75,w:3.15,d:3.15,h:.18};
  if(piece.type==='heater')return{x,z,y:y+.7,w:.65,d:.65,h:1.4};
  return{x,z,y:y-.08,w:3,d:3,h:.18};
@@ -39,13 +48,13 @@ export function blocked(world,x,z){
  if(Math.abs(x)>LIMIT||Math.abs(z)>LIMIT)return true;
  // Ruin columns; its open central console is reachable.
  for(const [dx,dz] of [[-3,-3],[3,-3],[-3,3],[3,3]])if(Math.hypot(x-RUIN.x-dx,z-RUIN.z-dz)<.95)return true;
- return world.structures.some(s=>{if(s.type!=='wall'&&s.type!=='heater')return false;const b=shape(s,world.seed);return Math.abs(x-b.x)<b.w/2+.32&&Math.abs(z-b.z)<b.d/2+.32;});
+ return world.structures.some(s=>{if(!['wall','perimeter','heater','cargo'].includes(s.type))return false;const b=shape(s,world.seed);return Math.abs(x-b.x)<b.w/2+.32&&Math.abs(z-b.z)<b.d/2+.32;});
 }
 export function surface(world,x,z){let y=height(x,z,world.seed);for(const s of world.structures)if(s.type==='floor'&&Math.abs(x-s.x)<=1.5&&Math.abs(z-s.z)<=1.5)y=Math.max(y,height(s.x,s.z,world.seed)+.27);return y;}
 export function sheltered(world,p){return world.structures.some(s=>s.type==='roof'&&Math.abs(p.x-s.x)<1.5&&Math.abs(p.z-s.z)<1.5);}
 export function powered(world,p){return world.structures.some(s=>s.type==='heater'&&dist(s,p)<7);}
 export function placementError(world,p,piece,people=[]){
- if(!['floor','wall','roof','heater'].includes(piece.type))return 'Choose a construction piece.';
+ if(!['floor','wall','roof','heater','perimeter','lamp','cargo'].includes(piece.type))return 'Choose a construction piece.';
  if(!Number.isFinite(piece.x)||!Number.isFinite(piece.z)||!Number.isInteger(piece.rotation)||piece.rotation<0||piece.rotation>3)return 'Invalid placement.';
  if(piece.x%3||piece.z%3)return 'Use the 3 m construction grid.';
  if(Math.abs(piece.x)>LIMIT-3||Math.abs(piece.z)>LIMIT-3)return 'Outside the survey boundary.';
@@ -53,14 +62,20 @@ export function placementError(world,p,piece,people=[]){
  if(dist(piece,RUIN)<7||Math.hypot(piece.x,piece.z)<3)return 'Keep the ruin and landing point clear.';
  if(piece.type==='heater'&&!p.unlocked)return 'Scan the distant ruin first.';
  const same=world.structures.filter(s=>s.x===piece.x&&s.z===piece.z);
- if(same.some(s=>s.type===piece.type&&(s.type!=='wall'||s.rotation===piece.rotation)))return 'This slot is occupied.';
+ if(same.some(s=>s.type===piece.type&&(!['wall','perimeter','lamp'].includes(s.type)||s.rotation===piece.rotation)))return 'This slot is occupied.';
  // Opposite edges on neighboring tiles represent the same physical wall.
  const b=shape(piece,world.seed);
- if(piece.type==='wall'&&world.structures.some(s=>s.type==='wall'&&dist(shape(s,world.seed),b)<.1))return 'This edge is occupied.';
- if(piece.type!=='floor'&&!same.some(s=>s.type==='floor'))return 'Place a deck underneath first.';
- if(piece.type==='wall'||piece.type==='heater')if(people.some(q=>Math.abs(q.x-b.x)<b.w/2+.5&&Math.abs(q.z-b.z)<b.d/2+.5))return 'A player is in the way.';
+ if(['wall','perimeter'].includes(piece.type)&&world.structures.some(s=>['wall','perimeter'].includes(s.type)&&dist(shape(s,world.seed),b)<.1))return 'This edge is occupied.';
+ if(piece.type==='lamp'&&!same.some(s=>['wall','perimeter'].includes(s.type)&&s.rotation===piece.rotation))return 'A wall is required on this edge.';
+ if(!['floor','perimeter','lamp','cargo'].includes(piece.type)&&!same.some(s=>s.type==='floor'))return 'Place a deck underneath first.';
+ if(['wall','perimeter','heater','cargo'].includes(piece.type))if(people.some(q=>Math.abs(q.x-b.x)<b.w/2+.5&&Math.abs(q.z-b.z)<b.d/2+.5))return 'A player is in the way.';
  if(piece.type==='floor'&&world.resources.some(n=>n.amount>0&&Math.abs(n.x-piece.x)<1.7&&Math.abs(n.z-piece.z)<1.7))return 'Gather the resources on this tile first.';
  return '';
 }
 export function canAfford(p,type){return Object.entries(RECIPES[type].cost).every(([k,v])=>p.inventory[k]>=v);}
 export function pay(p,type){for(const [k,v] of Object.entries(RECIPES[type].cost))p.inventory[k]-=v;}
+
+export const INVENTORY_CAPACITY=60;
+export const CARGO_CAPACITY=200;
+export const itemCount=inventory=>Object.values(inventory||{}).reduce((sum,n)=>sum+Math.max(0,Number(n)||0),0);
+export const freeSpace=inventory=>Math.max(0,INVENTORY_CAPACITY-itemCount(inventory));

@@ -2,7 +2,7 @@
 
 **Live: https://vibe-city.net — up to 10 simultaneous explorers, mouse or phone touch.**
 
-An original, small, playable 3D survival and construction game. No Hermes integration, accounts, paid services, downloaded art, or external game assets. A real Node server owns a shared world; browsers render it with Three.js.
+An original, small, playable 3D survival and construction game. Original procedural art and no Hermes integration. Username/password accounts support three characters each. A real Node server owns a shared world; browsers render it with Three.js.
 
 ## Launch on your Mac
 
@@ -19,12 +19,12 @@ Open **http://localhost:4173** in Chrome. Once dependencies are installed, inter
 ## Play together in real time
 
 1. Keep `npm start` running on the host Mac.
-2. On the same Mac, open two tabs and choose **different pilot slots** before joining.
+2. Choose **Find / Join Game**, create an account, create a character, and join. For a second player, use a separate browser profile/account or select a different character.
 3. On a second computer on the same Wi-Fi/LAN, visit `http://HOST_IP:4173`. Find the Mac's IP in System Settings → Wi-Fi → Details → TCP/IP, or run `ipconfig getifaddr en0`.
 4. Allow Node/Terminal through the macOS firewall if prompted. Guest Wi-Fi with client isolation may prevent devices from reaching each other.
 5. Both players see one another, share deposits and construction, and keep separate inventories. The server supports ten simultaneous explorers; admission was verified with ten WebSocket clients. Two rendered clients remain the full-loop performance test.
 
-This is a trusted local-network prototype. Remote internet play requires a reachable host, HTTPS/WSS and proper authentication/deployment work. Do not expose this development server directly to the public internet. There is no paid relay dependency. Mouse-only and phone touch controls are implemented; physical phone performance still needs verification.
+The public game is available at https://vibe-city.net with HTTPS, secure account cookies and server-validated character ownership. Local development is intended for your trusted LAN. Mouse-only and phone touch controls are implemented; physical phone performance still needs verification.
 
 ## Controls
 
@@ -54,13 +54,17 @@ Previews snap 4.5 m ahead onto a 3 m grid. Green means valid and affordable, red
 - The ruin unlocks a **resonance anchor** and supplies 3 flux crystals. Construct an anchor for **4 ferrite + 3 crystals** on a deck.
 - Stand under a canopy within 7 m of your anchor to complete First Signal. Keep exploring and building afterward.
 
-Suit charge drains slowly outside shelter, faster while sprinting and during 45-second ion winds every 150 seconds. A canopy restores charge; an anchor restores it faster. Empty charge damages health. At zero health, you recover at the landing point with your inventory intact. There is no combat or hunger yet.
+Suit charge drains slowly outside shelter, faster while sprinting and during 45-second ion winds every 150 seconds. A canopy restores charge; an anchor restores it faster. Empty charge damages health. At zero health, you recover at the landing point with your inventory intact. Wildlife combat and crafted healing meals are available; there is no hunger meter.
 
 ## Saving and loading
 
 The host stores `data/world.json`: seed, world time, structures, depleted resources, player positions, inventories, equipment and discovery progress. It saves after successful actions, every five seconds, on disconnect and on clean shutdown. A temporary file is renamed over the save to avoid partially written JSON. Back up this file while the server is stopped.
 
-Pilot identities live in browser local storage, separately per slot. Reuse the same browser, URL and slot to resume. `localhost` and a LAN IP are different browser origins. Clearing site data loses access to that pilot; account portability is a future milestone. Tokens are not included in shared snapshots. Server restart reloads the existing save; `SEED` only applies to a **new** save.
+Accounts use salted scrypt password hashes and seven-day HttpOnly sessions. Each account can create up to three characters with separate inventories and progress. Sign into the same account on another device to select your characters. Password recovery and character deletion are not available yet. Local accounts are stored in `data/accounts.json`; back it up alongside `world.json`. Public accounts live in Redis separately from the world snapshot.
+
+Backpacks hold **60 item units total**; equipped tools do not take space. **Cargo lockers hold 200 units**, cost 6 ferrite + 2 fiber, and can be placed on terrain. Approach within 3 m and choose Storage to deposit/withdraw a chosen quantity. Lockers are shared, and must be emptied before the builder dismantles them. Full inventories reject additional items; hunting and ruin rewards leave overflow on the ground.
+
+Existing anonymous pilot records and shared structures are preserved, but newly created account characters start fresh. Anonymous pilot inventory and building ownership are not automatically claimed by an account. Server restart reloads the existing save; `SEED` only applies to a new world.
 
 ```sh
 # A separate seeded expedition; leaves the default save intact:
@@ -104,3 +108,24 @@ The free storage plan has usage limits; it is suitable for an initial playtest, 
 ### Mouse and touch controls
 
 No keyboard is required. Click/tap terrain to walk toward it; drag the world to orbit. On touch-capable devices, drag the movement pad for precise steering. The pad is hidden on non-touch computers. Use Gather/Scan (hold to repeat), Sprint, Build, Place, Rotate, Dismantle, and +/− buttons. Open Field Guide for crafting. The hotbar selects construction pieces. Click-to-walk follows a straight line and stops at obstacles; use the pad to steer around them.
+
+## The Living Basin update
+
+From the title choose **Find / Join Game**, then join **The Quiet Basin**. The directory shows live occupancy (10-player maximum). **Create Server** is deliberately disabled until the owner enables additional servers; there is no create-server endpoint.
+
+- **Day/night:** six minutes of daylight and four minutes of night per shared simulation cycle. All players see the same phase; cloud simulation pauses when empty.
+- **Mossback:** neutral at all hours. Hunt with Attack to obtain meat. Prepare a Field meal using 1 meat + 1 ribbon fiber; Eat restores 35 health.
+- **Bristletick:** small hostile creature, active day and night.
+- **Veilstalker:** medium hostile creature, appears and attacks only at night. Defeating one yields flux crystals.
+- **Combat:** Attack targets the nearest creature within 2.8 m with a clear path. Bare hands deal 8 damage, the crafted cutter 15. Creatures respawn after three simulation minutes. The immediate landing area is a safe zone.
+- **Building walls:** Bulkheads still require decks. **Camp barriers** are freestanding perimeter walls costing 3 ferrite + 1 fiber. They block movement and creature attacks; leave an opening for entry.
+- **Wall lumen:** costs 1 ferrite + 1 flux crystal. Place on the same grid tile and rotated edge as an existing bulkhead or barrier. Remove the lamp before dismantling its supporting wall. Lamps stay on and do not drain suit charge. Up to six nearby wall lights illuminate geometry at once to limit mobile rendering cost; all lamp fixtures remain visible.
+- **Suit flashlight:** craft for 2 ferrite + 1 flux crystal. Toggle Light (F). The forward beam follows camera aim, is visible to other players, drains 0.65 extra charge per second and turns off at zero charge.
+- **Camera:** closer third-person follow, smooth orbit/follow, wheel or +/− zoom (2.5–12 m), and collision avoidance against terrain and buildings. Mouse drag or touch swipe rotates the view.
+- **New shortcuts:** Space attacks, F toggles flashlight, H eats a meal; 5 selects barriers and 6 selects wall lights. All actions also have mouse/touch buttons.
+
+### Daily saves
+
+Frequent transactional cloud saves and local five-second saves remain enabled. An additional Vercel Cron job runs at **00:00 UTC daily** and stores an immutable snapshot with eight-day retention. The `/api/daily-save` endpoint requires the server-only `CRON_SECRET`; it is not an anonymous backup or reset endpoint. The same date cannot overwrite an earlier snapshot. Local servers create dated backups when crossing UTC midnight while running. A stopped local server cannot execute a scheduled backup.
+
+Existing worlds upgrade in place: player items, structures, world time and resource depletion are preserved. The first successful cloud transaction persists the new creature population and player item fields.
