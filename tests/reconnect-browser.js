@@ -109,7 +109,12 @@ try {
   await new Promise(resolve => app.server.once('listening', resolve));
   await page.waitForFunction(() => window.vibeDiagnostics.connected, null, {timeout: 6000});
   const reconnectMs = Date.now() - disconnectedAt;
-  const after = await diagnostics();
+  const freshEpoch = await page.waitForFunction(priorInputAck => {
+    const next = window.vibeDiagnostics;
+    return Number.isSafeInteger(next.inputAck) && next.inputAck < priorInputAck && next.pendingInputs <= 1 ? next : false;
+  }, before.inputAck, {timeout: 5000});
+  const after = await freshEpoch.jsonValue();
+  await freshEpoch.dispose();
 
   assert.equal(await page.evaluate(() => window.__reconnectPageMarker), pageMarker, 'page must not reload');
   assert.equal(after.id, before.id, 'authenticated character id must be reused');
@@ -121,7 +126,8 @@ try {
   assert.equal(after.state.players.length, 1, 'server snapshot must contain one player presence');
   assert.equal(new Set(after.state.players.map(player => player.id)).size, 1, 'player presence must not be duplicated');
   assert.equal(after.avatars, 1, 'browser must render one avatar');
-  assert.ok(after.pendingInputs <= 1, 'reconnect must reset the pending input epoch');
+  assert.ok(Number.isSafeInteger(after.inputAck) && after.inputAck < before.inputAck, 'reconnect must begin a fresh acknowledged sequence epoch');
+  assert.ok(after.pendingInputs <= 1, `reconnect must reset the pending input epoch: ${JSON.stringify({inputAck: after.inputAck, pendingInputs: after.pendingInputs, priorInputAck: before.inputAck})}`);
   assert.ok(reconnectMs <= 6000, `reconnect exceeded technical test ceiling: ${reconnectMs} ms`);
 
   const xBeforeMovement = after.player.x;
@@ -131,7 +137,7 @@ try {
   assert.ok(Number.isSafeInteger(moved.inputAck) && moved.inputAck < before.inputAck, 'reconnect must begin a fresh acknowledged sequence epoch');
   assert.ok(moved.pendingInputs <= 32, 'post-reconnect pending inputs must remain bounded');
   assert.equal(errors.length, 0, errors.join('\n'));
-  console.log(JSON.stringify({browserEngine, reconnectMs, retryCeilingMs: 6000, playerId: after.id, players: after.state.players.length, avatars: after.avatars, structures: after.state.structures.length, pageErrors: errors.length}));
+  console.log(JSON.stringify({browserEngine, reconnectMs, retryCeilingMs: 6000, playerId: after.id, players: after.state.players.length, avatars: after.avatars, structures: after.state.structures.length, priorInputAck: before.inputAck, freshInputAck: after.inputAck, freshPendingInputs: after.pendingInputs, movedInputAck: moved.inputAck, movedPendingInputs: moved.pendingInputs, movementAccepted: moved.player.x > xBeforeMovement + 1, pageErrors: errors.length}));
 } finally {
   await browser.close();
   if (app) await app.close();
