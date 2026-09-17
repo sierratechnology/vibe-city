@@ -18,7 +18,7 @@ The title screen and completed-outpost gameplay view were inspected as images. T
 
 - Two clients were tested on one Mac, not two separate physical computers. Joining over LAN is implemented, but firewall/Wi-Fi behavior requires a second-machine check.
 - The sampled 60 FPS / approximately 24k rendered triangles is an automated Chrome observation, not a sustained MacBook Air thermal or battery benchmark. Two visible clients are the tested load; the eight-connection cap is not a performance guarantee.
-- Chrome is tested. Safari, Firefox, touch controls, controllers, packet loss and high-latency internet play are not verified.
+- Chrome and a local automated Firefox full journey are tested. Safari, physical touch controls, controllers, real packet loss and high-latency internet play are not verified.
 - This is a finite terrain region, four-piece construction set and one discovery—not planets, spaceflight, NPCs, automation or offline simulation.
 - The server uses full snapshots at 10 Hz. Movement prediction is basic; production-quality latency reconciliation and scalable interest management remain future work.
 - Local saves are persistent but not cloud backed up. Browser-local pilot identities are not portable user accounts.
@@ -26,7 +26,14 @@ The title screen and completed-outpost gameplay view were inspected as images. T
 
 ## Reproduce
 
-Run `npm test`, then `npm run test:browser`. The browser test requires Chrome; `CHROME_PATH` can override its executable location. All test saves use temporary directories. The normal game save is untouched.
+Run `npm test`, then `npm run test:browser` for Chrome or `node tests/browser.js firefox` for managed Firefox. `CHROME_PATH` can override Chrome's executable location. All test saves use temporary directories. The normal game save is untouched.
+
+## September 17: local Firefox full journey
+
+- Two authenticated Firefox contexts on one Mac rendered two avatars and completed real keyboard movement, observed remote movement, shared depletion, gathering, cutter fabrication, ruin scanning and all four shared construction pieces through the gameplay UI.
+- The completed outpost survived an actual local server restart with structures, depletion, inventory, cutter, unlock and milestone completion restored. The run exited naturally with zero page errors; its Firefox/server processes, listener and temporary save/screenshots were gone after cleanup.
+- The local automated render sample was 60 FPS, 71 draw calls and 31,828 triangles with two avatars. This is one observation, not sustained lower-powered-hardware, thermal, battery, physical-device, separate-LAN-machine, real-WAN or production Firefox evidence. Safari remains unverified.
+- Authentication used the isolated local verification-email fixture and temporary `.invalid` accounts. No real account, credential, provider, Redis, Vercel, production world or external network was used.
 
 ## September 16: ten-player, pointer and cloud update
 - Ten actual WebSocket clients admitted, eleventh rejected, departed slot reusable.
