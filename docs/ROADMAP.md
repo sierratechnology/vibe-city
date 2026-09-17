@@ -9,7 +9,7 @@
 ## 1 — A dependable shared settlement
 - Password recovery, character deletion, administrative controls, and an explicit migration path for legacy anonymous pilots. Accounts, three-character selection, reconnect and daily world backups are implemented.
 - Input sequence acknowledgment and reconciliation, delta snapshots, latency/loss tests, build ownership permissions and collaborative dismantling.
-- Richer modular snapping: passable doorway frames and directional angled canopies are implemented; operable sealed doors, stairs, multi-level structures, structural support and room enclosure remain planned.
+- Richer modular snapping: passable doorway frames, directional angled canopies, and nearby-operated sealed doors are implemented. The bounded sealed door blocks and seals its edge while closed, becomes traversable and unsealed while open, and persists its server-owned state; it does not add locks, automatic doors, pressure equalization, airlock cycles, room pressurization, structural support, multi-level building, or generalized enclosure simulation. Stairs and those broader construction systems remain planned.
 - Workbenches, crafting queues and storage permissions. Shared cargo lockers and item transfers are implemented.
 - Accessible remapping, touch/controller controls and sound with individual volume settings.
 

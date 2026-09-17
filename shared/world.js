@@ -1,5 +1,5 @@
 import {validSite,gridPoint,localOffset,anchor,withinTile,floorHeight} from './build-grid.js';
-import {planetHeight,planetDistance} from './planet.js';
+import {planetHeight,planetDistance,direction,travel} from './planet.js';
 // Shared deterministic world and collision rules. No renderer or network dependencies.
 export const VERSION = 1;
 export const LIMIT = 58;
@@ -58,13 +58,17 @@ export function shape(piece,seed){
  if(piece.type==='heater'){dy=.95;w=d=.65;h=1.4;}
  const centre=piece.site?gridPoint(piece.site,piece.gx+dx/3,piece.gz+dz/3,seed,dy):{x:piece.x+dx,z:piece.z+dz,y:height(piece.x,piece.z,seed)+dy};return{...centre,w,d,h,frame:piece.site?anchor(piece.site):{x:piece.x,z:piece.z}};
 }
+export function doorParts(piece,seed){const s=shape(piece,seed),alongX=s.w>s.d,parts=[];for(const side of[-1,1])parts.push({kind:'post',w:alongX?.3:s.w,h:s.h,d:alongX?s.d:.3,x:alongX?side*1.35:0,y:0,z:alongX?0:side*1.35});parts.push({kind:'lintel',w:s.w,h:.35,d:s.d,x:0,y:s.h/2-.175,z:0});parts.push({kind:'leaf',w:alongX?(piece.open?.12:2.4):(piece.open?2.4:s.w),h:2.2,d:alongX?(piece.open?2.4:s.d):(piece.open?.12:2.4),x:piece.open?(alongX?-1.2:1.2):0,y:-.2,z:piece.open?(alongX?1.2:-1.2):0});return parts;}
 
-export function blocked(world,x,z){
+export function blocked(world,x,z,ignoredStructureId=null){
  if(!Number.isFinite(x)||!Number.isFinite(z))return true;
  // Ruin columns; its open central console is reachable.
  for(const [dx,dz] of [[-3,-3],[3,-3],[-3,3],[3,3]])if(Math.hypot(x-RUIN.x-dx,z-RUIN.z-dz)<.95)return true;
- return world.structures.some(s=>{if(!['wall','doorway','perimeter','door','airlock','heater','cargo','lifeSupport','iceProcessor','garden','bed'].includes(s.type)||s.open)return false;const b=shape(s,world.seed);if(dist(b,{x,z})>4)return false;const o=localOffset(b,{x,z},b.frame),inside=Math.abs(o.x)<b.w/2+.32&&Math.abs(o.z)<b.d/2+.32;if(s.type==='doorway')return inside&&Math.abs(b.w>b.d?o.x:o.z)>.65;return inside;});
+ return world.structures.some(s=>{if(s.id===ignoredStructureId||!['wall','doorway','perimeter','door','airlock','heater','cargo','lifeSupport','iceProcessor','garden','bed'].includes(s.type)||(s.open&&s.type!=='door'))return false;const b=shape(s,world.seed);if(dist(b,{x,z})>4)return false;const o=localOffset(b,{x,z},b.frame);if(s.type==='door')return doorParts(s,world.seed).filter(part=>part.kind!=='lintel').some(part=>Math.abs(o.x-part.x)<part.w/2+.32&&Math.abs(o.z-part.z)<part.d/2+.32);const inside=Math.abs(o.x)<b.w/2+.32&&Math.abs(o.z)<b.d/2+.32;if(s.type==='doorway')return inside&&Math.abs(b.w>b.d?o.x:o.z)>.65;return inside;});
 }
+function clearDoorPath(world,p,s){const target=shape(s,world.seed),distance=dist(p,target),heading=direction(p,target),length=Math.hypot(heading.x,heading.z);for(let travelled=.4;travelled<distance-.35;travelled+=.2){const sample=travel(p,heading.x/length*travelled,heading.z/length*travelled);if(blocked(world,sample.x,sample.z,s.id))return false;}return true;}
+export function nearestOperableDoor(world,p,range=4,types=['door','airlock']){return world.structures.filter(s=>types.includes(s.type)&&dist(p,shape(s,world.seed))<=range&&clearDoorPath(world,p,s)).sort((a,b)=>dist(p,shape(a,world.seed))-dist(p,shape(b,world.seed))||String(a.id).localeCompare(String(b.id)))[0]||null;}
+export function interactionTarget(world,p){const resource=world.resources.filter(n=>n.amount>0&&dist(n,p)<=3).sort((a,b)=>dist(a,p)-dist(b,p)||String(a.id).localeCompare(String(b.id)))[0],door=nearestOperableDoor(world,p,4,['door']),choices=[];if(resource)choices.push({type:'gather',id:resource.id,distance:dist(resource,p)});if(door)choices.push({type:'door',id:door.id,distance:dist(shape(door,world.seed),p)});const target=choices.sort((a,b)=>a.distance-b.distance||a.type.localeCompare(b.type)||String(a.id).localeCompare(String(b.id)))[0];return target?{type:target.type,id:target.id}:null;}
 export function surface(world,x,z){let y=height(x,z,world.seed);for(const s of world.structures)if(s.type==='floor'&&withinTile(s,{x,z}))y=Math.max(y,floorHeight(s,{x,z},world.seed));return y;}
 export function sheltered(world,p){return world.structures.some(s=>['roof','angledCanopy'].includes(s.type)&&withinTile(s,p));}
 export function powered(world,p){return world.structures.some(s=>s.type==='heater'&&dist(s,p)<7);}
