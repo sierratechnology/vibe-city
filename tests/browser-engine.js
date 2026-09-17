@@ -15,7 +15,7 @@ export function launchBrowser(name) {
   const options = name === 'chromium'
     ? {
         headless: true,
-        executablePath: process.env.CHROME_PATH || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+        executablePath: process.env.CHROME_PATH || browserEngine.executablePath(),
         args: ['--use-angle=metal'],
       }
     : {headless: true};
