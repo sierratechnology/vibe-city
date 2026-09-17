@@ -17,9 +17,12 @@ export function createReconnectController({
 
   return {
     connected() {
+      if (!active) attemptIndex = 0;
       active = true;
-      attemptIndex = 0;
       cancelTimer();
+    },
+    stable() {
+      if (active) attemptIndex = 0;
     },
     disconnected() {
       if (!active || timer !== null) return;
@@ -40,6 +43,9 @@ export function createReconnectController({
     },
     get active() {
       return active;
+    },
+    get pending() {
+      return timer !== null;
     },
   };
 }
