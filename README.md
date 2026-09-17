@@ -39,12 +39,12 @@ The public game is available at https://vibe-city.net with HTTPS, secure account
 | C | Fabrication, inventory and field guide |
 | B | Toggle construction preview |
 | 1 / 2 / 3 / 4 / 9 | Deck / bulkhead / canopy / resonance anchor / angled canopy |
-| R | Rotate edge pieces or change the angled canopy slope direction |
+| R | Rotate edge pieces, the Deck stair, or the angled canopy slope direction |
 | Place button / click world | Place preview |
 | X | Dismantle your closest piece, full refund |
 | Escape | Close guide or construction mode |
 
-Previews snap 4.5 m ahead onto a 3 m grid. Green means valid and affordable, red means blocked. The on-screen hint explains why. Place a deck first; walls, a flat or angled canopy, a sealed door, and an anchor attach to it. Flat and angled canopies share one roof slot. A closed sealed door visibly blocks and seals its edge; approach it and use the contextual interaction to open it for passage, then close it again. The server owns placement, payment, and open/closed state, which persists across reconnects. This bounded door has no lock, automatic trigger, pressure equalization, airlock cycle, room pressurization, structural-support behavior, multi-level behavior, or generalized enclosure simulation. Dismantle upper pieces before their deck.
+Previews snap 4.5 m ahead onto a 3 m grid. Green means valid and affordable, red means blocked. The on-screen hint explains why. Place a deck first; walls, a flat or angled canopy, a sealed door, a Deck stair, and an anchor attach to it. The Deck stair is selected through the Field Guide or mouse/touch hotbar (it has no digit shortcut), rotates among four free deck edges, and provides only the low-rise terrain-to-deck transition for the current 0.27 m deck surface. Flat and angled canopies share one roof slot. A closed sealed door visibly blocks and seals its edge; approach it and use the contextual interaction to open it for passage, then close it again. The server owns placement, payment, stair support/collision checks, and door open/closed state, which persist across reconnects. Stairs do not add a second story, arbitrary vertical building, structural support, room enclosure, ladders, or elevators; those broader systems remain planned. Dismantle upper or edge pieces before their deck.
 
 ## The first loop (roughly 5–10 minutes)
 

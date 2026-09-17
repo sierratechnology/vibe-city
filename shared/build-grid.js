@@ -9,3 +9,4 @@ export function buildingCell(s){return{site:s.site||null,x:s.site?s.gx:Math.roun
 export function cellKey(c){return`${siteName(c.site)}|${c.x},${c.z}`;}
 export function withinTile(s,p){if(planetDistance(s,p)>3)return false;const o=localOffset(s,p,s.site?anchor(s.site):s);return Math.abs(o.x)<=1.5&&Math.abs(o.z)<=1.5;}
 export function floorHeight(s,p,seed){if(!s.site)return planetHeight(s.x,s.z,seed)+.27;const a=anchor(s.site),u=unit(p.x,p.z),normal=unit(a.x,a.z);return(RADIUS+planetHeight(a.x,a.z,seed)+.27)/(u.x*normal.x+u.y*normal.y+u.z*normal.z)-RADIUS;}
+export function stairFootprint(s,p,margin=0){const r=((s.rotation||0)%4+4)%4,[outX,outZ]=[[0,-1],[1,0],[0,1],[-1,0]][r],o=localOffset(s,p,s.site?anchor(s.site):s),along=o.x*outX+o.z*outZ,lateral=o.x*-outZ+o.z*outX;return{inside:along>=1.5-margin&&along<=3+margin&&Math.abs(lateral)<=.8+margin,along,lateral,progress:Math.max(0,Math.min(1,(3-along)/1.5))};}
