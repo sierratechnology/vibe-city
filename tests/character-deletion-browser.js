@@ -1,0 +1,65 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import {browserAccount,startTestServer} from './auth-helper.js';
+import {launchBrowser,resolveBrowserEngine} from './browser-engine.js';
+
+const engine=process.argv[2]||process.env.BROWSER_ENGINE||'chromium';
+resolveBrowserEngine(engine);
+const dir=fs.mkdtempSync(path.join(os.tmpdir(),`vibe-character-deletion-browser-${engine}-`));
+const app=startTestServer({port:0,host:'127.0.0.1',saveFile:path.join(dir,'world.json')});
+await new Promise(resolve=>app.server.once('listening',resolve));
+const browser=await launchBrowser(engine),base=`http://127.0.0.1:${app.server.address().port}`;
+const context=await browser.newContext({viewport:{width:1280,height:800}}),page=await context.newPage(),errors=[];
+page.on('pageerror',error=>errors.push(error.message));
+async function tabTo(id){for(let i=0;i<30&&await page.evaluate(target=>document.activeElement?.id!==target,id);i++)await page.keyboard.press('Tab');assert.equal(await page.evaluate(()=>document.activeElement?.id),id);}
+try{
+ await page.goto(base);
+ await browserAccount(page,'Alpha Explorer');
+ await page.locator('#characterName').fill('Beta Explorer');
+ await page.locator('#createCharacter').click();
+ await page.waitForFunction(()=>document.querySelectorAll('#character option').length===2);
+ await page.locator('#character').selectOption({label:'Alpha Explorer'});
+ await tabTo('deleteCharacter');
+ await page.keyboard.press('Enter');
+ await page.locator('#deleteCharacterDialog').waitFor({state:'visible'});
+ assert.match(await page.locator('#deleteCharacterMessage').innerText(),/Alpha Explorer/);
+ assert.equal(await page.evaluate(()=>document.activeElement?.id),'cancelCharacterDeletion');
+ await page.keyboard.press('Escape');
+ await page.locator('#deleteCharacterDialog').waitFor({state:'hidden'});
+ assert.deepEqual(await page.locator('#character option').allTextContents(),['Alpha Explorer','Beta Explorer']);
+ assert.equal(await page.evaluate(()=>document.activeElement?.id),'deleteCharacter');
+ await page.keyboard.press('Enter');
+ await page.locator('#deleteCharacterDialog').waitFor({state:'visible'});
+ await page.keyboard.press('Enter');
+ await page.locator('#deleteCharacterDialog').waitFor({state:'hidden'});
+ assert.equal(await page.evaluate(()=>document.activeElement?.id),'deleteCharacter');
+ assert.deepEqual(await page.locator('#character option').allTextContents(),['Alpha Explorer','Beta Explorer']);
+ await page.keyboard.press('Enter');
+ await page.keyboard.press('Tab');
+ assert.equal(await page.evaluate(()=>document.activeElement?.id),'confirmCharacterDeletion');
+ await page.keyboard.press('Enter');
+ await page.locator('#deleteCharacterDialog').waitFor({state:'hidden'});
+ assert.deepEqual(await page.locator('#character option').allTextContents(),['Beta Explorer']);
+ assert.equal(await page.locator('#character').inputValue(),await page.evaluate(()=>localStorage.getItem('vc-selected-character')));
+
+ const touchContext=await browser.newContext({viewport:{width:390,height:844},hasTouch:true}),touchPage=await touchContext.newPage();
+ touchPage.on('pageerror',error=>errors.push(error.message));
+ await touchPage.goto(base);
+ await browserAccount(touchPage,'Touch Explorer');
+ await touchPage.locator('#deleteCharacter').tap();
+ assert.match(await touchPage.locator('#deleteCharacterMessage').innerText(),/Touch Explorer/);
+ await touchPage.locator('#confirmCharacterDeletion').tap();
+ await touchPage.locator('#deleteCharacterDialog').waitFor({state:'hidden'});
+ assert.equal(await touchPage.locator('#character option').count(),0);
+ assert.equal(await touchPage.evaluate(()=>localStorage.getItem('vc-selected-character')),null);
+ assert.equal(await touchPage.locator('#createCharacter').isDisabled(),false);
+ assert.equal(await touchPage.evaluate(()=>document.activeElement?.id),'characterName');
+ await touchPage.locator('#characterName').fill('Touch Return');
+ await touchPage.locator('#createCharacter').tap();
+ await touchPage.waitForFunction(()=>document.querySelectorAll('#character option').length===1);
+ assert.deepEqual(await touchPage.locator('#character option').allTextContents(),['Touch Return']);
+ assert.deepEqual(errors,[]);
+ console.log(`PASS ${engine}: keyboard deletion names the character, Escape and button cancellation preserve the roster and restore focus, confirmation selects the survivor; touch deletion leaves the empty-roster create path usable.`);
+}finally{await browser.close();await app.close();fs.rmSync(dir,{recursive:true,force:true});}
