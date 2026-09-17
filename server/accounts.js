@@ -36,5 +36,5 @@ export class Accounts {
  if(body.action==='preferences'){const s=await this.session(token);if(!s)throw Error('Sign in first.');return respond(200,{profile:profile(await this.mutate(s.key,a=>{a.marketing=body.marketing===true;a.marketingUpdatedAt=new Date().toISOString();}))});}
  if(body.action==='character')return respond(200,{profile:await this.createCharacter(token,body.name)});
  if(body.action==='logout'){await this.logout(token);setCookie('',0);return respond(200,{profile:null});}return respond(400,{error:'Unknown account action.'});
- }catch(e){return respond(400,{error:e.message==='Unexpected end of JSON input'?'Invalid request.':e.message});}}
+ }catch(e){if(e.statusCode===503){res.setHeader('Retry-After',String(e.retryAfter||5));return respond(503,{error:e.message,code:e.code});}return respond(400,{error:e.message==='Unexpected end of JSON input'?'Invalid request.':e.message});}}
 }
