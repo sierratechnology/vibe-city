@@ -38,23 +38,23 @@ The public game is available at https://vibe-city.net with HTTPS, secure account
 | E (hold) | Gather nearest resource; scan nearby ruin |
 | C | Fabrication, inventory and field guide |
 | B | Toggle construction preview |
-| 1 / 2 / 3 / 4 | Deck / bulkhead / canopy / resonance anchor |
-| R | Rotate bulkhead to another edge |
+| 1 / 2 / 3 / 4 / 9 | Deck / bulkhead / canopy / resonance anchor / angled canopy |
+| R | Rotate edge pieces or change the angled canopy slope direction |
 | Place button / click world | Place preview |
 | X | Dismantle your closest piece, full refund |
 | Escape | Close guide or construction mode |
 
-Previews snap 4.5 m ahead onto a 3 m grid. Green means valid and affordable, red means blocked. The on-screen hint explains why. Place a deck first; walls, a canopy and an anchor attach to it. Keep an edge open as the doorway. Dismantle upper pieces before their deck.
+Previews snap 4.5 m ahead onto a 3 m grid. Green means valid and affordable, red means blocked. The on-screen hint explains why. Place a deck first; walls, a flat or angled canopy, and an anchor attach to it. Flat and angled canopies share one roof slot. Keep an edge open as the doorway. Dismantle upper pieces before their deck.
 
 ## The first loop (roughly 5–10 minutes)
 
 - Gather **3 ferrite + 2 ribbon fiber** near the landing point. Press C and craft the field cutter; gathering gets faster.
-- Build shelter if needed: **deck = 2 ferrite + 1 fiber**, **canopy = 1 ferrite + 3 fiber**. A bulkhead costs 2 ferrite.
+- Build shelter if needed: **deck = 2 ferrite + 1 fiber**, **flat or angled canopy = 1 ferrite + 3 fiber**. A bulkhead costs 2 ferrite.
 - Follow the broken ring northeast. The compass gives world bearing and distance. At its central console, press E with a cutter equipped.
 - The ruin unlocks a **resonance anchor** and supplies 3 flux crystals. Construct an anchor for **4 ferrite + 3 crystals** on a deck.
 - Stand under a canopy within 7 m of your anchor to complete First Signal. Keep exploring and building afterward.
 
-Suit charge drains slowly outside shelter, faster while sprinting and during 45-second ion winds every 150 seconds. A canopy restores charge; an anchor restores it faster. Empty charge damages health. At zero health, you recover at the landing point with your inventory intact. Wildlife combat and crafted healing meals are available; there is no hunger meter.
+Suit charge drains slowly outside shelter, faster while sprinting and during 45-second ion winds every 150 seconds. A flat or angled canopy shelters its full grid tile and restores charge; an anchor restores it faster. Angled canopies are directional architecture only: they do not simulate water, weather flow, structural load, multiple levels, airtightness, or enclosure. Empty charge damages health. At zero health, you recover at the landing point with your inventory intact. Wildlife combat and crafted healing meals are available; there is no hunger meter.
 
 ## Saving and loading
 
