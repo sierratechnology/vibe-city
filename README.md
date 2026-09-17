@@ -35,7 +35,7 @@ The public game is available at https://vibe-city.net with HTTPS, secure account
 | Wheel | Camera distance |
 | W A S D | Move relative to camera |
 | Shift | Sprint; uses more suit charge |
-| E (hold) | Gather nearest resource; scan nearby ruin |
+| E (hold) | Gather nearest resource; scan nearby ruin; operate a nearby sealed door |
 | C | Fabrication, inventory and field guide |
 | B | Toggle construction preview |
 | 1 / 2 / 3 / 4 / 9 | Deck / bulkhead / canopy / resonance anchor / angled canopy |
@@ -44,7 +44,7 @@ The public game is available at https://vibe-city.net with HTTPS, secure account
 | X | Dismantle your closest piece, full refund |
 | Escape | Close guide or construction mode |
 
-Previews snap 4.5 m ahead onto a 3 m grid. Green means valid and affordable, red means blocked. The on-screen hint explains why. Place a deck first; walls, a flat or angled canopy, and an anchor attach to it. Flat and angled canopies share one roof slot. Keep an edge open as the doorway. Dismantle upper pieces before their deck.
+Previews snap 4.5 m ahead onto a 3 m grid. Green means valid and affordable, red means blocked. The on-screen hint explains why. Place a deck first; walls, a flat or angled canopy, a sealed door, and an anchor attach to it. Flat and angled canopies share one roof slot. A closed sealed door visibly blocks and seals its edge; approach it and use the contextual interaction to open it for passage, then close it again. The server owns placement, payment, and open/closed state, which persists across reconnects. This bounded door has no lock, automatic trigger, pressure equalization, airlock cycle, room pressurization, structural-support behavior, multi-level behavior, or generalized enclosure simulation. Dismantle upper pieces before their deck.
 
 ## The first loop (roughly 5–10 minutes)
 
