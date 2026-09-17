@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {Game} from '../server/game.js';
+import {DISMANTLE_GRANT_LIMIT,Game} from '../server/game.js';
 import {
   SNAPSHOT_DELTA_LIMITS,
   acceptSnapshotBaseline,
@@ -45,6 +45,17 @@ test('current planet snapshot is accepted, detached, delta-preserved, and exact-
   assert.equal(accepted.planet.solarDistanceAU, 1.42);
   assert.equal(applied.planet.rotationSeconds, 1062);
   assert.throws(() => acceptSnapshotBaseline({...after, mystery: true}, 1), /snapshot field set/);
+});
+
+test('maximum per-structure dismantling projection remains inside snapshot budgets', () => {
+  const game = new Game();
+  const owner = game.join('owner', 'Owner');
+  const grants = Array.from({length: DISMANTLE_GRANT_LIMIT}, (_, index) => game.join(`saved-${index}`, `Saved ${index}`).id);
+  game.world.structures.push({id: 's1', type: 'floor', x: 0, z: 3, rotation: 0, owner: owner.id, dismantleGrants: grants});
+  const projected = game.snapshot(owner.id);
+  assert.equal(projected.structures[0].dismantleGrantedTo.length, DISMANTLE_GRANT_LIMIT);
+  assert.ok(Buffer.byteLength(JSON.stringify(projected)) < SNAPSHOT_DELTA_LIMITS.maxBytes);
+  assert.deepEqual(acceptSnapshotBaseline(projected, 0), projected);
 });
 
 test('two-player viewer snapshot supplies finite remote aim yaw before input', () => {
@@ -200,6 +211,17 @@ test('built snapshot omits undefined optional structure fields at the server bou
     'root.structures[0] must not contain an undefined optional power field',
   );
   assert.equal(Object.hasOwn(accepted.structures[0], 'power'), false);
+});
+
+test('viewer-specific dismantling authorization survives exact snapshot validation', () => {
+  const game = new Game();
+  const owner = game.join('owner', 'Owner');
+  const collaborator = game.join('collaborator', 'Collaborator');
+  game.world.structures.push({id: 's1', type: 'floor', x: 0, z: 3, rotation: 0, owner: owner.id, dismantleGrants: [collaborator.id]});
+
+  const accepted = acceptSnapshotBaseline(game.snapshot(owner.id), 0);
+  assert.equal(accepted.structures[0].canDismantle, true);
+  assert.deepEqual(accepted.structures[0].dismantleGrantedTo, [collaborator.id]);
 });
 
 test('legal 4,999-structure world establishes and continues snapshot delivery', () => {
