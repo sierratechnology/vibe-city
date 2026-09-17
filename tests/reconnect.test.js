@@ -45,3 +45,66 @@ test('bounds reconnect attempts without overlapping timers', () => {
   controller.disconnected();
   assert.equal(timers.length, 3);
 });
+
+test('valid welcomes do not reset recovery attempts before authoritative progression', () => {
+  const timers = [];
+  let attempts = 0;
+  let exhausted = 0;
+  let controller;
+  controller = createReconnectController({
+    delays: [1, 1, 1],
+    attempt: () => {
+      attempts++;
+      controller.connected();
+      controller.disconnected();
+    },
+    exhausted: () => exhausted++,
+    setTimer: callback => {
+      timers.push(callback);
+      return callback;
+    },
+    clearTimer: () => {},
+  });
+
+  controller.connected();
+  controller.disconnected();
+  for (let cycle = 0; cycle < 6 && timers.length; cycle++) timers.shift()();
+
+  assert.equal(attempts, 3);
+  assert.equal(exhausted, 1);
+  assert.equal(controller.active, false);
+  assert.equal(timers.length, 0);
+});
+
+test('accepted authoritative progression clears recovery failure history', () => {
+  const timers = [];
+  let attempts = 0;
+  let exhausted = 0;
+  const controller = createReconnectController({
+    delays: [1, 1],
+    attempt: () => attempts++,
+    exhausted: () => exhausted++,
+    setTimer: callback => {
+      timers.push(callback);
+      return callback;
+    },
+    clearTimer: () => {},
+  });
+
+  controller.connected();
+  controller.disconnected();
+  timers.shift()();
+  controller.connected();
+  controller.stable();
+
+  for (let failure = 0; failure < 2; failure++) {
+    controller.disconnected();
+    timers.shift()();
+    controller.connected();
+  }
+  controller.disconnected();
+
+  assert.equal(attempts, 3);
+  assert.equal(exhausted, 1);
+  assert.equal(controller.active, false);
+});

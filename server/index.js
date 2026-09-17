@@ -10,6 +10,7 @@ import {fileURLToPath} from 'node:url';
 import {WebSocketServer,WebSocket} from 'ws';
 import {Game} from './game.js';
 import {loadWorld,saveWorld} from './persistence.js';
+import {createSnapshotSession,nextSnapshotPacket} from './snapshot-delta.js';
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 export function startServer({port=Number(process.env.PORT||4173),host=process.env.HOST||'0.0.0.0',saveFile=process.env.SAVE_FILE||path.join(root,'data/world.json'),seed=Number(process.env.SEED||7319),mailer}={}){
  const accounts=new Accounts(new LocalAccountStore(path.join(path.dirname(saveFile),'accounts.json')),{mailer});const game=new Game(loadWorld(saveFile,seed));let saveError=null,lastSaved=null;
@@ -37,14 +38,14 @@ export function startServer({port=Number(process.env.PORT||4173),host=process.en
  if(m.server&&m.server!==SERVER_ID){send(ws,{type:'error',message:'Unknown server.'});return;}
  id=character.id;if(sockets.has(id)){send(ws,{type:'error',message:'This character is already online.'});id=null;return;}
  if(sockets.size>=(game.world.settings?.maxPlayers||MAX_PLAYERS)){id=null;send(ws,{type:'error',message:'Server full.'});return;}
- game.join(id,character.name);game.world.players[id].account=character.account;game.world.players[id].role=character.role;sockets.set(id,ws);clearTimeout(deadline);send(ws,{type:'welcome',id,state:game.snapshot(id)});save();return;
+ game.join(id,character.name);game.world.players[id].account=character.account;game.world.players[id].role=character.role;sockets.set(id,ws);clearTimeout(deadline);ws.snapshotSession=createSnapshotSession(game.snapshot(id));send(ws,{type:'welcome',id,state:structuredClone(ws.snapshotSession.state),revision:0});save();return;
  }
  if(!id)return;
  if(m.type==='input')game.input(id,m);else{const result=game.action(id,m);if(result.ok)save();send(ws,{type:'result',...result});}
  });
  ws.on('close',()=>{clearTimeout(deadline);clearInterval(limiter);clearInterval(revalidate);if(id){game.leave(id);sockets.delete(id);save();}});ws.on('error',()=>{});
  });
- let backupDay=new Date().toISOString().slice(0,10);let ticks=0;const tick=setInterval(()=>{game.tick(.05);if(++ticks%2===0){for(const [playerId,ws]of sockets)send(ws,{type:'state',state:game.snapshot(playerId),inputAck:game.inputAck(playerId),saveError,lastSaved});}if(ticks%100===0){save();const day=new Date().toISOString().slice(0,10);if(day!==backupDay){try{const dir=path.join(path.dirname(saveFile),'daily');saveWorld(path.join(dir,day+'.json'),game.world);backupDay=day;for(const file of fs.readdirSync(dir).filter(f=>/^\d{4}-\d{2}-\d{2}\.json$/.test(f)).sort().slice(0,-8))fs.unlinkSync(path.join(dir,file));}catch(e){console.error('Daily backup failed:',e.message);}}}},50);
+ let backupDay=new Date().toISOString().slice(0,10);let ticks=0;const tick=setInterval(()=>{game.tick(.05);if(++ticks%2===0){for(const [playerId,ws]of sockets)send(ws,nextSnapshotPacket(ws.snapshotSession,game.snapshot(playerId),{inputAck:game.inputAck(playerId),saveError,lastSaved}));}if(ticks%100===0){save();const day=new Date().toISOString().slice(0,10);if(day!==backupDay){try{const dir=path.join(path.dirname(saveFile),'daily');saveWorld(path.join(dir,day+'.json'),game.world);backupDay=day;for(const file of fs.readdirSync(dir).filter(f=>/^\d{4}-\d{2}-\d{2}\.json$/.test(f)).sort().slice(0,-8))fs.unlinkSync(path.join(dir,file));}catch(e){console.error('Daily backup failed:',e.message);}}}},50);
  server.listen(port,host,()=>console.log(`Vibe City: First Signal → http://localhost:${server.address().port} | seed ${game.world.seed}`));
  const close=()=>new Promise(resolve=>{clearInterval(tick);save();for(const ws of wss.clients)ws.terminate();wss.close();server.close(resolve);});
  return{server,game,close,save};
