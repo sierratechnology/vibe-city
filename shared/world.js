@@ -29,6 +29,7 @@ export const RECIPES = {
   lamp:{name:'Wall lumen',cost:{ferrite:1,crystal:1},description:'A permanent wall light. Requires a bulkhead or camp barrier on the same edge.'},
   floor:{name:'Deck',cost:{ferrite:2,fiber:1},description:'A 3 m foundation. Snap to the ground grid.'},
   wall:{name:'Bulkhead',cost:{ferrite:2},description:'An edge wall. R rotates to another edge.'},
+  doorway:{name:'Doorway frame',cost:{ferrite:2},description:'A passable opening on a deck edge. R rotates to another edge.'},
   roof:{name:'Canopy',cost:{fiber:3,ferrite:1},description:'Requires a deck; shelters the tile beneath it.'},
   heater:{name:'Resonance anchor',cost:{ferrite:4,crystal:3},unlock:true,description:'Ruin technology. Restores suit charge within 7 m.'}
 };
@@ -51,7 +52,7 @@ export function shape(piece,seed){
  if(['lifeSupport','iceProcessor','garden','bed'].includes(piece.type)){dy=.85;w=piece.type==='bed'?1.2:1.5;d=piece.type==='bed'?2:1.2;h=1.2;}
  if(piece.type==='cargo'){dy=.8;w=1.5;d=1;h=1.1;}
  if(piece.type==='lamp'){dx=[0,1.3,0,-1.3][r];dz=[-1.3,0,1.3,0][r];dy=2.1;w=.28;d=.28;h=.45;}
- if(['wall','perimeter','door','airlock'].includes(piece.type)){dx=[0,1.5,0,-1.5][r];dz=[-1.5,0,1.5,0][r];dy=1.55;w=r%2?.18:3;d=r%2?3:.18;h=2.6;}
+ if(['wall','doorway','perimeter','door','airlock'].includes(piece.type)){dx=[0,1.5,0,-1.5][r];dz=[-1.5,0,1.5,0][r];dy=1.55;w=r%2?.18:3;d=r%2?3:.18;h=2.6;}
  if(piece.type==='roof'){dy=3;w=d=3.15;h=.18;}
  if(piece.type==='heater'){dy=.95;w=d=.65;h=1.4;}
  const centre=piece.site?gridPoint(piece.site,piece.gx+dx/3,piece.gz+dz/3,seed,dy):{x:piece.x+dx,z:piece.z+dz,y:height(piece.x,piece.z,seed)+dy};return{...centre,w,d,h,frame:piece.site?anchor(piece.site):{x:piece.x,z:piece.z}};
@@ -61,13 +62,13 @@ export function blocked(world,x,z){
  if(!Number.isFinite(x)||!Number.isFinite(z))return true;
  // Ruin columns; its open central console is reachable.
  for(const [dx,dz] of [[-3,-3],[3,-3],[-3,3],[3,3]])if(Math.hypot(x-RUIN.x-dx,z-RUIN.z-dz)<.95)return true;
- return world.structures.some(s=>{if(!['wall','perimeter','door','airlock','heater','cargo','lifeSupport','iceProcessor','garden','bed'].includes(s.type)||s.open)return false;const b=shape(s,world.seed);if(dist(b,{x,z})>4)return false;const o=localOffset(b,{x,z},b.frame);return Math.abs(o.x)<b.w/2+.32&&Math.abs(o.z)<b.d/2+.32;});
+ return world.structures.some(s=>{if(!['wall','doorway','perimeter','door','airlock','heater','cargo','lifeSupport','iceProcessor','garden','bed'].includes(s.type)||s.open)return false;const b=shape(s,world.seed);if(dist(b,{x,z})>4)return false;const o=localOffset(b,{x,z},b.frame),inside=Math.abs(o.x)<b.w/2+.32&&Math.abs(o.z)<b.d/2+.32;if(s.type==='doorway')return inside&&Math.abs(b.w>b.d?o.x:o.z)>.65;return inside;});
 }
 export function surface(world,x,z){let y=height(x,z,world.seed);for(const s of world.structures)if(s.type==='floor'&&withinTile(s,{x,z}))y=Math.max(y,floorHeight(s,{x,z},world.seed));return y;}
 export function sheltered(world,p){return world.structures.some(s=>s.type==='roof'&&withinTile(s,p));}
 export function powered(world,p){return world.structures.some(s=>s.type==='heater'&&dist(s,p)<7);}
 export function placementError(world,p,piece,people=[]){
- if(!['floor','wall','roof','heater','perimeter','lamp','cargo','door','airlock','lifeSupport','iceProcessor','garden','bed'].includes(piece.type))return 'Choose a construction piece.';
+ if(!['floor','wall','doorway','roof','heater','perimeter','lamp','cargo','door','airlock','lifeSupport','iceProcessor','garden','bed'].includes(piece.type))return 'Choose a construction piece.';
  if(!Number.isFinite(piece.x)||!Number.isFinite(piece.z)||!Number.isInteger(piece.rotation)||piece.rotation<0||piece.rotation>3)return 'Invalid placement.';
  if(piece.site){if(!validSite(piece.site)||!Number.isInteger(piece.gx)||!Number.isInteger(piece.gz)||Math.abs(piece.gx)>128||Math.abs(piece.gz)>128)return 'Invalid local construction grid.';const expected=gridPoint(piece.site,piece.gx,piece.gz,world.seed);if(dist(piece,expected)>.01)return 'Invalid grid position.';if(Math.abs(expected.y-height(piece.x,piece.z,world.seed))>2)return 'Terrain too steep for this foundation. Choose flatter ground.';}else if(piece.x%3||piece.z%3)return 'Use the 3 m construction grid.';
 
@@ -75,13 +76,13 @@ export function placementError(world,p,piece,people=[]){
  if(dist(piece,RUIN)<7||Math.hypot(piece.x,piece.z)<3)return 'Keep the ruin and landing point clear.';
  if(piece.type==='heater'&&!p.unlocked)return 'Scan the distant ruin first.';
  const same=world.structures.filter(s=>dist(s,piece)<.05);if(piece.type==='floor'&&world.structures.some(s=>s.type==='floor'&&dist(s,piece)<2.85))return 'A foundation already occupies this space.';
- if(same.some(s=>s.type===piece.type&&(!['wall','perimeter','door','airlock','lamp'].includes(s.type)||s.rotation===piece.rotation)))return 'This slot is occupied.';
+ if(same.some(s=>s.type===piece.type&&(!['wall','doorway','perimeter','door','airlock','lamp'].includes(s.type)||s.rotation===piece.rotation)))return 'This slot is occupied.';
  // Opposite edges on neighboring tiles represent the same physical wall.
  const b=shape(piece,world.seed);
- if(['wall','perimeter','door','airlock'].includes(piece.type)&&world.structures.some(s=>['wall','perimeter','door','airlock'].includes(s.type)&&dist(shape(s,world.seed),b)<.1))return 'This edge is occupied.';
+ if(['wall','doorway','perimeter','door','airlock'].includes(piece.type)&&world.structures.some(s=>['wall','doorway','perimeter','door','airlock'].includes(s.type)&&dist(shape(s,world.seed),b)<.1))return 'This edge is occupied.';
  if(piece.type==='lamp'&&!same.some(s=>['wall','perimeter','door','airlock'].includes(s.type)&&s.rotation===piece.rotation))return 'A wall is required on this edge.';
  if(!['floor','perimeter','lamp','cargo'].includes(piece.type)&&!same.some(s=>s.type==='floor'))return 'Place a deck underneath first.';
- if(['wall','perimeter','door','airlock','heater','cargo','lifeSupport','iceProcessor','garden','bed'].includes(piece.type))if(people.some(q=>{if(dist(q,b)>5)return false;const o=localOffset(b,q,b.frame);return Math.abs(o.x)<b.w/2+.5&&Math.abs(o.z)<b.d/2+.5;}))return 'A player is in the way.';
+ if(['wall','doorway','perimeter','door','airlock','heater','cargo','lifeSupport','iceProcessor','garden','bed'].includes(piece.type))if(people.some(q=>{if(dist(q,b)>5)return false;const o=localOffset(b,q,b.frame),inside=Math.abs(o.x)<b.w/2+.5&&Math.abs(o.z)<b.d/2+.5;return inside&&(piece.type!=='doorway'||Math.abs(b.w>b.d?o.x:o.z)>.65);}))return 'A player is in the way.';
  if(piece.type==='floor'&&world.resources.some(n=>n.amount>0&&Math.abs(n.x-piece.x)<1.7&&Math.abs(n.z-piece.z)<1.7))return 'Gather the resources on this tile first.';
  return '';
 }
