@@ -224,6 +224,30 @@ test('viewer-specific dismantling authorization survives exact snapshot validati
   assert.deepEqual(accepted.structures[0].dismantleGrantedTo, [collaborator.id]);
 });
 
+test('cargo snapshots disclose the grant roster only to the owner and minimum access meaning to the recipient', () => {
+  const game = new Game();
+  const owner = game.join('owner', 'Owner');
+  const collaborator = game.join('collaborator', 'Collaborator');
+  const viewer = game.join('viewer', 'Viewer');
+  game.world.structures.push({id: 'box', type: 'cargo', x: 0, z: 3, rotation: 0, owner: owner.id});
+  game.world.containers.box = {ferrite: 2};
+  assert.equal(game.action(owner.id, {type: 'lock', id: 'box', mode: 'set', pin: '1234'}).ok, true);
+  assert.equal(game.action(owner.id, {type: 'cargoAccess', id: 'box', target: collaborator.id, allow: true}).ok, true);
+
+  const ownerBox = acceptSnapshotBaseline(game.snapshot(owner.id), 0).structures[0];
+  const collaboratorBox = acceptSnapshotBaseline(game.snapshot(collaborator.id), 0).structures[0];
+  const viewerBox = acceptSnapshotBaseline(game.snapshot(viewer.id), 0).structures[0];
+  assert.deepEqual(ownerBox.cargoGrantedTo, [{id: collaborator.id, name: 'Collaborator'}]);
+  assert.equal(ownerBox.canAccessCargo, true);
+  assert.equal(collaboratorBox.canAccessCargo, true);
+  assert.equal(Object.hasOwn(collaboratorBox, 'cargoGrantedTo'), false);
+  assert.equal(Object.hasOwn(viewerBox, 'canAccessCargo'), false);
+  assert.equal(Object.hasOwn(viewerBox, 'cargoGrantedTo'), false);
+  assert.equal(game.snapshot(collaborator.id).containers.box.ferrite, 2);
+  assert.equal(game.snapshot(viewer.id).containers.box, undefined);
+  for (const projected of [ownerBox, collaboratorBox, viewerBox]) assert.equal(JSON.stringify(projected).includes('1234'), false);
+});
+
 test('legal 4,999-structure world establishes and continues snapshot delivery', () => {
   const game = new Game();
   const player = game.join('builder', 'Builder');
