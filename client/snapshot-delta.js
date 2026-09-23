@@ -19,7 +19,7 @@ const planetFields = new Set(['version', 'circumference', 'solarDistanceAU', 'ro
 const settingsFields = new Set(['name', 'description', 'maxPlayers', 'public', 'pvp', 'structureDamage', 'offlineRaiding', 'survivalRate', 'gatherRate', 'daySeconds', 'nightSeconds', 'sleepPercent', 'vehicleSpeed']);
 const monumentFields = new Set(['id', 'kind', 'name', 'x', 'z']);
 const vehicleFields = new Set(['id', 'type', 'x', 'z', 'yaw', 'health', 'battery', 'modules', 'occupants', 'inventory', 'owner']);
-const structureFields = new Set(['id', 'type', 'x', 'z', 'rotation', 'site', 'gx', 'gz', 'health', 'power', 'owner', 'open', 'cycleUntil', 'water', 'readyAt', 'lastDamage', 'canDismantle', 'dismantleGrantedTo']);
+const structureFields = new Set(['id', 'type', 'x', 'z', 'rotation', 'site', 'gx', 'gz', 'health', 'power', 'owner', 'open', 'cycleUntil', 'water', 'readyAt', 'lastDamage', 'canDismantle', 'dismantleGrantedTo', 'canAccessCargo', 'cargoGrantedTo']);
 const creatureFields = new Set(['id', 'type', 'x', 'z', 'homeX', 'homeZ', 'health', 'yaw', 'attackAt', 'respawnAt', 'fleeUntil']);
 const resourceFields = new Set(['id', 'type', 'x', 'z', 'y', 'amount']);
 const inventoryFields = new Set(['ice', 'water', 'copper', 'silica', 'carbon', 'scrap', 'ferrite', 'fiber', 'meat', 'ration', 'crystal']);
@@ -169,6 +169,14 @@ function validateSnapshotSchema(snapshot) {
     if (Object.hasOwn(structure, 'open')) booleanValue(structure.open, 'structure');
     if (Object.hasOwn(structure, 'canDismantle')) booleanValue(structure.canDismantle, 'structure');
     if (Object.hasOwn(structure, 'dismantleGrantedTo')) stringArray(structure.dismantleGrantedTo, 'structure dismantle grants');
+    if (Object.hasOwn(structure, 'canAccessCargo')) booleanValue(structure.canAccessCargo, 'structure cargo access');
+    if (Object.hasOwn(structure, 'cargoGrantedTo')) {
+      if (!Array.isArray(structure.cargoGrantedTo) || structure.cargoGrantedTo.length > 16) fail('structure cargo grants shape');
+      for (const character of structure.cargoGrantedTo) {
+        exactKeys(character, new Set(['id', 'name']), ['id', 'name'], 'structure cargo grant');
+        stringValue(character.id, 'structure cargo grant'); stringValue(character.name, 'structure cargo grant');
+      }
+    }
   }
   for (const inventory of Object.values(snapshot.containers)) validateInventory(inventory, 'container inventory');
   for (const creature of snapshot.creatures) {
