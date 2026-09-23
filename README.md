@@ -46,6 +46,8 @@ The public game is available at https://vibe-city.net with HTTPS, secure account
 
 Previews snap 4.5 m ahead onto a 3 m grid. Green means valid and affordable, red means blocked. The on-screen hint explains why. Place a deck first; walls, a flat or angled canopy, a sealed door, a Deck stair, and an anchor attach to it. The Deck stair is selected through the Field Guide or mouse/touch hotbar (it has no digit shortcut), rotates among four free deck edges, and provides only the low-rise terrain-to-deck transition for the current 0.27 m deck surface. Flat and angled canopies share one roof slot. A closed sealed door visibly blocks and seals its edge; approach it and use the contextual interaction to open it for passage, then close it again. The server owns placement, payment, stair support/collision checks, and door open/closed state, which persist across reconnects. Stairs do not add a second story, arbitrary vertical building, structural support, room enclosure, ladders, or elevators; those broader systems remain planned. Dismantle upper or edge pieces before their deck.
 
+A freestanding **Workbench** costs the same established material bundle as a cargo locker: 6 ferrite + 2 fiber. Its owner can stand within 3 m and use Field Guide → Fabrication to queue Field meals. The server reserves 1 meat + 1 fiber, runs one five-second job with at most two pending, and grants each meal once. A full backpack leaves the completed job visibly blocked without losing value. Workbench time advances only while the server runs; there is no offline catch-up. Active queues must finish before dismantling.
+
 ## The first loop (roughly 5–10 minutes)
 
 - Gather **3 ferrite + 2 ribbon fiber** near the landing point. Press C and craft the field cutter; gathering gets faster.
@@ -114,7 +116,7 @@ No keyboard is required. Click/tap terrain to walk toward it; drag the world to 
 From the title choose **Find / Join Game**, then join **The Quiet Basin**. The directory shows live occupancy (50-player maximum). **Create Server** is deliberately disabled until the owner enables additional servers; there is no create-server endpoint.
 
 - **Day/night:** six minutes of daylight and four minutes of night per shared simulation cycle. All players see the same phase; cloud simulation pauses when empty.
-- **Mossback:** neutral at all hours. Hunt with Attack to obtain meat. Prepare a Field meal using 1 meat + 1 ribbon fiber; Eat restores 35 health.
+- **Mossback:** neutral at all hours. Hunt with Attack to obtain meat. At your nearby Workbench, queue a Field meal using 1 meat + 1 ribbon fiber; Eat restores 35 health.
 - **Bristletick:** small hostile creature, active day and night.
 - **Veilstalker:** medium hostile creature, appears and attacks only at night. Defeating one yields flux crystals.
 - **Combat:** Attack targets the nearest creature within 2.8 m with a clear path. Bare hands deal 8 damage, the crafted cutter 15. Creatures respawn after three simulation minutes. The immediate landing area is a safe zone.
