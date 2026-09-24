@@ -9,6 +9,11 @@ export function basis(x,z){const l=x/RADIUS,t=z/RADIUS;return{east:{x:Math.cos(l
 export function travel(p,east,south){const d=Math.hypot(east,south);if(!d)return{x:p.x,z:p.z};const b=basis(p.x,p.z),a=d/RADIUS,c=Math.cos(a),s=Math.sin(a)/d;return coordinates({x:b.up.x*c+(b.east.x*east+b.south.x*south)*s,y:b.up.y*c+(b.east.y*east+b.south.y*south)*s,z:b.up.z*c+(b.east.z*east+b.south.z*south)*s});}
 export function planetDistance(a,b){const u=unit(a.x,a.z),v=unit(b.x,b.z);return 2*RADIUS*Math.asin(Math.min(1,Math.hypot(u.x-v.x,u.y-v.y,u.z-v.z)/2));}
 export function direction(a,b){const u=unit(b.x,b.z),v=basis(a.x,a.z);return{x:u.x*v.east.x+u.y*v.east.y+u.z*v.east.z,z:u.x*v.south.x+u.y*v.south.y+u.z*v.south.z};}
+const BIOMES={baseline:{id:'quiet-basin',name:'Quiet Basin',palette:{high:0xa0b0b3,low:0x657e87,mid:0xa58a7d}},coral:{id:'coral-shelf',name:'Coral Shelf',palette:{high:0xb5a9bd,low:0x527f83,mid:0xb87570}}};
+const biomeDescriptor=biome=>({id:biome.id,name:biome.name,palette:{...biome.palette}});
+// travel/planetDistance can accumulate two scaled binary64 rounding steps at this boundary.
+const PROTECTED_RADIUS=325,PROTECTED_RADIUS_EPSILON=PROTECTED_RADIUS*Number.EPSILON*2; // Machine-scale only; not gameplay range.
+export function classifyBiome(x,z,seed){if(![x,z,seed].every(Number.isFinite)||planetDistance({x,z},{x:0,z:0})<=PROTECTED_RADIUS+PROTECTED_RADIUS_EPSILON)return biomeDescriptor(BIOMES.baseline);const u=unit(x,z),q=n=>Math.round(n*1e12)/1e12,phase=hash(`biome:${seed}`)/4294967296*Math.PI*2,field=Math.sin(q(u.x)*7+q(u.y)*11+q(u.z)*13+phase);return biomeDescriptor(field>.25?BIOMES.coral:BIOMES.baseline);}
 function random(seed){let a=seed>>>0;return()=>{a+=0x6D2B79F5;let t=a;t=Math.imul(t^t>>>15,t|1);t^=t+Math.imul(t^t>>>7,t|61);return((t^t>>>14)>>>0)/4294967296;};}
 export function hash(text){let h=2166136261;for(const c of text)h=Math.imul(h^c.charCodeAt(0),16777619);return h>>>0;}
 export function planetHeight(x,z,seed=7319){const old=Math.sin(x*.072+(seed%97)*.04)*1.25+Math.cos(z*.088-(seed%97)*.04)*1.05+Math.sin((x+z)*.13)*.32;if(Math.hypot(x,z)<80)return old;const u=unit(x,z),p=(seed%113)*.07;let h=0;for(const [freq,amp]of[[13,160],[43,55],[127,18],[509,3]])h+=(Math.sin(u.x*freq+p)*Math.cos(u.y*freq-p)+Math.sin(u.z*freq+p*.7))*.5*amp;const blend=clamp((Math.hypot(x,z)-80)/220,0,1);return old*(1-blend)+h*blend;}
