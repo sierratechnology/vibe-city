@@ -22,7 +22,20 @@ function faceUV(u){const a=[Math.abs(u.x),Math.abs(u.y),Math.abs(u.z)],axis=a.in
 export function tileUnit(face,u,v){const axis=Math.floor(face/2),sign=face%2?-1:1,o=axis===0?{x:sign,y:u,z:v}:axis===1?{x:u,y:sign,z:v}:{x:u,y:v,z:sign};const n=Math.hypot(o.x,o.y,o.z);return{x:o.x/n,y:o.y/n,z:o.z/n};}
 export function tileAt(x,z){const f=faceUV(unit(x,z));return{face:f.face,i:Math.min(TILES-1,Math.floor((f.u+1)*TILES/2)),j:Math.min(TILES-1,Math.floor((f.v+1)*TILES/2))};}
 export function tileSample(t,a,b){return coordinates(tileUnit(t.face,(t.i+a)*2/TILES-1,(t.j+b)*2/TILES-1));}
+export const CORAL_FORMATIONS_PER_TILE=2,CORAL_FORMATIONS_NEARBY_MAX=20;
+export function coralShelfFormations(seed,t){
+ if(!Number.isFinite(seed)||!t||!Number.isInteger(t.face)||t.face<0||t.face>5||!Number.isInteger(t.i)||t.i<0||t.i>=TILES||!Number.isInteger(t.j)||t.j<0||t.j>=TILES)return[];
+ const center=tileSample(t,.5,.5);if(classifyBiome(center.x,center.z,seed).id!==BIOMES.coral.id)return[];
+ const key=`${seed}:${t.face}:${t.i}:${t.j}`,r=random(hash(`coral-environment:${key}`)),formations=[];
+ for(let attempt=0;attempt<6&&formations.length<CORAL_FORMATIONS_PER_TILE;attempt++){const p=tileSample(t,.15+r()*.7,.15+r()*.7);if(classifyBiome(p.x,p.z,seed).id!==BIOMES.coral.id)continue;formations.push({id:`env:coral-fan:${key}:${formations.length}`,kind:'coral-fan',x:p.x,z:p.z,y:planetHeight(p.x,p.z,seed),scale:.8+r()*.6,rotation:r()*Math.PI*2});}
+ return formations;
+}
 export function nearbyTiles(p){const found=new Map();for(let a=-2;a<=2;a++)for(let b=-2;b<=2;b++){const q=travel(p,a*120,b*120),t=tileAt(q.x,q.z);found.set(`${t.face}:${t.i}:${t.j}`,t);}return [...found.values()];}
+export function nearbyCoralShelfFormations(seed,p,exclusions=[]){
+ if(!Number.isFinite(seed)||!p||![p.x,p.z].every(Number.isFinite)||!Array.isArray(exclusions)||exclusions.some(e=>!e||![e.x,e.z,e.radius].every(Number.isFinite)||e.radius<0))return[];
+ const tiles=nearbyTiles(p),automatic=tiles.map(t=>({...tileSample(t,.5,.5),radius:8})),blocked=[...exclusions,...automatic];
+ return tiles.flatMap(t=>coralShelfFormations(seed,t)).filter(f=>planetDistance(p,f)<320&&blocked.every(e=>planetDistance(f,e)>=e.radius)).slice(0,CORAL_FORMATIONS_NEARBY_MAX);
+}
 export function atmosphere(seed){const r=random(seed+901),profiles=[{name:'Thin nitrogen',oxygen:4,pressure:24,toxicity:0,temperature:-38},{name:'Cold breathable',oxygen:21,pressure:88,toxicity:0,temperature:-12},{name:'Corrosive haze',oxygen:12,pressure:102,toxicity:68,temperature:-24},{name:'Near vacuum',oxygen:0,pressure:.2,toxicity:0,temperature:-70}];return{...profiles[Math.floor(r()*profiles.length)]};}
 export function breathable(air){return air.oxygen>=18&&air.oxygen<=25&&air.pressure>=60&&air.pressure<=120&&air.toxicity<5;}
 export const MONUMENTS=[{id:'relay',kind:'relay',name:'Broken Relay',x:24,z:-24},{id:'cryowell',kind:'cryowell',name:'Cryowell Station',x:180,z:-90},{id:'graveyard',kind:'graveyard',name:'Crawler Graveyard',x:-220,z:100}];
