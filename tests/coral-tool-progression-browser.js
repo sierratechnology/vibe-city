@@ -110,7 +110,7 @@ try {
   app.game.world.players[desktop.id].cutter = true;
   app.game.world.players[touch.id].cutter = true;
   for (const explorer of [desktop, touch]) {
-    await explorer.page.waitForFunction(nodeId => document.querySelector('#interaction')?.textContent === '[E] Gather Flux crystal · 6 remaining'
+    await explorer.page.waitForFunction(nodeId => document.querySelector('#interaction')?.textContent === '[E] Gather Coral Flux · 6 remaining'
       && window.vibeDiagnostics?.player.cutter === true
       && window.vibeDiagnostics.state.resources.find(resource => resource.id === nodeId)?.amount === 6, node.id, {timeout: 7500});
   }
