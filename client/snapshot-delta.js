@@ -1,3 +1,5 @@
+import {withinGatherRange} from '../shared/world.js';
+
 export const SNAPSHOT_FIELDS = Object.freeze([
   'planet', 'settings', 'circumference', 'monuments', 'vehicles', 'locks', 'seed', 'time',
   'structures', 'containers', 'creatures', 'resources', 'playerCount', 'players',
@@ -116,6 +118,34 @@ function safeInteger(value, label) {
 
 function booleanValue(value, label) {
   if (typeof value !== 'boolean') fail(`${label} shape`);
+}
+
+function isCanonicalCoralFluxId(id) {
+  if (typeof id !== 'string') return false;
+  const parts = id.split(':');
+  if (parts.length !== 6 || parts[0] !== 'p' || parts[1] !== 'coral') return false;
+  const seed = Number(parts[2]);
+  const face = Number(parts[3]);
+  const i = Number(parts[4]);
+  const j = Number(parts[5]);
+  return Number.isFinite(seed) && String(seed) === parts[2]
+    && Number.isSafeInteger(face) && face >= 0 && face <= 5 && String(face) === parts[3]
+    && Number.isSafeInteger(i) && i >= 0 && String(i) === parts[4]
+    && Number.isSafeInteger(j) && j >= 0 && String(j) === parts[5];
+}
+
+export function coralFieldCutterFeedback(resources, player, actionableTarget, distance) {
+  if (!Array.isArray(resources) || !player || typeof player !== 'object' || Array.isArray(player)
+    || player.cutter !== false || actionableTarget?.type !== 'gather'
+    || typeof actionableTarget.id !== 'string' || typeof distance !== 'function') return null;
+  const resource = resources.find(candidate => candidate?.id === actionableTarget.id);
+  if (!resource || resource.type !== 'crystal' || !Number.isSafeInteger(resource.amount) || resource.amount <= 0
+    || !isCanonicalCoralFluxId(resource.id)) return null;
+  let separation;
+  try { separation = distance(resource, player); } catch { return null; }
+  return withinGatherRange(separation)
+    ? 'A Field cutter is required to gather Coral Flux.'
+    : null;
 }
 
 export function coralRegenerationStatus(resource, worldTime) {
