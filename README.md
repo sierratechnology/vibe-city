@@ -28,6 +28,8 @@ The public game is available at https://vibe-city.net with HTTPS, secure account
 
 ## Controls
 
+Field Guide → Settings includes a master mute plus separate **Interface** and **World/Gameplay** volume controls. These preferences are local to the current browser and do not sync through an account or world save. Audio begins only after a user gesture and uses short generated cues for menu actions and server-result feedback; it adds no speech, music, remote media or mandatory audio state. All outcomes remain visible without sound. Automated desktop Chromium, phone-sized Chromium real-touch emulation, and desktop Firefox cover the browser path; physical phone speakers/headphones and physical controllers remain unverified.
+
 | Input | Action |
 | --- | --- |
 | Click/tap world | Walk toward terrain; place while building |
