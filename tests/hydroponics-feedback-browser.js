@@ -73,7 +73,7 @@ try {
     {id: 'hydro-roof', type: 'roof', x: 9, z: 0, rotation: 0, owner: owner.id},
     ...[0, 1, 2, 3].map(rotation => ({id: `hydro-wall-${rotation}`, type: 'wall', x: 9, z: 0, rotation, owner: owner.id})),
     {id: 'hydro-support', type: 'lifeSupport', x: 9, z: 0, rotation: 0, power: 20, owner: owner.id},
-    {id: 'hydro-bed', type: 'garden', x: 9, z: 0, rotation: 0, owner: owner.id},
+    {id: 'hydro-bed', type: 'garden', x: 9, z: 0, rotation: 0, owner: owner.id, hydroponicsGrants: [observer.id]},
   ];
   app.game.world.structures.push(...structures);
   const room = rooms(app.game.world).find(candidate => candidate.sealed && candidate.cells.length === 1);

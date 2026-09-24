@@ -338,6 +338,30 @@ test('bounded workbench collaboration projections survive exact snapshot validat
   assert.deepEqual(acceptSnapshotBaseline(collaboratorView, 0), collaboratorView);
 });
 
+test('hydroponic owner roster and collaborator capability survive exact baseline and delta validation', () => {
+  const ownerView = snapshot({structures: [{id: 'bed', type: 'garden', hydroponicsGrantedTo: [{id: 'collaborator', name: 'Collaborator'}]}]});
+  const collaboratorView = snapshot({structures: [{id: 'bed', type: 'garden', canUseHydroponics: true}]});
+  assert.deepEqual(acceptSnapshotBaseline(ownerView, 0), ownerView);
+  const accepted = acceptSnapshotBaseline(snapshot({structures: [{id: 'bed', type: 'garden'}]}), 0);
+  assert.deepEqual(applySnapshotDelta(accepted, createSnapshotDelta(accepted, collaboratorView, 0, 1), 0), collaboratorView);
+});
+
+test('malformed and unknown hydroponic projection fields are rejected before snapshot mutation', () => {
+  const accepted = snapshot({structures: [{id: 'bed', type: 'garden'}]});
+  const unchanged = structuredClone(accepted);
+  const malformed = [
+    {id: 'bed', type: 'garden', canUseHydroponics: 'yes'},
+    {id: 'bed', type: 'garden', hydroponicsGrantedTo: 'collaborator'},
+    {id: 'bed', type: 'garden', hydroponicsGrantedTo: Array.from({length: 17}, (_, index) => ({id: `p${index}`, name: `P ${index}`}))},
+    {id: 'bed', type: 'garden', hydroponicsGrantedTo: [{id: 'collaborator', name: 'Collaborator', email: 'private@example.test'}]},
+    {id: 'bed', type: 'garden', hydroponicsGrants: ['collaborator']},
+  ];
+  for (const structure of malformed) {
+    assert.throws(() => applySnapshotDelta(accepted, {type: 'delta', baseRevision: 0, revision: 1, changes: {structures: [structure]}}, 0), /Invalid snapshot delta/);
+    assert.deepEqual(accepted, unchanged);
+  }
+});
+
 test('legal 4,999-structure world establishes and continues snapshot delivery', () => {
   const game = new Game();
   const player = game.join('builder', 'Builder');
