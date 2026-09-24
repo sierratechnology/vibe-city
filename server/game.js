@@ -3,7 +3,7 @@ import {types as utilTypes} from 'node:util';
 import {travel,direction,steering,MONUMENTS,CIRCUMFERENCE} from '../shared/planet.js';
 import {roomStatus} from '../shared/rooms.js';
 import {spawnCreatures,stepCreatures,activeCreature,SPECIES,clearPath} from '../shared/ecology.js';
-import {makeWorld,makePlayer,dist,RUIN,blocked,sheltered,powered,placementError,canAfford,pay,RECIPES,itemCount,freeSpace,CARGO_CAPACITY,height} from '../shared/world.js';
+import {makeWorld,makePlayer,dist,RUIN,blocked,sheltered,powered,placementError,canAfford,pay,RECIPES,itemCount,freeSpace,CARGO_CAPACITY,height,withinGatherRange} from '../shared/world.js';
 const FORBIDDEN_PLAYER_IDS=new Set(['__proto__','prototype','constructor']);
 export const DISMANTLE_GRANT_LIMIT=32;
 export const WORKBENCH_GRANT_LIMIT=32;
@@ -64,7 +64,8 @@ export class Game {
  pay(p,'ration');const job={id:legacyRequest?m.requestId:`workbench-${sequence}`,owner:id,recipe:'ration',state:queue.length?'queued':'in-progress',...(queue.length?{}:{startedAt:now})};bench.workbenchQueue=[...queue,job];bench.workbenchNextSequence=sequence+1;delete bench.workbenchRequests;return{ok:true,message:'Field meal queued.'};
  }
  if(m.type==='gather'){
- const n=resourcesFor(this.world,p).find(n=>n.id===m.id);if(!n||n.amount<=0)return fail('This deposit is depleted.');if(dist(p,n)>3)return fail('Move closer to gather (3 m).');
+ const n=resourcesFor(this.world,p).find(n=>n.id===m.id);if(!n||n.amount<=0)return fail('This deposit is depleted.');if(!withinGatherRange(dist(p,n)))return fail('Move closer to gather (3 m).');
+ if(isCoralFluxNodeId(n.id)&&!p.cutter)return fail('A Field cutter is required to gather Coral Flux.');
  const amount=Math.min(n.amount,(p.cutter?2:1)*this.world.settings.gatherRate,freeSpace(p.inventory));if(amount===0)return fail('Backpack full (60 items). Use a cargo locker.');n.amount-=amount;if(n.id.startsWith('p:'))this.world.depleted[n.id]=n.amount;if(n.id.startsWith('p:coral:')&&n.amount===0&&(Object.hasOwn(this.coralFluxRegeneration,n.id)||Object.keys(this.coralFluxRegeneration).length<CORAL_FLUX_REGENERATION_LIMIT))this.coralFluxRegeneration[n.id]=now+CORAL_FLUX_REGENERATION_SECONDS;p.inventory[n.type]+=amount;skill(p,'mining');this.cooldowns.set(id,now+(p.cutter?.35:.7)/(1+Math.min(.2,Math.sqrt(p.skills.mining)*.01)));return{ok:true,message:`+${amount} ${n.type}`};
  }
  if(m.type==='craft'){
