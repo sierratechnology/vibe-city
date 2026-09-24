@@ -47,12 +47,13 @@ test('current planet snapshot is accepted, detached, delta-preserved, and exact-
   assert.throws(() => acceptSnapshotBaseline({...after, mystery: true}, 1), /snapshot field set/);
 });
 
-test('viewer discovery projection is private and survives an exact snapshot delta', () => {
+test('viewer discovery and first contact projection is private and survives an exact snapshot delta', () => {
   const game = new Game();
   const first = game.join('first', 'First');
   const second = game.join('second', 'Second');
   game.tick(0.05);
   const before = game.snapshot(first.id);
+  assert.equal(Object.hasOwn(before.players.find(player => player.id === first.id), 'firstBiomeContacts'), false);
 
   first.x = 5000;
   first.z = -33250;
@@ -61,13 +62,40 @@ test('viewer discovery projection is private and survives an exact snapshot delt
   const secondView = game.snapshot(second.id);
 
   assert.deepEqual(after.players.find(player => player.id === first.id).discoveredBiomes, ['quiet-basin', 'coral-shelf']);
+  assert.deepEqual(after.players.find(player => player.id === first.id).firstBiomeContacts, {
+    'coral-shelf': {x: 5000, z: -33250},
+  });
   assert.equal(Object.hasOwn(after.players.find(player => player.id === second.id), 'discoveredBiomes'), false);
+  assert.equal(Object.hasOwn(after.players.find(player => player.id === second.id), 'firstBiomeContacts'), false);
   assert.deepEqual(secondView.players.find(player => player.id === second.id).discoveredBiomes, ['quiet-basin']);
+  assert.equal(Object.hasOwn(secondView.players.find(player => player.id === second.id), 'firstBiomeContacts'), false);
   assert.equal(Object.hasOwn(secondView.players.find(player => player.id === first.id), 'discoveredBiomes'), false);
+  assert.equal(Object.hasOwn(secondView.players.find(player => player.id === first.id), 'firstBiomeContacts'), false);
 
   const accepted = acceptSnapshotBaseline(before, 0);
   const delta = createSnapshotDelta(before, after, 0, 1);
   assert.deepEqual(applySnapshotDelta(accepted, delta, 0), after);
+});
+
+test('first contact deltas reject concealed, malformed, and nonfinite points before mutation', () => {
+  const accepted = snapshot({players: [{id: 'p1', x: 0, z: 3, discoveredBiomes: ['quiet-basin']}]});
+  const unchanged = structuredClone(accepted);
+  const invalidContacts = [
+    {'coral-shelf': {x: 5000, z: -33250}},
+    {},
+    {'quiet-basin': {x: 0, z: 3}},
+    {'coral-shelf': {x: Infinity, z: -33250}},
+    {'coral-shelf': {x: 5000, z: -33250, extra: true}},
+    {'coral-shelf': [5000, -33250]},
+  ];
+
+  for (const firstBiomeContacts of invalidContacts) {
+    const players = [{...accepted.players[0], firstBiomeContacts}];
+    assert.throws(() => applySnapshotDelta(accepted, {
+      type: 'delta', baseRevision: 0, revision: 1, changes: {players},
+    }, 0), /Invalid snapshot delta/);
+    assert.deepEqual(accepted, unchanged);
+  }
 });
 
 test('maximum per-structure dismantling projection remains inside snapshot budgets', () => {
