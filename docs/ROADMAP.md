@@ -14,7 +14,7 @@
 - Accessible remapping and touch/controller controls are implemented. Short generated Interface and World/Gameplay cues now have independent browser-local volume settings and a master mute; audio is gesture-gated and supplementary, with no speech, music, account sync or server/world-save fields. Physical phone speaker/headphone and physical-controller audio remain unverified.
 
 ## 2 — A planet worth exploring
-- Seeded regions and streaming; biomes, hazards and distinctive ruins with discoverable patterns.
+- A first deterministic visual biome tracer is implemented: the protected starter region remains Quiet Basin, while seeded distant terrain can classify as Coral Shelf with a distinct palette and accessible text label. Complete regions, biome gameplay, hazards and broader streaming work remain planned.
 - Tools and equipment progression, sustainable gathering/farming and optional threats.
 - Improve the original art language and add optimized authored assets.
 - Expand the finite construction palette before deciding whether true voxels/terrain editing are essential.

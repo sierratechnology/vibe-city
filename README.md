@@ -138,6 +138,8 @@ Existing worlds upgrade in place: player items, structures, world time and resou
 
 This release expands the world into a streamed 145 km-circumference sphere. Verified email is required before server entry; existing accounts retain their characters and progress.
 
+The first seeded biome tracer keeps the protected landing region labeled **Quiet Basin** and can classify distant terrain as **Coral Shelf** with a distinct deterministic palette. The current biome name also appears as accessible status text; this is visual classification only, not biome-specific gameplay or a complete region system.
+
 - Fifty concurrent characters; verified-email access before the title screen. Existing accounts enroll an email without losing characters. Marketing consent is separate and optional.
 - Terminal / M: exploration map, markers, atmosphere analyzer, suit controls, skills and ten belt slots, habitats, vehicles, and server settings.
 - Additional resources: ice, water, conductive ore, silica, carbon and salvage. Procedural rover wrecks can be repaired. The starting region includes Broken Relay, Cryowell Station and Crawler Graveyard.
