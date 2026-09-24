@@ -58,6 +58,19 @@ test('maximum per-structure dismantling projection remains inside snapshot budge
   assert.deepEqual(acceptSnapshotBaseline(projected, 0), projected);
 });
 
+test('workbench cancellation projection round-trips deltas and rejects malformed meaning', () => {
+  const before = snapshot({structures: [{id: 'bench', type: 'workbench', canCancelWorkbench: true, workbenchCancelJobId: 'workbench-7'}]});
+  const after = snapshot({time: 2, structures: [{id: 'bench', type: 'workbench'}]});
+  const accepted = acceptSnapshotBaseline(before, 0);
+  assert.deepEqual(applySnapshotDelta(accepted, createSnapshotDelta(before, after, 0, 1), 0), after);
+  for (const structure of [
+    {id: 'bench', type: 'workbench', canCancelWorkbench: 'yes', workbenchCancelJobId: 'workbench-7'},
+    {id: 'bench', type: 'workbench', canCancelWorkbench: true, workbenchCancelJobId: 7},
+    {id: 'bench', type: 'workbench', canCancelWorkbench: false, workbenchCancelJobId: 'workbench-7'},
+    {id: 'bench', type: 'workbench', canCancelWorkbench: true},
+  ]) assert.throws(() => acceptSnapshotBaseline(snapshot({structures: [structure]}), 0), /Invalid snapshot delta/);
+});
+
 test('two-player viewer snapshot supplies finite remote aim yaw before input', () => {
   const game = new Game();
   const viewer = game.join('viewer', 'Viewer');
