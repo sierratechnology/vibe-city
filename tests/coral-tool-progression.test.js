@@ -88,7 +88,7 @@ test('canonical Coral tool boundary includes exactly 3 m and excludes 3.001 m', 
 test('Coral Field cutter feedback is range-bounded, fail-closed, and follows interaction priority', () => {
   assert.equal(typeof snapshotDelta.coralFieldCutterFeedback, 'function', 'client must expose pure Coral tool feedback');
   const feedback = snapshotDelta.coralFieldCutterFeedback;
-  const coral = {id: 'p:coral:7319:2:128:119', type: 'crystal', amount: 6, x: 0, z: 0};
+  const coral = {id: 'p:coral:7319:2:128:119', type: 'crystal', amount: 6, x: 0, z: 0, y: 0};
   const player = {x: 3, z: 0, cutter: false};
   const distance = (left, right) => Math.hypot(left.x - right.x, left.z - right.z);
   const gather = {type: 'gather', id: coral.id};

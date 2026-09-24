@@ -68,12 +68,13 @@ try {
   const desktopId = await desktopPage.evaluate(() => window.vibeDiagnostics.id);
   const node = tileContent(app.game.world.seed, tileAt(0, -1500)).nodes.find(resource => resource.id.startsWith('p:coral:'));
   assert.ok(node, 'fixture tile must contain the deterministic Coral Shelf deposit');
-  Object.assign(app.game.world.players[desktopId], {x: node.x, z: node.z});
-  await desktopPage.waitForFunction(nodeId => window.vibeDiagnostics?.state.resources.some(resource => resource.id === nodeId && resource.amount === 6), node.id, {timeout: 7500});
+  Object.assign(app.game.world.players[desktopId], {x: node.x, z: node.z, cutter: true});
+  await desktopPage.waitForFunction(nodeId => window.vibeDiagnostics?.player.cutter === true
+    && window.vibeDiagnostics.state.resources.some(resource => resource.id === nodeId && resource.amount === 6), node.id, {timeout: 7500});
   const initialIndex = await desktopPage.evaluate(nodeId => window.vibeDiagnostics.state.resources.findIndex(resource => resource.id === nodeId), node.id);
   const initialCrystal = await desktopPage.evaluate(() => window.vibeDiagnostics.player.inventory.crystal);
 
-  for (let amount = 5; amount >= 0; amount--) {
+  for (const amount of [4, 2, 0]) {
     await desktopPage.keyboard.press('KeyE');
     await desktopPage.waitForFunction(({nodeId, amount, crystal}) => {
       const diagnostics = window.vibeDiagnostics;
@@ -83,7 +84,7 @@ try {
     if (amount > 0) await desktopPage.waitForTimeout(750);
   }
 
-  await desktopPage.waitForFunction(nodeId => /^Flux crystal depleted, regenerates in \d+ seconds of server time\.$/.test(document.querySelector('#interaction')?.textContent || '')
+  await desktopPage.waitForFunction(nodeId => /^Coral Flux depleted, regenerates in \d+ seconds of server time\.$/.test(document.querySelector('#interaction')?.textContent || '')
     && window.vibeDiagnostics?.state.resources.find(resource => resource.id === nodeId)?.amount === 0, node.id, {timeout: 7500});
   const scheduledDue = app.game.world.coralFluxRegeneration[node.id];
   assert.equal(Number.isFinite(scheduledDue), true);
@@ -114,8 +115,8 @@ try {
   await touchPage.evaluate(() => document.querySelector('#enter').click());
   await touchPage.waitForFunction(() => window.vibeDiagnostics?.connected, null, {timeout: 9500});
   const touchId = await touchPage.evaluate(() => window.vibeDiagnostics.id);
-  Object.assign(app.game.world.players[touchId], {x: node.x, z: node.z});
-  await touchPage.waitForFunction(nodeId => /^Flux crystal depleted, regenerates in \d+ seconds of server time\.$/.test(document.querySelector('#interaction')?.textContent || '')
+  Object.assign(app.game.world.players[touchId], {x: node.x, z: node.z, cutter: true});
+  await touchPage.waitForFunction(nodeId => /^Coral Flux depleted, regenerates in \d+ seconds of server time\.$/.test(document.querySelector('#interaction')?.textContent || '')
     && window.vibeDiagnostics?.state.resources.find(resource => resource.id === nodeId)?.amount === 0, node.id, {timeout: 7500});
   assert.equal(await touchPage.locator('#gatherAction').isVisible(), true);
   const touchBefore = structuredClone({
@@ -135,20 +136,20 @@ try {
   app.game.tick(0);
   assert.equal(app.game.world.depleted[node.id], undefined);
   assert.equal(app.game.world.coralFluxRegeneration[node.id], undefined);
-  await touchPage.waitForFunction(nodeId => document.querySelector('#interaction')?.textContent === '[E] Gather Flux crystal · 6 remaining'
+  await touchPage.waitForFunction(nodeId => document.querySelector('#interaction')?.textContent === '[E] Gather Coral Flux · 6 remaining'
     && window.vibeDiagnostics?.state.resources.filter(resource => resource.id === nodeId).length === 1
     && window.vibeDiagnostics.state.resources.find(resource => resource.id === nodeId).amount === 6, node.id, {timeout: 7500});
   const regeneratedIndex = await touchPage.evaluate(nodeId => window.vibeDiagnostics.state.resources.findIndex(resource => resource.id === nodeId), node.id);
   assert.equal(regeneratedIndex, initialIndex);
   const beforeRegather = app.game.world.players[touchId].inventory.crystal;
   await touchPage.locator('#gatherAction').tap({timeout: 5000});
-  await touchPage.waitForFunction(({nodeId, before}) => window.vibeDiagnostics?.player.inventory.crystal === before + 1
-    && window.vibeDiagnostics.state.resources.find(resource => resource.id === nodeId)?.amount === 5, {nodeId: node.id, before: beforeRegather}, {timeout: 7500});
-  assert.equal(app.game.world.depleted[node.id], 5);
+  await touchPage.waitForFunction(({nodeId, before}) => window.vibeDiagnostics?.player.inventory.crystal === before + 2
+    && window.vibeDiagnostics.state.resources.find(resource => resource.id === nodeId)?.amount === 4, {nodeId: node.id, before: beforeRegather}, {timeout: 7500});
+  assert.equal(app.game.world.depleted[node.id], 4);
   assert.equal(app.game.world.coralFluxRegeneration[node.id], undefined);
   assert.deepEqual(pageErrors, []);
   assert.deepEqual(externalRequests, []);
-  console.log('PASS: desktop and touch observed authoritative Coral depletion countdown, depleted inputs caused no mutation, exact due restored one stable amount-6 node, and touch gathered once with zero page errors or external requests.');
+  console.log('PASS: desktop and touch observed authoritative Coral depletion countdown after three two-unit Field-cutter gathers, depleted inputs caused no mutation, exact due restored one stable amount-6 node, and touch gathered two units with zero page errors or external requests.');
 } catch (error) {
   primaryError = error;
 }

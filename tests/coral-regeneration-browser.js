@@ -30,17 +30,17 @@ try{
  await page.waitForFunction(()=>window.vibeDiagnostics?.connected,null,{timeout:9500});
  const id=await page.evaluate(()=>window.vibeDiagnostics.id),node=tileContent(app.game.world.seed,tileAt(0,-1500)).nodes.find(resource=>resource.id.startsWith('p:coral:'));
  assert.ok(node,'fixture tile must contain the deterministic Coral Shelf deposit');
- Object.assign(app.game.world.players[id],{x:node.x,z:node.z});
- await page.waitForFunction(nodeId=>window.vibeDiagnostics?.state.resources.some(resource=>resource.id===nodeId&&resource.amount===6),node.id,{timeout:7500});
- assert.equal(await page.locator('#interaction').innerText(),'[E] Gather Flux crystal · 6 remaining');
+ Object.assign(app.game.world.players[id],{x:node.x,z:node.z,cutter:true});
+ await page.waitForFunction(nodeId=>window.vibeDiagnostics?.player.cutter===true&&window.vibeDiagnostics.state.resources.some(resource=>resource.id===nodeId&&resource.amount===6),node.id,{timeout:7500});
+ assert.equal(await page.locator('#interaction').innerText(),'[E] Gather Coral Flux · 6 remaining');
  const initialCrystal=await page.evaluate(()=>window.vibeDiagnostics.player.inventory.crystal);
- for(let amount=5;amount>=0;amount--){
+ for(const amount of[4,2,0]){
   await page.keyboard.press('KeyE');
   await page.waitForFunction(({nodeId,amount,crystal})=>window.vibeDiagnostics?.player.inventory.crystal===crystal&&window.vibeDiagnostics.state.resources.find(resource=>resource.id===nodeId)?.amount===amount,{nodeId:node.id,amount,crystal:initialCrystal+6-amount},{timeout:7500});
-  if(amount>0){assert.equal(await page.locator('#interaction').innerText(),`[E] Gather Flux crystal · ${amount} remaining`);await page.waitForTimeout(750);}
+  if(amount>0){assert.equal(await page.locator('#interaction').innerText(),`[E] Gather Coral Flux · ${amount} remaining`);await page.waitForTimeout(750);}
  }
  assert.equal(app.game.world.depleted[node.id],0);
- await page.waitForFunction(nodeId=>!document.querySelector('#interaction')?.textContent.includes('Gather Flux crystal')&&window.vibeDiagnostics?.state.resources.find(resource=>resource.id===nodeId)?.amount===0,node.id,{timeout:7500});
+ await page.waitForFunction(nodeId=>!document.querySelector('#interaction')?.textContent.includes('Gather Coral Flux')&&window.vibeDiagnostics?.state.resources.find(resource=>resource.id===nodeId)?.amount===0,node.id,{timeout:7500});
  {
   const observedPostDepletionTime=app.game.world.time,scheduledDue=app.game.world.coralFluxRegeneration[node.id];
   assert.equal(Number.isFinite(scheduledDue),true);
@@ -59,15 +59,15 @@ try{
   assert.deepEqual(app.game.snapshot(id).resources.filter(resource=>resource.id===node.id).map(resource=>resource.amount),[6]);
  }
  await page.waitForFunction(nodeId=>window.vibeDiagnostics?.state.resources.find(resource=>resource.id===nodeId)?.amount===6,node.id,{timeout:7500});
- assert.equal(await page.locator('#interaction').innerText(),'[E] Gather Flux crystal · 6 remaining');
+ assert.equal(await page.locator('#interaction').innerText(),'[E] Gather Coral Flux · 6 remaining');
  const beforeRegather=await page.evaluate(()=>window.vibeDiagnostics.player.inventory.crystal);
  await page.keyboard.press('KeyE');
- await page.waitForFunction(({nodeId,before})=>window.vibeDiagnostics?.player.inventory.crystal===before+1&&window.vibeDiagnostics.state.resources.find(resource=>resource.id===nodeId)?.amount===5,{nodeId:node.id,before:beforeRegather},{timeout:7500});
- assert.equal(app.game.world.depleted[node.id],5);
+ await page.waitForFunction(({nodeId,before})=>window.vibeDiagnostics?.player.inventory.crystal===before+2&&window.vibeDiagnostics.state.resources.find(resource=>resource.id===nodeId)?.amount===4,{nodeId:node.id,before:beforeRegather},{timeout:7500});
+ assert.equal(app.game.world.depleted[node.id],4);
  assert.equal(app.game.world.coralFluxRegeneration[node.id],undefined);
  assert.deepEqual(pageErrors,[]);
  assert.deepEqual(externalRequests,[]);
- console.log('PASS: Coral Shelf Flux was visibly labeled, depleted through six authoritative browser gathers, stayed absent before its world-time due boundary, returned at amount 6 exactly at due, and accepted one subsequent gather with zero external requests/page errors.');
+ console.log('PASS: Coral Shelf Flux was visibly labeled, depleted through three authoritative two-unit Field-cutter gathers, stayed absent before its world-time due boundary, returned at amount 6 exactly at due, and accepted one subsequent two-unit gather with zero external requests/page errors.');
 }catch(error){primaryError=error;}
 const cleanupErrors=[];
 for(const cleanup of[()=>page?.close(),()=>context?.close(),()=>browser?.close(),()=>app?.close(),()=>fs.rmSync(directory,{recursive:true,force:true})])try{await bounded('Coral regeneration browser cleanup',1000,cleanup);}catch(error){cleanupErrors.push(error);}

@@ -1,5 +1,16 @@
 import * as THREE from 'three';import {point,basis,nearbyTiles,tileSample,planetHeight,coordinates,RADIUS,MONUMENTS,planetDistance,classifyBiome} from '../shared/planet.js';
 import {coralShelfLandmark} from '../shared/landmarks.js';
+import {isCanonicalCoralFluxResource} from './snapshot-delta.js';
+export function coralFluxDepositDescriptor(resource){
+ if(!isCanonicalCoralFluxResource(resource))return null;const depleted=resource.amount===0;
+ return{kind:'coral-flux-deposit',depleted,bounds:{radius:1.45,height:2.4},parts:[
+  {primitive:'cylinder',radius:1.05,height:.28,y:.14,tilt:0,yaw:0},
+  {primitive:'cone',radius:.48,height:2.1,y:1.15,tilt:-.32,yaw:0},
+  {primitive:'cone',radius:.42,height:1.75,y:.94,tilt:.42,yaw:2.1},
+  {primitive:'cone',radius:.38,height:1.55,y:.83,tilt:.5,yaw:-2.1},
+ ]};
+}
+export function createCoralFluxDeposit(resource,activeMaterial,depletedMaterial){const descriptor=coralFluxDepositDescriptor(resource);if(!descriptor)return null;const group=new THREE.Group(),material=descriptor.depleted?depletedMaterial:activeMaterial;for(const part of descriptor.parts){const geometry=part.primitive==='cylinder'?new THREE.CylinderGeometry(part.radius,part.radius*1.18,part.height,7):new THREE.ConeGeometry(part.radius,part.height,6);const object=new THREE.Mesh(geometry,material);object.position.y=part.y;object.rotation.set(part.tilt,part.yaw,part.tilt*.35);object.castShadow=true;group.add(object);}group.userData.coralFluxId=resource.id;group.userData.depleted=descriptor.depleted;return group;}
 export const vector=(x,z,h=0)=>{const p=point(x,z,h);return new THREE.Vector3(p.x,p.y,p.z);};
 export function orient(object,x,z){const b=basis(x,z);object.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(new THREE.Vector3(b.east.x,b.east.y,b.east.z),new THREE.Vector3(b.up.x,b.up.y,b.up.z),new THREE.Vector3(b.south.x,b.south.y,b.south.z)));}
 export function fromPoint(p){return coordinates({x:p.x,y:p.y+RADIUS,z:p.z});}

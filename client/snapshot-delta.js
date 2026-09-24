@@ -134,13 +134,29 @@ function isCanonicalCoralFluxId(id) {
     && Number.isSafeInteger(j) && j >= 0 && String(j) === parts[5];
 }
 
+export function isCanonicalCoralFluxResource(resource) {
+  if (!isPlainObject(resource)) return false;
+  const keys = Object.keys(resource);
+  if (keys.some(key => !resourceFields.has(key)) || !['id', 'type', 'x', 'z', 'y', 'amount'].every(key => Object.hasOwn(resource, key))) return false;
+  if (!isCanonicalCoralFluxId(resource.id) || resource.type !== 'crystal'
+    || ![resource.x, resource.z, resource.y].every(value => typeof value === 'number' && Number.isFinite(value) && !Object.is(value, -0))
+    || !Number.isSafeInteger(resource.amount) || resource.amount < 0 || resource.amount > 6) return false;
+  const depleted = resource.amount === 0;
+  if (depleted !== Object.hasOwn(resource, 'regeneratesAt')) return false;
+  return !depleted || (Number.isFinite(resource.regeneratesAt) && !Object.is(resource.regeneratesAt, -0)
+    && resource.regeneratesAt >= 0 && resource.regeneratesAt <= Number.MAX_SAFE_INTEGER);
+}
+
+export function coralFluxResourceLabel(resource) {
+  return isCanonicalCoralFluxResource(resource) ? 'Coral Flux' : null;
+}
+
 export function coralFieldCutterFeedback(resources, player, actionableTarget, distance) {
   if (!Array.isArray(resources) || !player || typeof player !== 'object' || Array.isArray(player)
     || player.cutter !== false || actionableTarget?.type !== 'gather'
     || typeof actionableTarget.id !== 'string' || typeof distance !== 'function') return null;
   const resource = resources.find(candidate => candidate?.id === actionableTarget.id);
-  if (!resource || resource.type !== 'crystal' || !Number.isSafeInteger(resource.amount) || resource.amount <= 0
-    || !isCanonicalCoralFluxId(resource.id)) return null;
+  if (!isCanonicalCoralFluxResource(resource) || resource.amount <= 0) return null;
   let separation;
   try { separation = distance(resource, player); } catch { return null; }
   return withinGatherRange(separation)
@@ -160,6 +176,21 @@ export function coralRegenerationStatus(resource, worldTime) {
 export function coralRegenerationFeedback(resources, player, worldTime, actionableTarget, distance) {
   if (actionableTarget || !Array.isArray(resources) || typeof distance !== 'function') return null;
   const candidates = resources.map(resource => ({resource, status: coralRegenerationStatus(resource, worldTime), distance: distance(resource, player)}))
+    .filter(candidate => candidate.status && Number.isFinite(candidate.distance) && candidate.distance <= 3)
+    .sort((left, right) => left.distance - right.distance || left.resource.id.localeCompare(right.resource.id));
+  return candidates[0]?.status ?? null;
+}
+
+export function coralFluxAccessibleRegenerationStatus(resource, worldTime) {
+  if (!isCanonicalCoralFluxResource(resource) || resource.amount !== 0
+    || !Number.isFinite(worldTime) || Object.is(worldTime, -0) || worldTime < 0 || worldTime > Number.MAX_SAFE_INTEGER) return null;
+  const seconds = Math.max(0, Math.ceil(resource.regeneratesAt - worldTime));
+  return `Coral Flux depleted, regenerates in ${seconds} seconds of server time.`;
+}
+
+export function coralFluxAccessibleRegenerationFeedback(resources, player, worldTime, actionableTarget, distance) {
+  if (actionableTarget || !Array.isArray(resources) || typeof distance !== 'function') return null;
+  const candidates = resources.map(resource => ({resource, status: coralFluxAccessibleRegenerationStatus(resource, worldTime), distance: distance(resource, player)}))
     .filter(candidate => candidate.status && Number.isFinite(candidate.distance) && candidate.distance <= 3)
     .sort((left, right) => left.distance - right.distance || left.resource.id.localeCompare(right.resource.id));
   return candidates[0]?.status ?? null;
