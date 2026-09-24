@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {DISMANTLE_GRANT_LIMIT,Game} from '../server/game.js';
+import {DISMANTLE_GRANT_LIMIT,WORKBENCH_GRANT_LIMIT,Game} from '../server/game.js';
 import {
   SNAPSHOT_DELTA_LIMITS,
   acceptSnapshotBaseline,
@@ -246,6 +246,15 @@ test('cargo snapshots disclose the grant roster only to the owner and minimum ac
   assert.equal(game.snapshot(collaborator.id).containers.box.ferrite, 2);
   assert.equal(game.snapshot(viewer.id).containers.box, undefined);
   for (const projected of [ownerBox, collaboratorBox, viewerBox]) assert.equal(JSON.stringify(projected).includes('1234'), false);
+});
+
+test('bounded workbench collaboration projections survive exact snapshot validation', () => {
+  const grants = Array.from({length: WORKBENCH_GRANT_LIMIT}, (_, index) => ({id: `saved-${index}`, name: `Saved ${index}`}));
+  const ownerView = snapshot({structures: [{id: 'bench', type: 'workbench', workbenchGrantedTo: grants}]});
+  const collaboratorView = snapshot({structures: [{id: 'bench', type: 'workbench', canUseWorkbench: true, cycleUntil: 1}]});
+
+  assert.deepEqual(acceptSnapshotBaseline(ownerView, 0), ownerView);
+  assert.deepEqual(acceptSnapshotBaseline(collaboratorView, 0), collaboratorView);
 });
 
 test('legal 4,999-structure world establishes and continues snapshot delivery', () => {

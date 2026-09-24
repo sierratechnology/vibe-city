@@ -19,7 +19,7 @@ const planetFields = new Set(['version', 'circumference', 'solarDistanceAU', 'ro
 const settingsFields = new Set(['name', 'description', 'maxPlayers', 'public', 'pvp', 'structureDamage', 'offlineRaiding', 'survivalRate', 'gatherRate', 'daySeconds', 'nightSeconds', 'sleepPercent', 'vehicleSpeed']);
 const monumentFields = new Set(['id', 'kind', 'name', 'x', 'z']);
 const vehicleFields = new Set(['id', 'type', 'x', 'z', 'yaw', 'health', 'battery', 'modules', 'occupants', 'inventory', 'owner']);
-const structureFields = new Set(['id', 'type', 'x', 'z', 'rotation', 'site', 'gx', 'gz', 'health', 'power', 'owner', 'open', 'cycleUntil', 'water', 'readyAt', 'lastDamage', 'canDismantle', 'dismantleGrantedTo', 'canAccessCargo', 'cargoGrantedTo']);
+const structureFields = new Set(['id', 'type', 'x', 'z', 'rotation', 'site', 'gx', 'gz', 'health', 'power', 'owner', 'open', 'cycleUntil', 'water', 'readyAt', 'lastDamage', 'canDismantle', 'dismantleGrantedTo', 'canAccessCargo', 'cargoGrantedTo', 'canUseWorkbench', 'workbenchGrantedTo']);
 const creatureFields = new Set(['id', 'type', 'x', 'z', 'homeX', 'homeZ', 'health', 'yaw', 'attackAt', 'respawnAt', 'fleeUntil']);
 const resourceFields = new Set(['id', 'type', 'x', 'z', 'y', 'amount']);
 const inventoryFields = new Set(['ice', 'water', 'copper', 'silica', 'carbon', 'scrap', 'ferrite', 'fiber', 'meat', 'ration', 'crystal']);
@@ -175,6 +175,14 @@ function validateSnapshotSchema(snapshot) {
       for (const character of structure.cargoGrantedTo) {
         exactKeys(character, new Set(['id', 'name']), ['id', 'name'], 'structure cargo grant');
         stringValue(character.id, 'structure cargo grant'); stringValue(character.name, 'structure cargo grant');
+      }
+    }
+    if (Object.hasOwn(structure, 'canUseWorkbench')) booleanValue(structure.canUseWorkbench, 'structure workbench access');
+    if (Object.hasOwn(structure, 'workbenchGrantedTo')) {
+      if (!Array.isArray(structure.workbenchGrantedTo) || structure.workbenchGrantedTo.length > 32) fail('structure workbench grants shape');
+      for (const character of structure.workbenchGrantedTo) {
+        exactKeys(character, new Set(['id', 'name']), ['id', 'name'], 'structure workbench grant');
+        stringValue(character.id, 'structure workbench grant'); stringValue(character.name, 'structure workbench grant');
       }
     }
   }
