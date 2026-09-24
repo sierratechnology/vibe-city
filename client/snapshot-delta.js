@@ -15,9 +15,10 @@ const playerFields = new Set([
   'id', 'name', 'x', 'z', 'yaw', 'aimYaw', 'health', 'charge', 'inventory', 'cutter', 'unlocked',
   'completed', 'flashlightOwned', 'flashlightOn', 'oxygen', 'water', 'food', 'stamina', 'suit',
   'skills', 'belt', 'survey', 'markers', 'vehicle', 'sleeping', 'room', 'rifle', 'repair', 'recovered',
-  'discoveries', 'discoveredBiomes', 'airReading', 'lastDamage',
+  'discoveries', 'discoveredBiomes', 'firstBiomeContacts', 'airReading', 'lastDamage',
 ]);
 const biomeDiscoveryIds = new Set(['quiet-basin', 'coral-shelf']);
+const firstBiomeContactIds = new Set(['coral-shelf']);
 const planetFields = new Set(['version', 'circumference', 'solarDistanceAU', 'rotationSeconds', 'daySeconds', 'nightSeconds']);
 const settingsFields = new Set(['name', 'description', 'maxPlayers', 'public', 'pvp', 'structureDamage', 'offlineRaiding', 'survivalRate', 'gatherRate', 'daySeconds', 'nightSeconds', 'sleepPercent', 'vehicleSpeed']);
 const monumentFields = new Set(['id', 'kind', 'name', 'x', 'z']);
@@ -305,6 +306,17 @@ function validateSnapshotSchema(snapshot) {
       if (player.discoveredBiomes.length > biomeDiscoveryIds.size
         || new Set(player.discoveredBiomes).size !== player.discoveredBiomes.length
         || player.discoveredBiomes.some(id => !biomeDiscoveryIds.has(id))) fail('player discovered biomes shape');
+    }
+    if (Object.hasOwn(player, 'firstBiomeContacts')) {
+      exactKeys(player.firstBiomeContacts, firstBiomeContactIds, [], 'player first biome contacts');
+      const contactIds = Object.keys(player.firstBiomeContacts);
+      if (contactIds.length !== firstBiomeContactIds.size
+        || !Array.isArray(player.discoveredBiomes)
+        || contactIds.some(id => !player.discoveredBiomes.includes(id))) fail('player first biome contacts shape');
+      for (const point of Object.values(player.firstBiomeContacts)) {
+        exactKeys(point, new Set(['x', 'z']), ['x', 'z'], 'player first biome contact');
+        numberValue(point.x, 'player first biome contact'); numberValue(point.z, 'player first biome contact');
+      }
     }
     if (Object.hasOwn(player, 'markers')) {
       if (!Array.isArray(player.markers)) fail('player markers shape');
