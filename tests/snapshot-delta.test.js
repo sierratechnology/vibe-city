@@ -112,6 +112,23 @@ test('snapshot schemas reject recursive unsafe integers while accepting finite f
   assert.deepEqual(accepted, unchanged);
 });
 
+test('resource regeneration due accepts bounded world time and rejects malformed or unknown fields', () => {
+  const due = Number.MAX_SAFE_INTEGER - 0.5;
+  const scheduled = snapshot({resources: [{id: 'p:coral:7319:0:1:2', type: 'crystal', amount: 0, regeneratesAt: due}]});
+  assert.deepEqual(acceptSnapshotBaseline(scheduled, 0), scheduled);
+
+  for (const regeneratesAt of [-1, -0, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1, '301']) {
+    assert.throws(
+      () => acceptSnapshotBaseline(snapshot({resources: [{id: 'p:coral:7319:0:1:2', type: 'crystal', amount: 0, regeneratesAt}]}), 0),
+      /Invalid snapshot delta/,
+    );
+  }
+  assert.throws(
+    () => acceptSnapshotBaseline(snapshot({resources: [{id: 'p:0', type: 'ferrite', amount: 4, mystery: due}]}), 0),
+    /resource field set/,
+  );
+});
+
 test('every authoritative snapshot object shape rejects unknown nested fields', () => {
   const accepted = snapshot();
   const unchanged = structuredClone(accepted);

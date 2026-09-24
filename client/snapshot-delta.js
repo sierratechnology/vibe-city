@@ -21,7 +21,7 @@ const monumentFields = new Set(['id', 'kind', 'name', 'x', 'z']);
 const vehicleFields = new Set(['id', 'type', 'x', 'z', 'yaw', 'health', 'battery', 'modules', 'occupants', 'inventory', 'owner']);
 const structureFields = new Set(['id', 'type', 'x', 'z', 'rotation', 'site', 'gx', 'gz', 'health', 'power', 'owner', 'open', 'cycleUntil', 'water', 'readyAt', 'lastDamage', 'canDismantle', 'dismantleGrantedTo', 'canAccessCargo', 'cargoGrantedTo', 'canUseWorkbench', 'workbenchGrantedTo', 'canCancelWorkbench', 'workbenchCancelJobId']);
 const creatureFields = new Set(['id', 'type', 'x', 'z', 'homeX', 'homeZ', 'health', 'yaw', 'attackAt', 'respawnAt', 'fleeUntil']);
-const resourceFields = new Set(['id', 'type', 'x', 'z', 'y', 'amount']);
+const resourceFields = new Set(['id', 'type', 'x', 'z', 'y', 'amount', 'regeneratesAt']);
 const inventoryFields = new Set(['ice', 'water', 'copper', 'silica', 'carbon', 'scrap', 'ferrite', 'fiber', 'meat', 'ration', 'crystal']);
 const skillFields = new Set(['mining', 'construction', 'combat', 'piloting']);
 const roomFields = new Set(['id', 'cells', 'sealed', 'doors', 'pressure', 'oxygen', 'temperature', 'safe']);
@@ -118,6 +118,23 @@ function booleanValue(value, label) {
   if (typeof value !== 'boolean') fail(`${label} shape`);
 }
 
+export function coralRegenerationStatus(resource, worldTime) {
+  const due = resource?.regeneratesAt;
+  if (resource?.amount !== 0 || resource?.type !== 'crystal' || typeof resource?.id !== 'string' || !resource.id.startsWith('p:coral:')) return null;
+  if (!Number.isFinite(due) || Object.is(due, -0) || due < 0 || due > Number.MAX_SAFE_INTEGER) return null;
+  if (!Number.isFinite(worldTime) || Object.is(worldTime, -0) || worldTime < 0 || worldTime > Number.MAX_SAFE_INTEGER) return null;
+  const seconds = Math.max(0, Math.ceil(due - worldTime));
+  return `Flux crystal depleted, regenerates in ${seconds} seconds of server time.`;
+}
+
+export function coralRegenerationFeedback(resources, player, worldTime, actionableTarget, distance) {
+  if (actionableTarget || !Array.isArray(resources) || typeof distance !== 'function') return null;
+  const candidates = resources.map(resource => ({resource, status: coralRegenerationStatus(resource, worldTime), distance: distance(resource, player)}))
+    .filter(candidate => candidate.status && Number.isFinite(candidate.distance) && candidate.distance <= 3)
+    .sort((left, right) => left.distance - right.distance || left.resource.id.localeCompare(right.resource.id));
+  return candidates[0]?.status ?? null;
+}
+
 function stringArray(value, label) {
   if (!Array.isArray(value) || value.some(item => typeof item !== 'string')) fail(`${label} shape`);
 }
@@ -204,6 +221,7 @@ function validateSnapshotSchema(snapshot) {
     stringValue(resource.id, 'resource'); stringValue(resource.type, 'resource');
     for (const key of ['x', 'z', 'y']) if (Object.hasOwn(resource, key)) numberValue(resource[key], 'resource');
     safeInteger(resource.amount, 'resource');
+    if (Object.hasOwn(resource, 'regeneratesAt') && (!Number.isFinite(resource.regeneratesAt) || Object.is(resource.regeneratesAt, -0) || resource.regeneratesAt < 0 || resource.regeneratesAt > Number.MAX_SAFE_INTEGER)) fail('resource regeneration shape');
   }
   for (const player of snapshot.players) {
     exactKeys(player, playerFields, ['id', 'x', 'z'], 'player');
