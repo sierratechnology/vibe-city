@@ -3,7 +3,7 @@ import {types as utilTypes} from 'node:util';
 import {travel,direction,steering,MONUMENTS,CIRCUMFERENCE} from '../shared/planet.js';
 import {roomStatus} from '../shared/rooms.js';
 import {spawnCreatures,stepCreatures,activeCreature,SPECIES,clearPath} from '../shared/ecology.js';
-import {makeWorld,makePlayer,dist,RUIN,blocked,sheltered,powered,placementError,canAfford,pay,RECIPES,itemCount,freeSpace,CARGO_CAPACITY,height,withinGatherRange} from '../shared/world.js';
+import {makeWorld,makePlayer,dist,RUIN,blocked,sheltered,powered,placementError,canAfford,pay,RECIPES,itemCount,freeSpace,CARGO_CAPACITY,height,withinGatherRange,nearestOperableDoor} from '../shared/world.js';
 const FORBIDDEN_PLAYER_IDS=new Set(['__proto__','prototype','constructor']);
 export const DISMANTLE_GRANT_LIMIT=32;
 export const WORKBENCH_GRANT_LIMIT=32;
@@ -46,6 +46,7 @@ export class Game {
  action(id,m){const p=this.world.players[id];if(!p||!this.online.has(id))return{ok:false,message:'Join first.'};
  if(!m||typeof m!=='object'||utilTypes.isProxy(m))return{ok:false,message:'Invalid action request.'};const prototype=Object.getPrototypeOf(m);if(prototype!==Object.prototype&&prototype!==null)return{ok:false,message:'Invalid action request.'};const descriptors=Object.getOwnPropertyDescriptors(m);if(Reflect.ownKeys(descriptors).some(key=>typeof key!=='string'||!descriptors[key].enumerable||!Object.hasOwn(descriptors[key],'value')))return{ok:false,message:'Invalid action request.'};
  if(p.sleeping&&m.type!=='sleep')return{ok:false,message:'Wake up before taking an action.'};
+ if(m.type==='campGate'){const keys=Object.keys(m).sort();if(keys.length!==2||keys.join(',')!=='id,type'||typeof m.id!=='string')return{ok:false,message:'Invalid Camp gate request.'};const gate=nearestOperableDoor(this.world,p,4,['campGate']);if(!gate||gate.id!==m.id)return{ok:false,message:'Move closer to the Camp gate.'};gate.open=!gate.open;return{ok:true,message:gate.open?'Camp gate open.':'Camp gate closed.'};}
  const special=expeditionAction(this,p,m);if(special)return special;
  const now=this.world.time,ready=this.cooldowns.get(id)||0;
  if(now<ready&&['gather','build','dismantle','attack','eat'].includes(m.type))return{ok:false,message:'Tool cycling…'};
@@ -96,7 +97,7 @@ export class Game {
  }
  if(m.type==='build'){
  const piece={type:m.piece,x:m.x,z:m.z,rotation:m.rotation,...(m.site?{site:m.site,gx:m.gx,gz:m.gz}:{})};const error=placementError(this.world,p,piece,[...this.online].map(id=>this.world.players[id]));if(error)return fail(error);
- if(this.world.structures.length>=5000)return fail('Server structure limit reached.');if(!canAfford(p,piece.type))return fail('Not enough resources.');pay(p,piece.type);skill(p,'construction');const structure={...piece,health:200,...(piece.type==='lifeSupport'?{power:20}:{}),id:`s${this.world.nextStructure++}`,owner:id,...(piece.type==='workbench'?{workbenchQueue:[],workbenchNextSequence:0}:{})};this.world.structures.push(structure);if(piece.type==='cargo')this.world.containers[structure.id]={};this.cooldowns.set(id,now+.2);return{ok:true,message:`${RECIPES[piece.type].name} constructed.`};
+ if(this.world.structures.length>=5000)return fail('Server structure limit reached.');if(!canAfford(p,piece.type))return fail('Not enough resources.');pay(p,piece.type);skill(p,'construction');const structure={...piece,health:200,...(piece.type==='lifeSupport'?{power:20}:{}),...(piece.type==='campGate'?{open:false}:{}),id:`s${this.world.nextStructure++}`,owner:id,...(piece.type==='workbench'?{workbenchQueue:[],workbenchNextSequence:0}:{})};this.world.structures.push(structure);if(piece.type==='cargo')this.world.containers[structure.id]={};this.cooldowns.set(id,now+.2);return{ok:true,message:`${RECIPES[piece.type].name} constructed.`};
  }
  if(m.type==='transfer'){
  const box=this.world.structures.find(s=>s.id===m.id&&s.type==='cargo');if(!box||dist(p,box)>3)return fail('Move within 3 m of the cargo locker.');if(!Object.hasOwn(p.inventory,m.item)||!['deposit','withdraw'].includes(m.direction)||!Number.isInteger(m.amount)||m.amount<1||m.amount>200)return fail('Invalid transfer.');
