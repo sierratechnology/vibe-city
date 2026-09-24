@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {chromium} from 'playwright';
 import {browserAccount, startTestServer} from './auth-helper.js';
+import {computeReturnGuidance} from '../client/return-guidance.js';
 
 const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'vibe-biome-browser-'));
 const saveFile = path.join(directory, 'world.json');
@@ -37,10 +38,31 @@ async function connect(page, name) {
 async function installMapLabelCapture(page) {
   await page.evaluate(() => {
     window.__mapLabels = [];
+    window.__mapStrokes = [];
     const fillText = CanvasRenderingContext2D.prototype.fillText;
+    const beginPath = CanvasRenderingContext2D.prototype.beginPath;
+    const moveTo = CanvasRenderingContext2D.prototype.moveTo;
+    const lineTo = CanvasRenderingContext2D.prototype.lineTo;
+    const stroke = CanvasRenderingContext2D.prototype.stroke;
     CanvasRenderingContext2D.prototype.fillText = function (...args) {
       window.__mapLabels.push(String(args[0]));
       return fillText.apply(this, args);
+    };
+    CanvasRenderingContext2D.prototype.beginPath = function (...args) {
+      this.__mapPath = [];
+      return beginPath.apply(this, args);
+    };
+    CanvasRenderingContext2D.prototype.moveTo = function (...args) {
+      this.__mapPath?.push(['moveTo', ...args]);
+      return moveTo.apply(this, args);
+    };
+    CanvasRenderingContext2D.prototype.lineTo = function (...args) {
+      this.__mapPath?.push(['lineTo', ...args]);
+      return lineTo.apply(this, args);
+    };
+    CanvasRenderingContext2D.prototype.stroke = function (...args) {
+      window.__mapStrokes.push({style: String(this.strokeStyle), path: this.__mapPath || []});
+      return stroke.apply(this, args);
     };
   });
 }
@@ -54,17 +76,23 @@ async function assertMap(page, coralDiscovered) {
   assert.equal(Object.hasOwn(player, 'firstBiomeContacts'), coralDiscovered);
   const waypoint = page.locator('#firstBiomeContacts');
   assert.equal(await waypoint.count(), coralDiscovered ? 1 : 0);
+  const guidance = page.locator('#firstContactGuidance');
+  assert.equal(await guidance.count(), coralDiscovered ? 1 : 0);
   if (coralDiscovered) {
     const contact = player.firstBiomeContacts['coral-shelf'];
     await assert.doesNotReject(() => waypoint.getByText(
       `First Coral Shelf contact · ${Math.round(contact.x)} E / ${Math.round(-contact.z)} N`,
       {exact: true},
     ).waitFor());
+    const expected = computeReturnGuidance({x: player.x, z: player.z}, contact);
+    await assert.doesNotReject(() => guidance.getByText(expected.label, {exact: true}).waitFor());
   }
   const cuePixel = await page.locator('#planetMap').evaluate(canvas => [...canvas.getContext('2d').getImageData(16, 16, 1, 1).data]);
   assert.deepEqual(cuePixel, coralDiscovered ? [184, 117, 112, 255] : [16, 30, 41, 255]);
   const labels = await page.evaluate(() => window.__mapLabels);
   assert.equal(labels.includes('FIRST CORAL SHELF CONTACT'), coralDiscovered);
+  const hasReturnCue = await page.evaluate(() => window.__mapStrokes.some(stroke => stroke.style === '#72d6ff' && stroke.path.length >= 2));
+  assert.equal(hasReturnCue, coralDiscovered);
   await page.keyboard.press('Escape');
 }
 
@@ -86,17 +114,23 @@ async function assertTouchMap(page, cdp, coralDiscovered) {
   assert.equal(Object.hasOwn(player, 'firstBiomeContacts'), coralDiscovered);
   const waypoint = page.locator('#firstBiomeContacts');
   assert.equal(await waypoint.count(), coralDiscovered ? 1 : 0);
+  const guidance = page.locator('#firstContactGuidance');
+  assert.equal(await guidance.count(), coralDiscovered ? 1 : 0);
   if (coralDiscovered) {
     const contact = player.firstBiomeContacts['coral-shelf'];
     await assert.doesNotReject(() => waypoint.getByText(
       `First Coral Shelf contact · ${Math.round(contact.x)} E / ${Math.round(-contact.z)} N`,
       {exact: true},
     ).waitFor());
+    const expected = computeReturnGuidance({x: player.x, z: player.z}, contact);
+    await assert.doesNotReject(() => guidance.getByText(expected.label, {exact: true}).waitFor());
   }
   const cuePixel = await page.locator('#planetMap').evaluate(canvas => [...canvas.getContext('2d').getImageData(16, 16, 1, 1).data]);
   assert.deepEqual(cuePixel, coralDiscovered ? [184, 117, 112, 255] : [16, 30, 41, 255]);
   const labels = await page.evaluate(() => window.__mapLabels);
   assert.equal(labels.includes('FIRST CORAL SHELF CONTACT'), coralDiscovered);
+  const hasReturnCue = await page.evaluate(() => window.__mapStrokes.some(stroke => stroke.style === '#72d6ff' && stroke.path.length >= 2));
+  assert.equal(hasReturnCue, coralDiscovered);
   const closeBox = await page.locator('#closeExpedition').boundingBox();
   const viewport = page.viewportSize();
   assert.ok(closeBox?.width > 0 && closeBox?.height > 0, 'Close must have a nonempty bounding rectangle');
@@ -132,6 +166,57 @@ try {
   assert.deepEqual(desktopCue, [184, 117, 112, 255]);
   assert.equal((await desktop.evaluate(() => window.__mapLabels)).includes('FIRST CORAL SHELF CONTACT'), true);
   assert.equal((await desktop.evaluate(() => window.__mapLabels)).includes('Existing marker'), true);
+  const firstContact = structuredClone(desktopPlayer.firstBiomeContacts['coral-shelf']);
+  desktopPlayer.x = firstContact.x - 100;
+  desktopPlayer.z = firstContact.z + 100;
+  await desktop.waitForFunction(() => {
+    const player = window.vibeDiagnostics.player;
+    return Math.abs(player.x - (player.firstBiomeContacts['coral-shelf'].x - 100)) < 0.5
+      && Math.abs(player.z - (player.firstBiomeContacts['coral-shelf'].z + 100)) < 0.5;
+  });
+  await assert.doesNotReject(() => desktop.locator('#firstContactGuidance').getByText(
+    'Return to first Coral Shelf contact: 141 m · NE · 45°',
+    {exact: true},
+  ).waitFor());
+  assert.equal(await desktop.evaluate(() => window.__mapStrokes.some(stroke => stroke.style === '#72d6ff' && stroke.path.length >= 2)), true);
+  desktopPlayer.x = firstContact.x - 0.4;
+  desktopPlayer.z = firstContact.z;
+  await desktop.waitForFunction(() => {
+    const player = window.vibeDiagnostics.player;
+    return player.x === player.firstBiomeContacts['coral-shelf'].x - 0.4
+      && player.z === player.firstBiomeContacts['coral-shelf'].z;
+  });
+  await assert.doesNotReject(() => desktop.locator('#firstContactGuidance').getByText(
+    'Return to first Coral Shelf contact: 0 m · E · 90°',
+    {exact: true},
+  ).waitFor());
+  await desktop.evaluate(() => {
+    window.__mapStrokes = [];
+    document.querySelector('#mapScale').dispatchEvent(new Event('change'));
+  });
+  assert.equal(await desktop.evaluate(() => window.__mapStrokes.some(stroke => stroke.style === '#72d6ff' && stroke.path.length >= 2)), true);
+  desktopPlayer.x = firstContact.x;
+  await desktop.waitForFunction(() => {
+    const player = window.vibeDiagnostics.player;
+    return player.x === player.firstBiomeContacts['coral-shelf'].x
+      && player.z === player.firstBiomeContacts['coral-shelf'].z;
+  });
+  await assert.doesNotReject(() => desktop.locator('#firstContactGuidance').getByText(
+    'At first Coral Shelf contact',
+    {exact: true},
+  ).waitFor());
+  await desktop.evaluate(() => {
+    window.__mapStrokes = [];
+    document.querySelector('#mapScale').dispatchEvent(new Event('change'));
+  });
+  assert.equal(await desktop.evaluate(() => window.__mapStrokes.some(stroke => stroke.style === '#72d6ff' && stroke.path.length >= 2)), false);
+  desktopPlayer.x = firstContact.x - 100;
+  desktopPlayer.z = firstContact.z + 100;
+  await desktop.waitForFunction(() => {
+    const player = window.vibeDiagnostics.player;
+    return player.x === player.firstBiomeContacts['coral-shelf'].x - 100
+      && player.z === player.firstBiomeContacts['coral-shelf'].z + 100;
+  });
   await desktop.keyboard.press('Escape');
 
   app.save();
@@ -166,7 +251,7 @@ try {
 
   assert.deepEqual(errors, []);
   assert.deepEqual(externalRequests, []);
-  console.log('PASS: desktop keyboard and 390x844 touch at 200% zoom/reduced motion conceal then reveal the private first-contact text/coordinates/map label; restart preserves contact and existing markers/survey; zero page errors/external requests.');
+  console.log('PASS: desktop keyboard and 390x844 emulated CDP touch at 200% zoom/reduced motion conceal then reveal owner-only return guidance and its private visual cue; accepted movement updates distance/direction/bearing; restart preserves contact and existing markers/survey; zero page errors/external requests.');
 } finally {
   await browser.close();
   await app.close();
