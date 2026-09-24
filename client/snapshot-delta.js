@@ -15,8 +15,9 @@ const playerFields = new Set([
   'id', 'name', 'x', 'z', 'yaw', 'aimYaw', 'health', 'charge', 'inventory', 'cutter', 'unlocked',
   'completed', 'flashlightOwned', 'flashlightOn', 'oxygen', 'water', 'food', 'stamina', 'suit',
   'skills', 'belt', 'survey', 'markers', 'vehicle', 'sleeping', 'room', 'rifle', 'repair', 'recovered',
-  'discoveries', 'airReading', 'lastDamage',
+  'discoveries', 'discoveredBiomes', 'airReading', 'lastDamage',
 ]);
+const biomeDiscoveryIds = new Set(['quiet-basin', 'coral-shelf']);
 const planetFields = new Set(['version', 'circumference', 'solarDistanceAU', 'rotationSeconds', 'daySeconds', 'nightSeconds']);
 const settingsFields = new Set(['name', 'description', 'maxPlayers', 'public', 'pvp', 'structureDamage', 'offlineRaiding', 'survivalRate', 'gatherRate', 'daySeconds', 'nightSeconds', 'sleepPercent', 'vehicleSpeed']);
 const monumentFields = new Set(['id', 'kind', 'name', 'x', 'z']);
@@ -299,6 +300,12 @@ function validateSnapshotSchema(snapshot) {
     }
     if (Object.hasOwn(player, 'belt') && (!Array.isArray(player.belt) || player.belt.some(item => item !== null && typeof item !== 'string'))) fail('player belt shape');
     for (const key of ['survey', 'discoveries']) if (Object.hasOwn(player, key)) stringArray(player[key], `player ${key}`);
+    if (Object.hasOwn(player, 'discoveredBiomes')) {
+      stringArray(player.discoveredBiomes, 'player discovered biomes');
+      if (player.discoveredBiomes.length > biomeDiscoveryIds.size
+        || new Set(player.discoveredBiomes).size !== player.discoveredBiomes.length
+        || player.discoveredBiomes.some(id => !biomeDiscoveryIds.has(id))) fail('player discovered biomes shape');
+    }
     if (Object.hasOwn(player, 'markers')) {
       if (!Array.isArray(player.markers)) fail('player markers shape');
       for (const marker of player.markers) {

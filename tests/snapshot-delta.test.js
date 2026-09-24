@@ -47,6 +47,29 @@ test('current planet snapshot is accepted, detached, delta-preserved, and exact-
   assert.throws(() => acceptSnapshotBaseline({...after, mystery: true}, 1), /snapshot field set/);
 });
 
+test('viewer discovery projection is private and survives an exact snapshot delta', () => {
+  const game = new Game();
+  const first = game.join('first', 'First');
+  const second = game.join('second', 'Second');
+  game.tick(0.05);
+  const before = game.snapshot(first.id);
+
+  first.x = 5000;
+  first.z = -33250;
+  game.tick(0.05);
+  const after = game.snapshot(first.id);
+  const secondView = game.snapshot(second.id);
+
+  assert.deepEqual(after.players.find(player => player.id === first.id).discoveredBiomes, ['quiet-basin', 'coral-shelf']);
+  assert.equal(Object.hasOwn(after.players.find(player => player.id === second.id), 'discoveredBiomes'), false);
+  assert.deepEqual(secondView.players.find(player => player.id === second.id).discoveredBiomes, ['quiet-basin']);
+  assert.equal(Object.hasOwn(secondView.players.find(player => player.id === first.id), 'discoveredBiomes'), false);
+
+  const accepted = acceptSnapshotBaseline(before, 0);
+  const delta = createSnapshotDelta(before, after, 0, 1);
+  assert.deepEqual(applySnapshotDelta(accepted, delta, 0), after);
+});
+
 test('maximum per-structure dismantling projection remains inside snapshot budgets', () => {
   const game = new Game();
   const owner = game.join('owner', 'Owner');
