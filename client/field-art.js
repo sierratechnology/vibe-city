@@ -13,11 +13,11 @@ export function fieldProp(type,dimensions){const model=fieldModel('prop_'+type);
 
 // Smooth joint animation on imported rigid-part rigs. It follows accepted movement;
 // no mesh animation changes collisions, authoritative position, or jump physics.
-export function animateFieldModel(model,{dt,time,speed=0,jump=0,action=0,sprint=false,sleeping=false,cutter=false,rifle=false}={}){
+export function animateFieldModel(model,{dt,time,speed=0,jump=0,action=0,sprint=false,sleeping=false,fabricator=false,cutter=false,rifle=false}={}){
  if(!model?.userData.art)return;const data=model.userData;data.motion??={blend:0,phase:0};const motion=data.motion,target=Math.min(1,speed/.9);motion.blend=THREE.MathUtils.damp(motion.blend,target,9,dt);motion.phase+=dt*(sprint?12:8)*Math.min(1.7,Math.max(.3,speed/2.5));
  const name=data.model;data.joints??=Object.fromEntries((()=>{const a=[];model.traverse(o=>{if(!o.isMesh){o.userData.restPosition??=o.position.clone();o.userData.restQuaternion??=o.quaternion.clone();a.push([o.name,o]);}});return a;})());
  const pose=(key,x=0,y=0,z=0)=>{const joint=data.joints[key];if(joint)joint.quaternion.copy(joint.userData.restQuaternion).multiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(x,y,z)));};
- if(name==='explorer'){const tool=model.getObjectByName('explorer_tool'),weapon=model.getObjectByName('explorer_rifle');if(tool)tool.visible=cutter&&!rifle;if(weapon)weapon.visible=rifle;
+ if(name==='explorer'){const tool=model.getObjectByName('explorer_tool'),weapon=model.getObjectByName('explorer_rifle');const driver=model.getObjectByName('explorer_fabricator');if(driver)driver.visible=fabricator;if(tool)tool.visible=cutter&&!rifle&&!fabricator;if(weapon)weapon.visible=rifle&&!fabricator;
   const gait=Math.sin(motion.phase)*motion.blend,air=jump>.02,bend=air?.38:0;
   pose('explorer_leg_l',air?-.35:gait*.62);pose('explorer_leg_r',air?.20:-gait*.62);pose('explorer_shin_l',bend+Math.max(0,-gait)*.8);pose('explorer_shin_r',bend+Math.max(0,gait)*.8);
   pose('explorer_arm_l',air?-.5:-gait*.48,0,.06);pose('explorer_arm_r',action>0?-Math.sin(action*Math.PI)*1.25:air?-.5:gait*.48,0,-.06);

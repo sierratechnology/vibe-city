@@ -15,8 +15,9 @@ export const RESOURCES = {
   crystal:{name:'Flux crystal',color:0x9b9afa}
 };
 export const RECIPES = {
+  fabricator:{name:'Fabrication driver',cost:{},description:'Starter construction multitool. Build, rotate previews, and reclaim authorized pieces. B: build. V: reclaim.'},
   rifle:{name:'Arc carbine',cost:{ferrite:6,copper:3,crystal:2},description:'Ranged weapon. Each shot consumes one flux crystal.'},
-  repair:{name:'Repair tool',cost:{ferrite:3,copper:1},description:'Repairs nearby structures using ferrite.'},
+  repair:{name:'Arc welder',cost:{ferrite:3,copper:1},description:'Repairs nearby structures using ferrite.'},
   door:{name:'Sealed door',cost:{ferrite:3,fiber:1},description:'An airtight outer door. Open using Operate.'},
   airlock:{name:'Airlock door',cost:{ferrite:4,copper:2},description:'Inner door between a sealed chamber and a habitable base.'},
   lifeSupport:{name:'Life support',cost:{ferrite:5,copper:2,crystal:2},description:'Makes a sealed room habitable. Refuel with flux crystals.'},

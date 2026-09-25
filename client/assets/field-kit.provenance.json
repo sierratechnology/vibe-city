@@ -29,10 +29,10 @@
     "prop_bed",
     "prop_heater"
   ],
-  "meshes": 86,
-  "vertices": 24069,
-  "bytes": 3404580,
-  "sha256": "39f9ce3682dcbf7399980a1682023d713241bf8404a909c41276131b4b0909c8",
+  "meshes": 88,
+  "vertices": 24481,
+  "bytes": 3495088,
+  "sha256": "8d3dfa1c91a43eb5f1c4edf49b41d327c631b22a467e43dd2a3f10368ca6cead",
   "units": "metres",
   "animation": "Articulated rigid-part rigs animated by client/field-art.js; Blender live study has editable keyframes."
 }
