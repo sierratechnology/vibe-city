@@ -21,7 +21,7 @@ try{
  await walk(a,24,-17);await walk(a,9,4.5);
  for(const [key,type] of [['Digit1','floor'],['Digit2','wall'],['Digit3','roof'],['Digit4','heater']]){
  if(!(await diag(a)).buildMode)await a.keyboard.press('KeyB');await a.keyboard.press(key);await pause(250);let d=await diag(a);assert.equal(d.preview.x,9);assert.equal(d.preview.z,0);
- await a.locator('#placeAction').click();
+ await a.locator('#gatherAction').click();
  await a.waitForFunction(type=>window.vibeDiagnostics.state.structures.some(s=>s.type===type),type,{timeout:5000});await b.waitForFunction(type=>window.vibeDiagnostics.state.structures.some(s=>s.type===type),type);console.log('Shared construction',type);
  }
  await a.keyboard.press('KeyB');await a.keyboard.press('Escape');await walk(a,9,1);await a.waitForFunction(()=>window.vibeDiagnostics.player.completed);await walk(a,9,4.5);await pause(3600);

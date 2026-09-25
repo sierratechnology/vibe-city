@@ -83,7 +83,7 @@ async function desktopJourney(page) {
   await page.keyboard.press('KeyB');
   await page.keyboard.press('Digit1');
   await page.waitForFunction(() => window.vibeDiagnostics.preview?.x === 9 && window.vibeDiagnostics.preview?.z === 0);
-  await page.locator('#placeAction').click();
+  await page.locator('#gatherAction').click();
   await page.waitForFunction(() => window.vibeDiagnostics.state.structures.some(structure => structure.type === 'floor'));
   await pause(350);
   await page.locator('[data-piece="stairs"]').click();
@@ -91,7 +91,7 @@ async function desktopJourney(page) {
   await page.waitForFunction(() => window.vibeDiagnostics.preview?.rotation === 1 && window.vibeDiagnostics.previewStair);
   const preview = (await diagnostics(page)).previewStair;
   assert.ok(preview.angle > 0 && preview.rotation === 1, `Unexpected stair preview: ${JSON.stringify(preview)}`);
-  await page.locator('#placeAction').click();
+  await page.locator('#gatherAction').click();
   await pause(1000);
   if (!(await diagnostics(page)).state.structures.some(structure => structure.type === 'stairs')) throw new Error(`Desktop stair placement failed: ${await page.locator('#toast').innerText()} | ${JSON.stringify(await diagnostics(page))}`);
   const placed = await diagnostics(page);
@@ -170,12 +170,12 @@ async function touchJourney(page, session) {
   await touch('#buildAction');
   await page.locator('[data-piece="floor"]').tap();
   await page.waitForFunction(() => window.vibeDiagnostics.preview?.x === 9 && window.vibeDiagnostics.preview?.z === 0);
-  await touch('#placeAction');
+  await touch('#gatherAction');
   await page.waitForFunction(() => window.vibeDiagnostics.state.structures.some(structure => structure.type === 'floor'));
   await pause(350);
   await page.locator('[data-piece="stairs"]').tap();
   await touch('#rotateAction');
-  await touch('#placeAction');
+  await touch('#gatherAction');
   await page.waitForFunction(() => window.vibeDiagnostics.state.structures.some(structure => structure.type === 'stairs'));
   assert.equal((await diagnostics(page)).renderedStairs[0].rotation, 1);
   await touch('#buildAction');

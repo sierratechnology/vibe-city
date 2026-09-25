@@ -78,13 +78,13 @@ async function desktopJourney(page) {
   await page.keyboard.press('KeyB');
   await page.keyboard.press('Digit1');
   await page.waitForFunction(() => window.vibeDiagnostics.preview?.x === 9 && window.vibeDiagnostics.preview?.z === 0);
-  await page.locator('#placeAction').click();
+  await page.locator('#gatherAction').click();
   await page.waitForFunction(() => window.vibeDiagnostics.state.structures.some(structure => structure.type === 'floor'));
   await pause(350);
 
   await page.keyboard.press('Digit8');
   await page.waitForFunction(() => window.vibeDiagnostics.selected === 'doorway' && window.vibeDiagnostics.previewParts === 3);
-  await page.locator('#placeAction').click();
+  await page.locator('#gatherAction').click();
   await page.waitForFunction(() => window.vibeDiagnostics.state.structures.some(structure => structure.type === 'doorway'));
   assert.equal((await diagnostics(page)).state.structures.filter(structure => structure.type === 'doorway').length, 1);
 
@@ -142,14 +142,14 @@ async function touchJourney(page, context) {
   await page.locator('#buildAction').tap();
   await page.locator('[data-piece="floor"]').tap();
   await page.waitForFunction(() => window.vibeDiagnostics.preview?.x === 15 && window.vibeDiagnostics.preview?.z === 0);
-  await page.locator('#placeAction').tap();
+  await page.locator('#gatherAction').tap();
   await pause(1000);
   const floorPlaced = (await diagnostics(page)).state.structures.some(structure => structure.type === 'floor' && structure.x === 15 && structure.z === 0);
   if (!floorPlaced) throw new Error(`Touch floor placement failed: ${await page.locator('#toast').innerText()} | ${JSON.stringify(await diagnostics(page))}`);
   await pause(350);
 
   await page.locator('[data-piece="doorway"]').tap();
-  await page.locator('#placeAction').tap();
+  await page.locator('#gatherAction').tap();
   await page.waitForFunction(() => window.vibeDiagnostics.state.structures.some(structure => structure.type === 'doorway'));
   await page.locator('#buildAction').tap();
   await touchWalk(page, session, 15, -3);

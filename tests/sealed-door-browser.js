@@ -156,11 +156,11 @@ try {
     await page.keyboard.press('KeyB');
     await page.keyboard.press('Digit1');
     await page.waitForFunction(() => window.vibeDiagnostics.preview?.x === 15 && window.vibeDiagnostics.preview?.z === 0);
-    await page.locator('#placeAction').click();
+    await page.locator('#gatherAction').click();
     await page.waitForFunction(() => window.vibeDiagnostics.state.structures.some(structure => structure.type === 'floor' && structure.x === 15));
     await pause(350);
     await page.locator('[data-piece="door"]').click();
-    await page.locator('#placeAction').click();
+    await page.locator('#gatherAction').click();
     await page.waitForFunction(() => window.vibeDiagnostics.state.structures.filter(structure => structure.type === 'door').length === 2);
     await page.reload();
     await browserAccount(page, 'Door Operator');
@@ -199,11 +199,11 @@ try {
       await touchButton(page, session, '#buildAction');
       await page.locator('[data-piece="floor"]').tap();
       await page.waitForFunction(() => window.vibeDiagnostics.preview?.x === 15 && window.vibeDiagnostics.preview?.z === 0);
-      await touchButton(page, session, '#placeAction');
+      await touchButton(page, session, '#gatherAction');
       await page.waitForFunction(() => window.vibeDiagnostics.state.structures.some(structure => structure.type === 'floor' && structure.x === 15));
       await pause(350);
       await page.locator('[data-piece="door"]').tap();
-      await touchButton(page, session, '#placeAction');
+      await touchButton(page, session, '#gatherAction');
       await page.waitForFunction(() => window.vibeDiagnostics.state.structures.filter(structure => structure.type === 'door').length === 2);
     }
     assert.deepEqual(errors, []);
