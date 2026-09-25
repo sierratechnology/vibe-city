@@ -1,6 +1,7 @@
 export const AUTHORED_MESH_LIMITS=Object.freeze({bytes:24*1024,materials:4,drawCalls:12,vertices:256,triangles:384,coordinates:256*3,indices:384*3});
 export const AUTHORED_MESH_MATERIALS=Object.freeze(['weathered-ivory','dark-blue-green','mint-energy','coral-lavender']);
 const topKeys=['version','name','materials','meshes'],meshKeys=['name','material','positions','indices'];
+const authoredMeshPaths=new Set(['/client/assets/broken-signal-ring.json','/client/assets/camp-gate.json','/client/assets/workbench.json']);
 const fail=()=>{throw new TypeError('Invalid authored mesh manifest.');};
 function descriptors(value,keys){
  if(value===null||typeof value!=='object'||Object.getPrototypeOf(value)!==Object.prototype)return fail();
@@ -22,8 +23,8 @@ function validateAuthoredMesh(value){
  const meshDescriptors=denseArray(root.meshes.value,AUTHORED_MESH_LIMITS.drawCalls),meshes=[];let vertices=0,triangles=0;if(!root.meshes.value.length)return fail();
  for(let meshIndex=0;meshIndex<root.meshes.value.length;meshIndex++){
   const part=descriptors(meshDescriptors[meshIndex].value,meshKeys),name=part.name.value,material=part.material.value;if(!safeName(name)||!materials.includes(material)||meshes.some(mesh=>mesh.name===name))return fail();
-  const positionDescriptors=denseArray(part.positions.value,AUTHORED_MESH_LIMITS.coordinates),positions=[];if(part.positions.value.length<9||part.positions.value.length%3)return fail();for(let index=0;index<part.positions.value.length;index++){const coordinate=positionDescriptors[index].value;if(!canonicalNumber(coordinate))return fail();positions.push(coordinate);}const vertexCount=positions.length/3;vertices+=vertexCount;if(vertices>AUTHORED_MESH_LIMITS.vertices)return fail();
-  const indexDescriptors=denseArray(part.indices.value,AUTHORED_MESH_LIMITS.indices),indices=[];if(part.indices.value.length<3||part.indices.value.length%3)return fail();for(let index=0;index<part.indices.value.length;index++){const vertex=indexDescriptors[index].value;if(!Number.isSafeInteger(vertex)||vertex<0||vertex>=vertexCount)return fail();indices.push(vertex);}triangles+=indices.length/3;if(triangles>AUTHORED_MESH_LIMITS.triangles)return fail();meshes.push({name,material,positions,indices});
+  const positionDescriptors=denseArray(part.positions.value,AUTHORED_MESH_LIMITS.coordinates),positions=[];if(part.positions.value.length<9||part.positions.value.length%3)return fail();for(let index=0;index<part.positions.value.length;index++){const coordinate=positionDescriptors[index].value;if(!canonicalNumber(coordinate))return fail();positions.push(coordinate);}const vertexCount=positions.length/3,positionUnits=positions.map(value=>BigInt(Math.round(value*1000000)));vertices+=vertexCount;if(vertices>AUTHORED_MESH_LIMITS.vertices)return fail();
+  const indexDescriptors=denseArray(part.indices.value,AUTHORED_MESH_LIMITS.indices),indices=[];if(part.indices.value.length<3||part.indices.value.length%3)return fail();for(let index=0;index<part.indices.value.length;index++){const vertex=indexDescriptors[index].value;if(!Number.isSafeInteger(vertex)||vertex<0||vertex>=vertexCount)return fail();indices.push(vertex);}for(let index=0;index<indices.length;index+=3){const a=indices[index],b=indices[index+1],c=indices[index+2];if(a===b||a===c||b===c)return fail();const ao=a*3,bo=b*3,co=c*3,abx=positionUnits[bo]-positionUnits[ao],aby=positionUnits[bo+1]-positionUnits[ao+1],abz=positionUnits[bo+2]-positionUnits[ao+2],acx=positionUnits[co]-positionUnits[ao],acy=positionUnits[co+1]-positionUnits[ao+1],acz=positionUnits[co+2]-positionUnits[ao+2],crossX=aby*acz-abz*acy,crossY=abz*acx-abx*acz,crossZ=abx*acy-aby*acx;if(crossX===0n&&crossY===0n&&crossZ===0n)return fail();}triangles+=indices.length/3;if(triangles>AUTHORED_MESH_LIMITS.triangles)return fail();meshes.push({name,material,positions,indices});
  }
  return {version:1,name:root.name.value,materials,meshes};
 }
@@ -40,6 +41,11 @@ export function createAuthoredMeshObject(THREE,data,materialMap){
  group.userData={authoredAsset:data.name,vertices,triangles,drawCalls:data.meshes.length,materials:data.materials.length,bounds:{min:minimum,max:maximum}};return group;
 }
 
+export function createCampGateAuthoredObject(THREE,data,materialMap,open){
+ if(data?.name!=='camp-gate'||data.meshes?.length!==2||data.meshes[0]?.name!=='gate-frame'||data.meshes[1]?.name!=='gate-leaf')return null;
+ const group=createAuthoredMeshObject(THREE,data,materialMap),leaf=group.getObjectByName('gate-leaf');if(!leaf){disposeAuthoredMesh(group);return null;}if(open){leaf.rotation.y=Math.PI/2;leaf.position.set(-1.2,0,1.2);}Object.assign(group.userData,{presentation:'authored',open:!!open});return group;
+}
+
 async function readBoundedBody(response){
  if(!response.body?.getReader)return fail();
  const reader=response.body.getReader(),chunks=[];let length=0;
@@ -48,6 +54,6 @@ async function readBoundedBody(response){
 }
 
 export async function loadAuthoredMesh({url,signal,fetchImpl=fetch,create,isCurrent,dispose=disposeAuthoredMesh}){
- if(!['/client/assets/broken-signal-ring.json','/client/assets/workbench.json'].includes(url)||typeof create!=='function'||typeof isCurrent!=='function'||typeof dispose!=='function')return null;
- let candidate=null;try{const response=await fetchImpl(url,{cache:'no-store',credentials:'same-origin',signal});if(!response.ok)return null;const length=Number(response.headers?.get?.('content-length'));if(Number.isFinite(length)&&length>AUTHORED_MESH_LIMITS.bytes)return null;const bytes=await readBoundedBody(response),text=new TextDecoder('utf-8',{fatal:true}).decode(bytes),data=decodeAuthoredMesh(text);candidate=create(data);if(!isCurrent()){const stale=candidate;candidate=null;dispose(stale);return null;}return candidate;}catch{if(candidate){const rejected=candidate;candidate=null;try{dispose(rejected);}catch{}}return null;}
+ if(typeof url!=='string'||!authoredMeshPaths.has(url)||typeof create!=='function'||typeof isCurrent!=='function'||typeof dispose!=='function')return null;
+ let candidate=null;try{if(signal?.aborted)return null;const response=await fetchImpl(url,{cache:'no-store',credentials:'same-origin',signal});if(!response.ok)return null;const length=Number(response.headers?.get?.('content-length'));if(Number.isFinite(length)&&length>AUTHORED_MESH_LIMITS.bytes)return null;const bytes=await readBoundedBody(response),text=new TextDecoder('utf-8',{fatal:true}).decode(bytes),data=decodeAuthoredMesh(text);if(signal?.aborted)return null;candidate=create(data);const current=isCurrent();if(signal?.aborted||!current){const stale=candidate;candidate=null;try{dispose(stale);}catch{}return null;}return candidate;}catch{if(candidate){const rejected=candidate;candidate=null;try{dispose(rejected);}catch{}}return null;}
 }
