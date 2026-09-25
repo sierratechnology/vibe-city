@@ -12,7 +12,7 @@ const fieldSet = new Set(SNAPSHOT_FIELDS);
 const forbiddenKeys = new Set(['__proto__', 'prototype', 'constructor']);
 const privateKeys = new Set(['account', 'role', 'email', 'emailVerified', 'verification', 'verificationToken', 'password', 'passwordHash', 'session', 'sessionToken', 'cookie', 'admin']);
 const playerFields = new Set([
-  'id', 'name', 'x', 'z', 'yaw', 'aimYaw', 'health', 'charge', 'inventory', 'cutter', 'unlocked',
+  'id', 'name', 'x', 'z', 'yaw', 'aimYaw', 'health', 'charge', 'inventory', 'cutter', 'fabricator', 'unlocked',
   'completed', 'flashlightOwned', 'flashlightOn', 'oxygen', 'water', 'food', 'stamina', 'suit',
   'skills', 'belt', 'survey', 'markers', 'vehicle', 'sleeping', 'room', 'rifle', 'repair', 'recovered',
   'jumpHeight', 'jumpVelocity', 'discoveries', 'discoveredBiomes', 'firstBiomeContacts', 'airReading', 'lastDamage',
@@ -302,7 +302,7 @@ function validateSnapshotSchema(snapshot) {
     stringValue(player.id, 'player');
     for (const key of ['name']) if (Object.hasOwn(player, key)) stringValue(player[key], 'player');
     for (const key of ['x', 'z', 'yaw', 'aimYaw', 'health', 'charge', 'oxygen', 'water', 'food', 'stamina', 'jumpHeight', 'jumpVelocity', 'lastDamage']) if (Object.hasOwn(player, key)) numberValue(player[key], 'player');
-    for (const key of ['cutter', 'unlocked', 'completed', 'flashlightOwned', 'flashlightOn', 'suit', 'sleeping', 'rifle', 'repair']) if (Object.hasOwn(player, key)) booleanValue(player[key], 'player');
+    for (const key of ['cutter', 'fabricator', 'unlocked', 'completed', 'flashlightOwned', 'flashlightOn', 'suit', 'sleeping', 'rifle', 'repair']) if (Object.hasOwn(player, key)) booleanValue(player[key], 'player');
     if (Object.hasOwn(player, 'vehicle') && player.vehicle !== null) stringValue(player.vehicle, 'player vehicle');
     if (Object.hasOwn(player, 'recovered')) safeInteger(player.recovered, 'player');
     if (Object.hasOwn(player, 'inventory')) validateInventory(player.inventory, 'player inventory');

@@ -2,8 +2,8 @@ import {depositKind,depositLabels} from './resource-deposits.js';
 import {dist,interactionTarget,RESOURCES,RECIPES,RUIN,shape} from './world.js';
 import {MONUMENTS,direction} from './planet.js';
 import {SPECIES} from './ecology.js';
-export function contextAction(world,p,{buildMode=false,yaw=0}={}){
- if(!p)return null;if(p.vehicle)return{kind:'message',message:{type:'vehicle',id:p.vehicle},label:'Exit vehicle',repeat:false};if(buildMode)return{kind:'place',label:'Place',repeat:false};
+export function contextAction(world,p,{buildMode=false,reclaimMode=false,yaw=0}={}){
+ if(!p)return null;if(p.vehicle)return{kind:'message',message:{type:'vehicle',id:p.vehicle},label:'Exit vehicle',repeat:false};if(reclaimMode){const s=world.structures.filter(s=>(s.canDismantle||s.owner===p.id)&&dist(p,s)<=6).sort((a,b)=>dist(p,a)-dist(p,b))[0];return s?{kind:'message',message:{type:'dismantle',id:s.id},label:`Reclaim ${RECIPES[s.type]?.name||s.type}`,repeat:false}:null;}if(buildMode)return{kind:'place',label:'Place',repeat:false};
  const choices=[];
  const add=(object,range,action)=>{const distance=dist(p,object);if(distance<=range)choices.push({...action,distance});};
  const target=interactionTarget(world,p);

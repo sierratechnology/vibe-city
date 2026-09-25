@@ -60,6 +60,15 @@ tool=empty('explorer_tool',parent,(0,-.29,.10))
 rod(tool,(0,-.12,0),(0,.10,0),.038,'dark');cube(tool,(0,.14,.12),(.12,.14,.35),'teal',.025);cube(tool,(0,.14,.08),(.13,.05,.19),'ivory',.01)
 for x in [-.06,.06]:cube(tool,(x,.14,.32),(.035,.16,.20),'ivory',.01)
 cube(tool,(0,.14,.35),(.06,.05,.14),'mint',.008,GLOW)
+# Fabrication driver: compact induction hammer with split flux head and projector.
+driver=empty('explorer_fabricator',parent,(0,-.29,.10))
+rod(driver,(0,-.15,0),(0,.15,0),.043,'dark')
+cube(driver,(0,.18,.07),(.34,.17,.21),'teal',.028)
+for x in [-.19,.19]:
+ cube(driver,(x,.18,.07),(.10,.22,.25),'ivory',.025)
+ cube(driver,(x,.18,.205),(.07,.13,.025),'mint',.008,GLOW)
+cube(driver,(0,.28,.07),(.12,.025,.12),'coral',.008)
+cube(driver,(0,-.07,.055),(.06,.11,.025),'gold',.008)
 rifle=empty('explorer_rifle',parent,(0,-.27,.11))
 cube(rifle,(0,.04,.13),(.13,.16,.52),'teal',.025);cube(rifle,(0,.04,-.20),(.16,.18,.22),'ivory',.03);rod(rifle,(0,.04,.37),(0,.04,.68),.035,'dark');cube(rifle,(0,.15,.25),(.07,.08,.16),'mint',.01,GLOW)
 for side in ['l','r']:bpy.data.objects['explorer_arm_'+side].scale.x=.92
