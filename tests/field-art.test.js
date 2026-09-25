@@ -1,0 +1,15 @@
+import test from 'node:test';import assert from 'node:assert/strict';import fs from 'node:fs';import * as THREE from 'three';
+import {loadFieldArt,fieldArtState,fieldModel,fieldResource,fieldProp,animateFieldModel} from '../client/field-art.js';
+import {closeTerrain} from '../client/world-atmosphere.js';import {planetHeight,point} from '../shared/planet.js';
+test('local model pack loads with independent articulated actors, valid bounds and equipment visibility',async()=>{
+ const fetch=globalThis.fetch,bytes=fs.readFileSync(new URL('../client/assets/field-kit.glb',import.meta.url));
+ try{globalThis.fetch=async()=>new Response(bytes);assert.ok(await loadFieldArt());assert.equal(fieldArtState().models,25);assert.ok(bytes.length<5*1024*1024);
+  const actor=fieldModel('explorer'),peer=fieldModel('explorer'),leg=actor.getObjectByName('explorer_leg_l'),rest=peer.getObjectByName('explorer_leg_l').quaternion.clone();
+  for(let i=0;i<20;i++)animateFieldModel(actor,{dt:1/60,time:i/60,speed:3,cutter:true});assert.notDeepEqual(leg.quaternion.toArray(),rest.toArray());assert.deepEqual(peer.getObjectByName('explorer_leg_l').quaternion.toArray(),rest.toArray());assert.equal(actor.getObjectByName('explorer_tool').visible,true);assert.equal(actor.getObjectByName('explorer_rifle').visible,false);
+  animateFieldModel(actor,{dt:.016,time:1,jump:.4,rifle:true});assert.equal(actor.userData.animation,'jump');assert.equal(actor.getObjectByName('explorer_tool').visible,false);assert.equal(actor.getObjectByName('explorer_rifle').visible,true);
+  for(const type of ['grazer','skitter','prowler','scout','rover','crawler']){const obj=fieldModel(type),size=new THREE.Box3().setFromObject(obj).getSize(new THREE.Vector3());assert.ok(size.toArray().every(v=>v>0&&v<15));}
+  for(const type of ['ice','water','copper','silica','carbon','scrap','ferrite','fiber','meat','ration','crystal']){const g=fieldResource(type);assert.ok(g.getAttribute('color'));assert.ok([...g.getAttribute('position').array].every(Number.isFinite));g.dispose();}
+  const prop=fieldProp('cargo',{w:1.5,h:1.1,d:1}),size=new THREE.Box3().setFromObject(prop).getSize(new THREE.Vector3());for(const[n,v]of size.toArray().entries())assert.ok(Math.abs(v-[1.5,1.1,1][n])<1e-5,'cargo model fits its authoritative footprint');
+ }finally{globalThis.fetch=fetch;}
+});
+test('close terrain follows the authoritative surface without altering far terrain',()=>{const scene=new THREE.Scene(),material=new THREE.MeshStandardMaterial({vertexColors:true}),centre=new THREE.Vector3(),patch=closeTerrain(scene,7319,material,centre);patch.update({x:0,z:0},{mid:'#889988'});const pos=patch.mesh.geometry.getAttribute('position'),i=(48*97+48),expected=point(0,0,planetHeight(0,0,7319));assert.ok(new THREE.Vector3().fromBufferAttribute(pos,i).distanceTo(new THREE.Vector3(expected.x,expected.y,expected.z))<1e-5);assert.ok(patch.mesh.geometry.index.count<60000);patch.dispose();assert.equal(scene.children.length,0);material.dispose();});
