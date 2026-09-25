@@ -86,7 +86,6 @@ function capture(){canvas.requestPointerLock?.()?.catch?.(()=>notify('Mouse capt
 function selectGuideTab(key){for(const tab of document.querySelectorAll('[data-guide-tab]')){const active=tab.dataset.guideTab===key;tab.setAttribute('aria-selected',String(active));tab.tabIndex=active?0:-1;$(tab.getAttribute('aria-controls')).classList.toggle('hidden',!active);}$('guide').querySelector('.guide-content').scrollTop=0;}
 for(const tab of document.querySelectorAll('[data-guide-tab]')){tab.onclick=()=>selectGuideTab(tab.dataset.guideTab);tab.onkeydown=e=>{const tabs=[...document.querySelectorAll('[data-guide-tab]')].filter(tab=>!tab.classList.contains('hidden')),i=tabs.indexOf(tab);let next;if(e.key==='ArrowRight')next=(i+1)%tabs.length;if(e.key==='ArrowLeft')next=(i+tabs.length-1)%tabs.length;if(e.key==='Home')next=0;if(e.key==='End')next=tabs.length-1;if(next!==undefined){e.preventDefault();selectGuideTab(tabs[next].dataset.guideTab);tabs[next].focus();}};}
 function toggleBackpack(){if(!joined)return;if(guide&&!$('guide').classList.contains('hidden')&&$('guideTab-backpack').getAttribute('aria-selected')==='true'){guideOpen(false);return;}if(guide)closeControllerMenu();selectGuideTab('backpack');guideOpen(true);}
-$('backpackAction').onclick=toggleBackpack;
 $('menuButton').onclick=()=>guideOpen(true);$('closeGuide').onclick=()=>guideOpen(false);
 let recipeState='';
 const reconnect=createReconnectController({attempt:connectExplorer,exhausted:()=>{$('network').textContent='OFFLINE';$('joinError').textContent='Connection lost. Rejoin manually.';$('enter').disabled=false;notify('Automatic reconnect stopped. Rejoin when the server is available.');}});
@@ -163,8 +162,7 @@ const controls=bindControls({canvas,
 const extraActions=document.createElement('div');extraActions.className='secondary-actions';
 $('guidePage-manual').prepend(extraActions);
 for(const button of [...$('actionButtons').children]){
- if(button.id==='backpackAction')document.querySelector('.topright').prepend(button);
- else if(!['gatherAction','jumpAction'].includes(button.id)){extraActions.append(button);const action=button.onclick;if(action)button.onclick=event=>{guideOpen(false);action(event);};}
+ if(!['gatherAction','jumpAction'].includes(button.id)){extraActions.append(button);const action=button.onclick;if(action)button.onclick=event=>{guideOpen(false);action(event);};}
 }
 canvas.addEventListener('wheel',e=>{distance=Math.max(2.5,Math.min(12,distance+e.deltaY*.01));e.preventDefault();},{passive:false});
 window.addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);});
