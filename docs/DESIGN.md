@@ -22,7 +22,7 @@ A seeded 116 m playable basin contains ferrite, ribbon fiber, flux crystals, a l
 
 The ruin fragment — “We did not build the signal. We only taught it to wait.” — offers a mystery without assigning a quest giver or explaining the universe. The milestone can be finished, but the world remains open for construction afterward.
 
-The current palette includes decks, bulkheads, canopies, anchors, perimeter barriers, wall lights and shared cargo lockers. Three original wildlife species, a shared day/night cycle, combat, meals and battery-powered flashlights add preparation and risk. Accounts support three selectable characters, each with a 60-item backpack. The current world extends over a spherical planet, with bounded hydroponic farming and ground vehicles. Voxel terrain destruction, spacecraft flight, NPC settlements, broad logistics and offline production remain planned.
+The current palette includes decks, bulkheads, windowed bulkheads, canopies, anchors, perimeter barriers, wall lights and shared cargo lockers. A windowed bulkhead is a static full barrier whose transparent pane is visual only: the complete piece blocks traversal, creatures, attacks and path clearance while sealing rooms and supporting a Wall lumen exactly like a solid Bulkhead. Three original wildlife species, a shared day/night cycle, combat, meals and battery-powered flashlights add preparation and risk. Accounts support three selectable characters, each with a 60-item backpack. The current world extends over a spherical planet, with bounded hydroponic farming and ground vehicles. Voxel terrain destruction, spacecraft flight, NPC settlements, broad logistics and offline production remain planned.
 
 ## Technical decision
 
@@ -37,7 +37,7 @@ The renderer uses instanced resource/decorative meshes, low-poly geometry, a cap
 ## Design boundaries
 
 - Real-time multiplayer and saved player progress are present now.
-- Touch and mouse controls are implemented. Physical phones, controllers and every browser are not yet verified.
+- Touch and mouse controls are implemented. Windowed bulkhead journeys have been exercised in Chromium desktop, Chromium 390×844 emulated touch, Firefox desktop and a virtual standard controller; physical phones and controllers, and browsers beyond that bounded coverage, remain unverified.
 - Public hosting and portable accounts are available; offline automation remains future work.
 - A finite seeded terrain patch is not a full simulated planet or solar system.
 - A fully enclosed room is not required for shelter in this slice: a canopy tile is enough.
