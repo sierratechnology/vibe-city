@@ -1,3 +1,5 @@
+import {solarProfile} from './planet.js';
+import {gravityForSeed} from './physics.js';
 import {validSite,gridPoint,localOffset,anchor,withinTile,floorHeight,stairFootprint} from './build-grid.js';
 import {planetHeight,planetDistance,direction,travel} from './planet.js';
 // Shared deterministic world and collision rules. No renderer or network dependencies.
@@ -52,7 +54,7 @@ export function generate(seed){
 export const dist=planetDistance;
 export const GATHER_RANGE=3,GATHER_RANGE_TOLERANCE=GATHER_RANGE*Number.EPSILON*16;
 export const withinGatherRange=distance=>Number.isFinite(distance)&&distance<=GATHER_RANGE+GATHER_RANGE_TOLERANCE;
-export function makeWorld(seed=7319){return {version:VERSION,seed,time:0,structures:[],resources:generate(seed),players:{},nextStructure:1};}
+export function makeWorld(seed=7319){return {version:VERSION,seed,planet:{...solarProfile(seed),gravity:gravityForSeed(seed)},time:0,structures:[],resources:generate(seed),players:{},nextStructure:1};}
 export function makePlayer(id,name){return {id,name,x:0,z:3,yaw:0,health:100,charge:100,inventory:{ferrite:0,fiber:0,crystal:0},cutter:false,unlocked:false,completed:false};}
 export function shape(piece,seed){
  const r=((piece.rotation||0)%4+4)%4;let dx=0,dz=0,dy=.17,w=3,d=3,h=.18;

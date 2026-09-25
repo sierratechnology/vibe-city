@@ -91,7 +91,7 @@ try {
   await page.keyboard.press('KeyB');
   await page.keyboard.press('Digit1');
   await page.waitForFunction(() => window.vibeDiagnostics.preview?.x === 9 && window.vibeDiagnostics.preview?.z === 0);
-  await page.locator('#placeAction').click();
+  await page.locator('#gatherAction').click();
   await page.waitForFunction(() => window.vibeDiagnostics.state.structures.length === 1);
   await page.keyboard.press('KeyB');
 

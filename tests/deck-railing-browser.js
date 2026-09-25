@@ -104,7 +104,7 @@ try {
 
   await selectPiece(page, 'floor', touch);
   await page.waitForFunction(() => window.vibeDiagnostics.preview && !document.querySelector('#buildHint').textContent.includes('occupied'));
-  await activate(page.locator('#placeAction'), touch);
+  await activate(page.locator('#gatherAction'), touch);
   await page.waitForFunction(() => window.vibeDiagnostics.state.structures.some(structure => structure.type === 'floor'));
   await page.waitForFunction(expected => window.vibeDiagnostics.player.inventory.ferrite === expected && window.vibeDiagnostics.player.inventory.fiber === 0, touch ? 2 : 1);
   await page.waitForFunction(readyAt => window.vibeDiagnostics.state.time >= readyAt, app.game.world.time + .25);
@@ -118,7 +118,7 @@ try {
   assert.deepEqual(preview.previewRailing, {rotation: 1, parts: 4});
   assert.match(await page.locator('#buildHint').innerText(), /VALID/, 'Railing preview must remain on the supported Deck');
   const ferriteBefore = (await diagnostics(page)).player.inventory.ferrite;
-  await activate(page.locator('#placeAction'), touch);
+  await activate(page.locator('#gatherAction'), touch);
   await page.waitForFunction(() => window.vibeDiagnostics.state.structures.some(structure => structure.type === 'railing'));
   await page.waitForFunction(expected => window.vibeDiagnostics.player.inventory.ferrite === expected, ferriteBefore - 1);
 
@@ -142,7 +142,7 @@ try {
     await activate(page.locator('#rotateAction'), true);
     await activate(page.locator('#rotateAction'), true);
     await page.waitForFunction(() => window.vibeRailingDiagnostics().previewRailing?.rotation === 2);
-    await activate(page.locator('#placeAction'), true);
+    await activate(page.locator('#gatherAction'), true);
     await page.waitForFunction(() => window.vibeDiagnostics.state.structures.filter(structure => structure.type === 'railing').length === 2);
     const railings = (await diagnostics(page)).state.structures.filter(structure => structure.type === 'railing');
     assert.deepEqual(railings.map(structure => structure.rotation).sort(), [1, 2]);

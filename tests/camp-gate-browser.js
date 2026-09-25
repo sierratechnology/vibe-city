@@ -65,7 +65,7 @@ try {
   }
   await page.waitForFunction(() => window.vibeDiagnostics.preview?.x === 9 && window.vibeDiagnostics.preview?.z === 0);
   assert.deepEqual(await page.evaluate(() => window.vibeCampGateDiagnostics().previewGate), {rotation: 0, parts: 3, leafSpan: 2.45});
-  await page.locator('#placeAction').click();
+  await page.locator('#gatherAction').click();
   await page.waitForFunction(() => window.vibeDiagnostics.state.structures.some(s => s.type === 'campGate'));
   const gate = app.game.world.structures.find(s => s.type === 'campGate');
   assert.ok(gate && gate.owner === id && gate.open === false);
