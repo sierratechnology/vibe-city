@@ -1,3 +1,4 @@
+import {survivalAction,respawnPoint} from './survival-actions.js';
 import {stepJump,JUMP_SPEED,JUMP_COST} from '../shared/physics.js';
 import {initExpedition,initPlayer,stepExpedition,expeditionAction,resourcesFor,canAccess,cargoGrants,CARGO_GRANT_LIMIT,hydroponicsGrants,HYDROPONICS_GRANT_LIMIT,skill} from './expedition.js';
 import {types as utilTypes} from 'node:util';
@@ -42,14 +43,28 @@ export class Game {
  if(p.charge<=0)p.flashlightOn=false;
  if(p.charge<=0)p.health=Math.max(0,p.health-dt*4);else if(safe||power)p.health=Math.min(100,p.health+dt*3);
  if(p.unlocked&&power&&safe)p.completed=true;
- if(p.health<=0){p.x=0;p.z=3;p.jumpHeight=0;p.jumpVelocity=0;p.health=100;p.charge=65;p.oxygen=100;p.water=75;p.food=75;p.stamina=100;p.suit=true;p.sleeping=false;p.vehicle=null;this.inputs.set(id,{x:0,z:0});p.recovered=(p.recovered||0)+1;}
+ if(p.health<=0){const home=respawnPoint(this.world,p);for(const v of this.world.vehicles)v.occupants=v.occupants.filter(occupant=>occupant!==id);p.x=home.x;p.z=home.z;p.jumpHeight=0;p.jumpVelocity=0;p.health=100;p.charge=65;p.oxygen=100;p.water=75;p.food=75;p.stamina=100;p.suit=true;p.sleeping=false;p.vehicle=null;this.inputs.set(id,{x:0,z:0});p.recovered=(p.recovered||0)+1;}
  }
  }
- action(id,m,{freeBuild=false}={}){const p=this.world.players[id];if(!p||!this.online.has(id))return{ok:false,message:'Join first.'};
+ action(id,m,options={}){
+  const result=this.performAction(id,m,options);
+  if(result.ok){
+   const p=this.world.players[id];let milestone=0;
+   if(m.type==='gather')milestone=1;
+   else if(m.type==='craft'&&m.recipe==='cutter')milestone=2;
+   else if(m.type==='build')milestone={floor:4,roof:8,angledCanopy:8,cargo:16}[m.piece]||0;
+   else if(m.type==='transfer'&&m.direction==='deposit'||m.type==='transferBulk'&&m.mode!=='withdraw')milestone=32;
+   else if(m.type==='home'&&m.id)milestone=64;
+   p.journey=(p.journey||0)|milestone;
+  }
+  return result;
+ }
+ performAction(id,m,{freeBuild=false}={}){const p=this.world.players[id];if(!p||!this.online.has(id))return{ok:false,message:'Join first.'};
  if(!m||typeof m!=='object'||utilTypes.isProxy(m))return{ok:false,message:'Invalid action request.'};const prototype=Object.getPrototypeOf(m);if(prototype!==Object.prototype&&prototype!==null)return{ok:false,message:'Invalid action request.'};const descriptors=Object.getOwnPropertyDescriptors(m);if(Reflect.ownKeys(descriptors).some(key=>typeof key!=='string'||!descriptors[key].enumerable||!Object.hasOwn(descriptors[key],'value')))return{ok:false,message:'Invalid action request.'};
  if(p.sleeping&&m.type!=='sleep')return{ok:false,message:'Wake up before taking an action.'};
  if(m.type==='jump'){if(p.vehicle||p.sleeping||p.jumpHeight>0||p.jumpVelocity>0)return{ok:false,message:'Jump requires standing on the ground.'};if(p.stamina<JUMP_COST)return{ok:false,message:'Not enough stamina to jump.'};p.stamina-=JUMP_COST;p.jumpVelocity=JUMP_SPEED;return{ok:true,message:'Jump'};}
  if(m.type==='campGate'){const keys=Object.keys(m).sort();if(keys.length!==2||keys.join(',')!=='id,type'||typeof m.id!=='string')return{ok:false,message:'Invalid Camp gate request.'};const gate=nearestOperableDoor(this.world,p,4,['campGate']);if(!gate||gate.id!==m.id)return{ok:false,message:'Move closer to the Camp gate.'};gate.open=!gate.open;return{ok:true,message:gate.open?'Camp gate open.':'Camp gate closed.'};}
+ const survival=survivalAction(this,p,m);if(survival)return survival;
  const special=expeditionAction(this,p,m,{freeBuild});if(special)return special;
  const now=this.world.time,ready=this.cooldowns.get(id)||0;
  if(now<ready&&['gather','build','dismantle','attack','eat'].includes(m.type))return{ok:false,message:'Tool cycling…'};

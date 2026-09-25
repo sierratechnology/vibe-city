@@ -13,16 +13,16 @@ export function fieldProp(type,dimensions){const model=fieldModel('prop_'+type);
 
 // Smooth joint animation on imported rigid-part rigs. It follows accepted movement;
 // no mesh animation changes collisions, authoritative position, or jump physics.
-export function animateFieldModel(model,{dt,time,speed=0,jump=0,action=0,sprint=false,sleeping=false,fabricator=false,cutter=false,rifle=false}={}){
+export function animateFieldModel(model,{dt,time,speed=0,jump=0,action=0,actionKind='gather',sprint=false,sleeping=false,fabricator=false,cutter=false,rifle=false}={}){
  if(!model?.userData.art)return;const data=model.userData;data.motion??={blend:0,phase:0};const motion=data.motion,target=Math.min(1,speed/.9);motion.blend=THREE.MathUtils.damp(motion.blend,target,9,dt);motion.phase+=dt*(sprint?12:8)*Math.min(1.7,Math.max(.3,speed/2.5));
  const name=data.model;data.joints??=Object.fromEntries((()=>{const a=[];model.traverse(o=>{if(!o.isMesh){o.userData.restPosition??=o.position.clone();o.userData.restQuaternion??=o.quaternion.clone();a.push([o.name,o]);}});return a;})());
- const pose=(key,x=0,y=0,z=0)=>{const joint=data.joints[key];if(joint)joint.quaternion.copy(joint.userData.restQuaternion).multiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(x,y,z)));};
- if(name==='explorer'){const tool=model.getObjectByName('explorer_tool'),weapon=model.getObjectByName('explorer_rifle');const driver=model.getObjectByName('explorer_fabricator');if(driver)driver.visible=fabricator;if(tool)tool.visible=cutter&&!rifle&&!fabricator;if(weapon)weapon.visible=rifle&&!fabricator;
-  const gait=Math.sin(motion.phase)*motion.blend,air=jump>.02,bend=air?.38:0;
+ data.poseQuaternion??=new THREE.Quaternion();data.poseEuler??=new THREE.Euler();const pose=(key,x=0,y=0,z=0)=>{const joint=data.joints[key];if(joint)joint.quaternion.copy(joint.userData.restQuaternion).multiply(data.poseQuaternion.setFromEuler(data.poseEuler.set(x,y,z)));};
+ if(name==='explorer'){data.toolNodes??={tool:model.getObjectByName('explorer_tool'),weapon:model.getObjectByName('explorer_rifle'),driver:model.getObjectByName('explorer_fabricator')};const{tool,weapon,driver}=data.toolNodes;if(driver)driver.visible=fabricator;if(tool)tool.visible=cutter&&!rifle&&!fabricator;if(weapon)weapon.visible=rifle&&!fabricator;
+  const gait=Math.sin(motion.phase)*motion.blend,air=jump>.02;if(motion.wasAir&&!air)motion.landing=.24;motion.wasAir=air;motion.landing=Math.max(0,(motion.landing||0)-dt);const settle=motion.landing/.24,bend=air?.38:settle*.32,working=['build','repair','dismantle'].includes(actionKind),stroke=action>0?(working?.85+Math.sin(time*34)*.05:Math.sin(action*Math.PI)*1.25):0;
   pose('explorer_leg_l',air?-.35:gait*.62);pose('explorer_leg_r',air?.20:-gait*.62);pose('explorer_shin_l',bend+Math.max(0,-gait)*.8);pose('explorer_shin_r',bend+Math.max(0,gait)*.8);
-  pose('explorer_arm_l',air?-.5:-gait*.48,0,.06);pose('explorer_arm_r',action>0?-Math.sin(action*Math.PI)*1.25:air?-.5:gait*.48,0,-.06);
-  pose('explorer_forearm_l',-.12-Math.max(0,gait)*.25);pose('explorer_forearm_r',action>0?-.12-Math.sin(action*Math.PI)*.7:-.12-Math.max(0,-gait)*.25);
-  const body=data.joints.explorer_body;if(body){body.position.copy(body.userData.restPosition);body.position.y+=Math.sin(time*2)*.008+Math.abs(Math.sin(motion.phase))*motion.blend*.035;pose('explorer_body',sleeping?-.25:sprint?.09:0,Math.sin(time*.65)*.025,Math.sin(motion.phase)*motion.blend*.035);}pose('explorer_head',Math.sin(time*.7)*.025,-Math.sin(time*.65)*.035);
+  pose('explorer_arm_l',air?-.5:-gait*.48,0,.06);pose('explorer_arm_r',action>0?-stroke:air?-.5:gait*.48,0,-.06);
+  pose('explorer_forearm_l',-.12-Math.max(0,gait)*.25);pose('explorer_forearm_r',action>0?-.12-(working?.6:Math.sin(action*Math.PI)*.7):-.12-Math.max(0,-gait)*.25);
+  const body=data.joints.explorer_body;if(body){body.position.copy(body.userData.restPosition);body.position.y-=settle*.07;body.position.y+=Math.sin(time*2)*.008+Math.abs(Math.sin(motion.phase))*motion.blend*.035;pose('explorer_body',sleeping?-.25:sprint?.09:0,Math.sin(time*.65)*.025,Math.sin(motion.phase)*motion.blend*.035);}pose('explorer_head',Math.sin(time*.7)*.025,-Math.sin(time*.65)*.035);
  }else if(['grazer','skitter','prowler'].includes(name)){
   for(const key of Object.keys(data.joints))if(key.includes('_leg_')){const side=key.includes('_l')?1:-1,j=Number(key.slice(-1));pose(key,Math.sin(motion.phase*1.1+j*Math.PI+side)*motion.blend*.48,0,Math.sin(motion.phase+j)*motion.blend*.035);}
   pose(name+'_tail',0,Math.sin(time*2)*.25);const body=data.joints[name+'_body'];if(body){body.position.copy(body.userData.restPosition);body.position.y+=Math.sin(time*2)*.012+Math.abs(Math.sin(motion.phase))*motion.blend*.035;}

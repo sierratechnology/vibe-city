@@ -49,6 +49,14 @@ export function createAudioSettings(storage) {
   };
 }
 
+// Original synthesized cues: no sampled audio from other games.
+export const WORLD_CUES=Object.freeze({
+ gather:[740,130,.11,'triangle',.24], build:[220,640,.24,'sine',.28], dismantle:[480,80,.22,'triangle',.2], repair:[960,320,.16,'triangle',.16],
+ craft:[440,880,.22,'sine',.22], transfer:[460,680,.09,'sine',.15], transferBulk:[460,780,.16,'sine',.2],
+ drop:[280,110,.1,'triangle',.18], home:[330,990,.3,'sine',.2], jump:[150,330,.09,'sine',.13],
+ footstep:[90,38,.055,'triangle',.13], land:[120,35,.14,'triangle',.23], attack:[160,45,.12,'triangle',.22],
+ eat:[340,480,.12,'sine',.15], drink:[560,760,.13,'sine',.14], light:[700,520,.07,'sine',.1],
+});
 export function createAudioEngine({settings, createContext, maxVoices=4}) {
   let context = null;
   const voices = new Set();
@@ -79,18 +87,20 @@ export function createAudioEngine({settings, createContext, maxVoices=4}) {
         return false;
       }
     },
-    play(category) {
+    play(category, cue) {
       const volume = settings.effectiveVolume(category);
       if (!context || context.state !== 'running' || !volume || voices.size >= maxVoices) return false;
       let oscillator, gain;
       try {
         oscillator = context.createOscillator();
         gain = context.createGain();
-        const now = context.currentTime, duration = category === 'interface' ? .08 : category === 'world' ? .14 : 0;
+        const sound=category==='world'&&Object.hasOwn(WORLD_CUES,cue)?WORLD_CUES[cue]:null;
+        const now = context.currentTime, duration = sound?.[2] ?? (category === 'interface' ? .08 : category === 'world' ? .14 : 0);
         if (!duration) return false;
-        oscillator.type = 'sine';
-        oscillator.frequency.setValueAtTime(category === 'interface' ? 520 : 240, now);
-        gain.gain.setValueAtTime(Math.max(.0001, volume), now);
+        oscillator.type = sound?.[3]||'sine';
+        oscillator.frequency.setValueAtTime(sound?.[0]??(category === 'interface' ? 520 : 240), now);
+        if(sound)oscillator.frequency.exponentialRampToValueAtTime(sound[1],now+duration);
+        gain.gain.setValueAtTime(Math.max(.0001, volume*(sound?.[4]??1)), now);
         gain.gain.exponentialRampToValueAtTime(.0001, now + duration);
         oscillator.connect(gain); gain.connect(context.destination);
         const voice = {oscillator, gain};

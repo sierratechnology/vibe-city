@@ -6,7 +6,7 @@ export {
   createSnapshotDelta,
 } from '../client/snapshot-delta.js';
 
-import {acceptSnapshotBaseline, createSnapshotDelta} from '../client/snapshot-delta.js';
+import {acceptSnapshotBaseline, SNAPSHOT_FIELDS, SNAPSHOT_DELTA_LIMITS} from '../client/snapshot-delta.js';
 
 export const FULL_SNAPSHOT_INTERVAL = 32;
 
@@ -29,17 +29,21 @@ export function nextSnapshotPacket(session, state, metadata = {}) {
   }
   state = snapshotForDelivery(state);
   const revision = session.revision + 1;
-  const delta = createSnapshotDelta(session.state, state, session.revision, revision);
+  // Both baselines already passed the full schema and privacy validator. Avoid
+  // recursively cloning and validating them again for every connected viewer.
+  const changes={};for(const field of SNAPSHOT_FIELDS)if(JSON.stringify(session.state[field])!==JSON.stringify(state[field]))changes[field]=state[field];
+  const delta = {type:'delta',baseRevision:session.revision,revision,changes};
   const deltaPacket = {...metadata, type: 'delta', delta};
-  const fullPacket = {...metadata, type: 'state', revision, state: structuredClone(state)};
+  const fullPacket = {...metadata, type: 'state', revision, state};
   const rosterChanged = JSON.stringify(session.state.players.map(player => player.id)) !== JSON.stringify(state.players.map(player => player.id));
   const firstAcknowledgement = !session.acknowledgedInput && metadata.inputAck !== null && metadata.inputAck !== undefined;
   const forceFull = !session.sentUpdate || rosterChanged || firstAcknowledgement || session.deltasSinceFull + 1 >= FULL_SNAPSHOT_INTERVAL
+    || Buffer.byteLength(JSON.stringify(delta)) > SNAPSHOT_DELTA_LIMITS.maxBytes
     || Buffer.byteLength(JSON.stringify(deltaPacket)) >= Buffer.byteLength(JSON.stringify(fullPacket));
-  session.state = structuredClone(state);
+  session.state = state;
   session.revision = revision;
   session.deltasSinceFull = forceFull ? 0 : session.deltasSinceFull + 1;
   session.sentUpdate = true;
   if (metadata.inputAck !== null && metadata.inputAck !== undefined) session.acknowledgedInput = true;
-  return forceFull ? fullPacket : deltaPacket;
+  return structuredClone(forceFull ? fullPacket : deltaPacket);
 }

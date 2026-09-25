@@ -6,7 +6,7 @@ Vibe City is an original cooperative science-fiction survival and construction g
 
 Valheim informs the rhythm of shared expeditions, preparation and earned capabilities. Minecraft informs expressive construction. Neither game's assets, fiction, naming, world generation or interface is reproduced.
 
-**Visual direction:** weathered ivory equipment, dark blue-green metal, mint energy, coral sediment and pale lavender crystalline minerals. Silhouettes are simple, angular and readable. Civilization should look assembled, repaired and inhabited rather than like a pristine spacecraft showroom. The current geometry is deliberately lightweight, original placeholder work.
+**Visual direction:** weathered ivory equipment, dark blue-green metal, mint energy, coral sediment and pale lavender crystalline minerals. Silhouettes are simple, angular and readable. Civilization should look assembled, repaired and inhabited rather than like a pristine spacecraft showroom. The current field kit uses original Blender explorer, creature, vehicle and prop models with articulated movement; terrain and many structures remain lightweight geometry.
 
 ## World and progression
 
@@ -22,7 +22,7 @@ A seeded 116 m playable basin contains ferrite, ribbon fiber, flux crystals, a l
 
 The ruin fragment — “We did not build the signal. We only taught it to wait.” — offers a mystery without assigning a quest giver or explaining the universe. The milestone can be finished, but the world remains open for construction afterward.
 
-The current palette includes decks, bulkheads, canopies, anchors, perimeter barriers, wall lights and shared cargo lockers. Three original wildlife species, a shared day/night cycle, combat, meals and battery-powered flashlights add preparation and risk. Accounts support three selectable characters, each with a 60-item backpack. No voxel terrain destruction, spherical planets, flight, NPCs, logistics, farming or offline simulation are included yet.
+The current palette includes decks, bulkheads, canopies, anchors, perimeter barriers, wall lights and shared cargo lockers. Three original wildlife species, a shared day/night cycle, combat, meals and battery-powered flashlights add preparation and risk. Accounts support three selectable characters, each with a 60-item backpack. The current world extends over a spherical planet, with bounded hydroponic farming and ground vehicles. Voxel terrain destruction, spacecraft flight, NPC settlements, broad logistics and offline production remain planned.
 
 ## Technical decision
 
@@ -46,4 +46,7 @@ The renderer uses instanced resource/decorative meshes, low-poly geometry, a cap
 References consulted for the stack decision: [Three.js renderer](https://threejs.org/docs/pages/WebGLRenderer.html), [Godot web export](https://docs.godotengine.org/en/4.5/tutorials/export/exporting_for_web.html).
 
 ## Public prototype update
-The public deployment uses Vercel WebSockets and an Upstash Redis world shared through atomic compare-and-set transactions. Local development remains disk-backed. Admission is capped at ten simultaneous characters. Passwords use salted scrypt hashes; HttpOnly sessions gate character ownership. Daily world snapshots run at 00:00 UTC alongside frequent active-world saves. Password recovery, admin account tools and resource regeneration need follow-up.
+The public deployment uses Vercel WebSockets and an Upstash Redis world shared through atomic compare-and-set transactions. Local development remains disk-backed. Admission is capped at fifty simultaneous characters. Passwords use salted scrypt hashes; HttpOnly sessions gate character ownership. Daily world snapshots run at 00:00 UTC alongside frequent active-world saves. Password recovery, owner-managed administrators/moderators, construction permissions and bounded Coral Flux regeneration are implemented. Broader renewable resource systems remain planned.
+
+## Shared survival loop — September 24
+Backpack grids expose item use, belt assignment and resource dropping. Recipes are searchable and categorized with have/need counts and one browser-local tracked list. Bulk storage transfers remain server-authoritative, capacity-bounded and subject to existing access controls. Characters can claim an owned bunk for recovery, with clear-space checks and landing fallback. Optional saved expedition milestones live inside the guide. Distinct original sounds, work/landing poses, tool sparks and bounded crowd nameplates support readability. See the research and validation record in docs/research/survival-loop-2026-09-24.md.
