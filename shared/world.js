@@ -1,6 +1,6 @@
 import {solarProfile} from './planet.js';
 import {gravityForSeed} from './physics.js';
-import {validSite,gridPoint,localOffset,anchor,withinTile,floorHeight,stairFootprint} from './build-grid.js';
+import {isFurniture,onPlacementGrid,validSite,gridPoint,localOffset,anchor,withinTile,floorHeight,stairFootprint} from './build-grid.js';
 import {planetHeight,planetDistance,direction,travel} from './planet.js';
 // Shared deterministic world and collision rules. No renderer or network dependencies.
 export const VERSION = 1;
@@ -86,7 +86,7 @@ export function powered(world,p){return world.structures.some(s=>s.type==='heate
 export function placementError(world,p,piece,people=[]){
  if(!['floor','wall','doorway','roof','angledCanopy','stairs','railing','heater','perimeter','campGate','lamp','cargo','workbench','door','airlock','lifeSupport','iceProcessor','garden','bed'].includes(piece.type))return 'Choose a construction piece.';
  if(!Number.isFinite(piece.x)||!Number.isFinite(piece.z)||!Number.isInteger(piece.rotation)||piece.rotation<0||piece.rotation>3)return 'Invalid placement.';
- if(piece.site){if(!validSite(piece.site)||!Number.isInteger(piece.gx)||!Number.isInteger(piece.gz)||Math.abs(piece.gx)>128||Math.abs(piece.gz)>128)return 'Invalid local construction grid.';const expected=gridPoint(piece.site,piece.gx,piece.gz,world.seed);if(dist(piece,expected)>.01)return 'Invalid grid position.';if(Math.abs(expected.y-height(piece.x,piece.z,world.seed))>2)return 'Terrain too steep for this foundation. Choose flatter ground.';}else if(piece.x%3||piece.z%3)return 'Use the 3 m construction grid.';
+ if(piece.site){if(!validSite(piece.site)||!onPlacementGrid(piece.gx,piece.type,true)||!onPlacementGrid(piece.gz,piece.type,true)||Math.abs(piece.gx)>128||Math.abs(piece.gz)>128)return 'Invalid local construction grid.';const expected=gridPoint(piece.site,piece.gx,piece.gz,world.seed);if(dist(piece,expected)>.01)return 'Invalid grid position.';if(Math.abs(expected.y-height(piece.x,piece.z,world.seed))>2)return 'Terrain too steep for this foundation. Choose flatter ground.';}else if(!onPlacementGrid(piece.x,piece.type)||!onPlacementGrid(piece.z,piece.type))return 'Use the 3 m construction grid.';
 
  if(dist(p,piece)>7)return 'Move closer (within 7 m).';
  if(dist(piece,RUIN)<7||Math.hypot(piece.x,piece.z)<3)return 'Keep the ruin and landing point clear.';
@@ -98,7 +98,18 @@ export function placementError(world,p,piece,people=[]){
  const b=shape(piece,world.seed);
  if(['wall','doorway','perimeter','campGate','door','airlock','stairs','railing'].includes(piece.type)){const edge=shape({...piece,type:'wall'},world.seed);if(world.structures.some(s=>['wall','doorway','perimeter','campGate','door','airlock','stairs','railing'].includes(s.type)&&dist(shape({...s,type:'wall'},world.seed),edge)<.1))return 'This edge is occupied.';}
  if(piece.type==='lamp'&&!same.some(s=>['wall','perimeter','door','airlock'].includes(s.type)&&s.rotation===piece.rotation))return 'A wall is required on this edge.';
- if(!['floor','perimeter','campGate','lamp','cargo','workbench'].includes(piece.type)&&!same.some(s=>s.type==='floor'))return 'Place a deck underneath first.';
+ if(!['floor','perimeter','campGate','lamp','cargo','workbench'].includes(piece.type)&&!world.structures.some(s=>s.type==='floor'&&(isFurniture(piece.type)?withinTile(s,piece):dist(s,piece)<.05)))return 'Place a deck underneath first.';
+ // Equipment uses a fine grid; its entire footprint must fit on a supporting deck.
+ if(isFurniture(piece.type)){
+  const floors=world.structures.filter(s=>s.type==='floor'&&withinTile(s,piece));
+  if(floors.length&&!floors.some(s=>{const o=localOffset(s,piece,b.frame);return Math.abs(o.x)+b.w/2<=1.501&&Math.abs(o.z)+b.d/2<=1.501;}))return 'Keep the whole object on the deck.';
+ }
+ const solid=['wall','doorway','perimeter','campGate','door','airlock','railing'];
+ if((isFurniture(piece.type)||solid.includes(piece.type))&&world.structures.some(s=>{
+  if(!(isFurniture(piece.type)&&(isFurniture(s.type)||solid.includes(s.type))||isFurniture(s.type)&&solid.includes(piece.type)))return false;
+  const other=shape(s,world.seed);if(dist(b,other)>5)return false;const o=localOffset(b,other,b.frame);
+  return Math.abs(o.x)<(b.w+other.w)/2-.01&&Math.abs(o.z)<(b.d+other.d)/2-.01;
+ }))return 'Another object occupies this space.';
  if(piece.type!=='stairs'&&['floor','wall','doorway','perimeter','campGate','door','airlock','railing','heater','cargo','workbench','lifeSupport','iceProcessor','garden','bed'].includes(piece.type)&&world.structures.some(s=>s.type==='stairs'&&stairFootprint(s,b,Math.max(b.w,b.d)/2).inside))return 'The stair path is occupied.';
  if(piece.type==='stairs'){const profile=stairProfile(world,piece);if(!Number.isFinite(profile.rise)||profile.rise<=0)return 'The terrain outside the deck must be lower.';const occupied=world.structures.some(s=>{if(s.type==='floor'&&dist(s,piece)<.05)return false;if(!['floor','stairs','wall','doorway','perimeter','campGate','door','airlock','railing','heater','cargo','lifeSupport','iceProcessor','garden','bed'].includes(s.type))return false;if(s.type==='stairs')return stairFootprint(piece,stairProfile(world,s).centre,.8).inside;const obstacle=shape(s,world.seed);return stairFootprint(piece,obstacle,Math.max(obstacle.w,obstacle.d)/2).inside;});if(occupied)return 'The stair path is occupied.';if(people.some(q=>stairFootprint(piece,q,.5).inside))return 'A player is in the way.';if(world.resources.some(n=>n.amount>0&&stairFootprint(piece,n,.15).inside))return 'Gather the resources on the stair path first.';}
  if(['wall','doorway','perimeter','campGate','door','airlock','railing','heater','cargo','workbench','lifeSupport','iceProcessor','garden','bed'].includes(piece.type))if(people.some(q=>{if(dist(q,b)>5)return false;const o=localOffset(b,q,b.frame),inside=Math.abs(o.x)<b.w/2+.5&&Math.abs(o.z)<b.d/2+.5;return inside&&(piece.type!=='doorway'||Math.abs(b.w>b.d?o.x:o.z)>.65);}))return 'A player is in the way.';

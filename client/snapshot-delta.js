@@ -245,8 +245,10 @@ function validateSnapshotSchema(snapshot) {
     exactKeys(structure, structureFields, ['id', 'type'], 'structure');
     stringValue(structure.id, 'structure'); stringValue(structure.type, 'structure');
     for (const key of ['x', 'z', 'health', 'power', 'cycleUntil', 'water', 'readyAt', 'lastDamage']) if (Object.hasOwn(structure, key)) numberValue(structure[key], 'structure');
-    for (const key of ['rotation', 'gx', 'gz']) if (Object.hasOwn(structure, key)) safeInteger(structure[key], 'structure');
-    for (const key of ['site', 'owner']) if (Object.hasOwn(structure, key)) stringValue(structure[key], 'structure');
+    for (const key of ['gx', 'gz']) if (Object.hasOwn(structure, key)) numberValue(structure[key], 'structure');
+    for (const key of ['rotation']) if (Object.hasOwn(structure, key)) safeInteger(structure[key], 'structure');
+    if (Object.hasOwn(structure, 'site')) {exactKeys(structure.site,new Set(['face','i','j']),['face','i','j'],'structure site');for(const value of Object.values(structure.site)) safeInteger(value,'structure site');}
+    for (const key of ['owner']) if (Object.hasOwn(structure, key)) stringValue(structure[key], 'structure');
     if (Object.hasOwn(structure, 'open')) booleanValue(structure.open, 'structure');
     if (Object.hasOwn(structure, 'canDismantle')) booleanValue(structure.canDismantle, 'structure');
     if (Object.hasOwn(structure, 'dismantleGrantedTo')) stringArray(structure.dismantleGrantedTo, 'structure dismantle grants');
