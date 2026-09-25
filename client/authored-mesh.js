@@ -47,7 +47,7 @@ async function readBoundedBody(response){
  const bytes=new Uint8Array(length);let offset=0;for(const chunk of chunks){bytes.set(chunk,offset);offset+=chunk.byteLength;}return bytes;
 }
 
-export async function loadAuthoredMesh({url,signal,fetchImpl=fetch,create,isCurrent}){
- if(url!=='/client/assets/broken-signal-ring.json'||typeof create!=='function'||typeof isCurrent!=='function')return null;
- try{const response=await fetchImpl(url,{cache:'no-store',credentials:'same-origin',signal});if(!response.ok)return null;const length=Number(response.headers?.get?.('content-length'));if(Number.isFinite(length)&&length>AUTHORED_MESH_LIMITS.bytes)return null;const bytes=await readBoundedBody(response),text=new TextDecoder('utf-8',{fatal:true}).decode(bytes),data=decodeAuthoredMesh(text),candidate=create(data);if(!isCurrent()){disposeAuthoredMesh(candidate);return null;}return candidate;}catch{return null;}
+export async function loadAuthoredMesh({url,signal,fetchImpl=fetch,create,isCurrent,dispose=disposeAuthoredMesh}){
+ if(!['/client/assets/broken-signal-ring.json','/client/assets/workbench.json'].includes(url)||typeof create!=='function'||typeof isCurrent!=='function'||typeof dispose!=='function')return null;
+ let candidate=null;try{const response=await fetchImpl(url,{cache:'no-store',credentials:'same-origin',signal});if(!response.ok)return null;const length=Number(response.headers?.get?.('content-length'));if(Number.isFinite(length)&&length>AUTHORED_MESH_LIMITS.bytes)return null;const bytes=await readBoundedBody(response),text=new TextDecoder('utf-8',{fatal:true}).decode(bytes),data=decodeAuthoredMesh(text);candidate=create(data);if(!isCurrent()){const stale=candidate;candidate=null;dispose(stale);return null;}return candidate;}catch{if(candidate){const rejected=candidate;candidate=null;try{dispose(rejected);}catch{}}return null;}
 }

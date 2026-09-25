@@ -37,6 +37,12 @@ test('checked-in broken signal ring is accepted within explicit file and geometr
  assert.ok(bytes<=AUTHORED_MESH_LIMITS.bytes,{bytes});assert.ok(data.materials.length<=AUTHORED_MESH_LIMITS.materials);assert.ok(data.meshes.length<=AUTHORED_MESH_LIMITS.drawCalls);assert.ok(vertices<=AUTHORED_MESH_LIMITS.vertices,{vertices});assert.ok(triangles<=AUTHORED_MESH_LIMITS.triangles,{triangles});assert.equal(data.name,'broken-signal-ring');
 });
 
+test('checked-in Workbench authored manifest is valid and its literal local path is loadable',async()=>{
+ const file=path.join(root,'client/assets/workbench.json'),text=fs.readFileSync(file,'utf8'),bytes=fs.statSync(file).size,data=decodeAuthoredMesh(text),vertices=data.meshes.reduce((n,m)=>n+m.positions.length/3,0),triangles=data.meshes.reduce((n,m)=>n+m.indices.length/3,0);
+ assert.ok(bytes<=AUTHORED_MESH_LIMITS.bytes,{bytes});assert.ok(data.materials.length<=AUTHORED_MESH_LIMITS.materials);assert.ok(data.meshes.length<=AUTHORED_MESH_LIMITS.drawCalls);assert.ok(vertices<=AUTHORED_MESH_LIMITS.vertices,{vertices});assert.ok(triangles<=AUTHORED_MESH_LIMITS.triangles,{triangles});assert.equal(data.name,'workbench');
+ const candidate={data};assert.equal(await loadAuthoredMesh({url:'/client/assets/workbench.json',fetchImpl:async()=>new Response(text,{headers:{'content-length':String(bytes)}}),create:decoded=>Object.assign(candidate,{decoded}),isCurrent:()=>true}),candidate);assert.equal(candidate.decoded.name,'workbench');
+});
+
 test('decoded data builds a named deterministic bounded Three object without mutating input',()=>{
  const data=decodeAuthoredMesh(JSON.stringify(fixture())),before=structuredClone(data),material=new THREE.MeshBasicMaterial(),object=createAuthoredMeshObject(THREE,data,{'weathered-ivory':material}),bounds=new THREE.Box3().setFromObject(object);
  assert.equal(object.name,'broken-signal-ring');assert.deepEqual(object.userData,{authoredAsset:'broken-signal-ring',vertices:3,triangles:1,drawCalls:1,materials:1,bounds:{min:[0,0,0],max:[1,1,0]}});assert.equal(object.children.length,1);assert.equal(object.children[0].name,'ring-segment');assert.deepEqual(bounds.min.toArray(),[0,0,0]);assert.deepEqual(bounds.max.toArray(),[1,1,0]);assert.deepEqual(data,before);object.traverse(child=>child.geometry?.dispose());material.dispose();
@@ -50,6 +56,14 @@ test('bounded local loader accepts current data and disposes a stale candidate w
  assert.equal(await loadAuthoredMesh({url:'https://bad.invalid/model.json',fetchImpl:async()=>response(),create,isCurrent:()=>true}),null);
 });
 
+test('bounded local loader uses the caller disposer exactly once for a stale Workbench candidate',async()=>{
+ const text=fs.readFileSync(path.join(root,'client/assets/workbench.json'),'utf8'),materials=Object.fromEntries(['weathered-ivory','dark-blue-green','mint-energy','coral-lavender'].map(name=>[name,new THREE.MeshBasicMaterial()])),materialDisposals=new Map(Object.values(materials).map(material=>[material,0])),geometryDisposals=[];
+ for(const material of materialDisposals.keys())material.addEventListener('dispose',()=>materialDisposals.set(material,materialDisposals.get(material)+1));
+ const create=data=>{const object=createAuthoredMeshObject(THREE,data,materials);object.traverse(child=>{if(child.geometry){geometryDisposals.push(0);const index=geometryDisposals.length-1;child.geometry.addEventListener('dispose',()=>geometryDisposals[index]++);}if(child.material)child.userData.workbenchMaterial=true;});return object;},dispose=object=>object.traverse(child=>{child.geometry?.dispose();if(child.userData?.workbenchMaterial)child.material?.dispose();});
+ const result=await loadAuthoredMesh({url:'/client/assets/workbench.json',fetchImpl:async()=>new Response(text),create,isCurrent:()=>false,dispose});
+ assert.equal(result,null);assert.deepEqual(geometryDisposals,[1,1,1,1]);assert.deepEqual([...materialDisposals.values()],[1,1,1,1]);
+});
+
 test('bounded local loader cancels a no-length stream at the first oversized chunk',async()=>{
  const chunk=new Uint8Array(1024).fill(120);let pulls=0,cancelled=false,created=false;
  const body=new ReadableStream({pull(controller){pulls++;controller.enqueue(chunk);if(pulls===480)controller.close();},cancel(){cancelled=true;}},{highWaterMark:0});
@@ -59,4 +73,8 @@ test('bounded local loader cancels a no-length stream at the first oversized chu
 
 test('environment keeps an independent primitive fallback and generation-safe authored replacement',()=>{
  const source=fs.readFileSync(path.join(root,'client/main.js'),'utf8');assert.match(source,/from '.\/authored-mesh\.js'/);assert.match(source,/new AbortController\(\)/);assert.match(source,/loadAuthoredMesh\(/);assert.match(source,/createAuthoredMeshObject\(/);assert.match(source,/broken-signal-ring-fallback/);assert.match(source,/assetGeneration===generation/);assert.match(source,/disposeAuthoredMesh\(fallback\)/);
+});
+
+test('Workbench renderer keeps one primitive fallback until a generation-safe independent authored replacement',()=>{
+ const source=fs.readFileSync(path.join(root,'client/main.js'),'utf8');assert.match(source,/\/client\/assets\/workbench\.json/);assert.match(source,/workbench-fallback/);assert.match(source,/structureAssetGeneration===generation/);assert.match(source,/group\.remove\(fallback\);disposeWorkbenchAsset\(fallback\)/);assert.match(source,/materials\.wall\.clone\(\)/);assert.match(source,/disposeWorkbenchAsset/);
 });
