@@ -100,7 +100,7 @@ test('Camp gate catalog renderer and accessible operation expose local stateful 
   assert.match(renderer, /\[-1,1\]/, 'two posts are rendered');
   assert.match(renderer, /piece\.open/, 'the leaf geometry changes with accepted open state');
   assert.doesNotMatch(renderer, /fetch|https?:|TextureLoader|load\(/);
-  assert.match(client, /function updateHUD\(\)\{const p=me\(\);if\(!p\)return;const action=contextAction\(state,p,\{buildMode,reclaimMode,yaw\}\);.*?\$\('gatherAction'\)\.textContent=action\?\.label\|\|'Action';.*?\$\('interaction'\)\.textContent=buildMode\?'':action\?`\[E\] \$\{action\.label\}`:/s);
+  assert.match(client, /function updateHUD\(\)\{const p=me\(\);if\(!p\)return;const action=contextAction\(state,p,\{buildMode,reclaimMode,yaw\}\);.*?\$\('gatherAction'\)\.textContent=action\?\.label\|\|'Action';.*?\$\('interaction'\)\.textContent=buildMode\?'':action\?`\[E\] \$\{readableActionLabel\(state,action\)\}`:/s);
   assert.match(client, /vibeCampGateDiagnostics/);
   assert.match(client, /rotation:structure\.rotation/);
 });
