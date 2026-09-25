@@ -44,7 +44,7 @@ try {
 
   await page.locator('#menuButton').click();
   const recipe = page.locator('.recipe').filter({has: page.locator('b', {hasText: 'Camp gate'})});
-  assert.equal(await recipe.locator('small').innerText(), '3 Ferrite + 1 Ribbon fiber');
+  assert.equal(await recipe.locator('small').innerText(), '3/3 Ferrite · 1/1 Ribbon fiber');
   assert.equal(await recipe.locator('p').innerText(), 'Freestanding perimeter opening. Operate toggles it. R rotates its edge.');
   await page.locator('#closeGuide').click();
   const cdp = await desktop.newCDPSession(page);
@@ -53,7 +53,7 @@ try {
   assert.ok(await page.evaluate(() => visualViewport.scale >= 1.99));
   await cdp.send('Emulation.setPageScaleFactor', {pageScaleFactor: 1});
 
-  await page.locator('#buildAction').click();
+  await page.keyboard.press('KeyB');
   await page.locator('[data-piece="campGate"]').click();
   await page.waitForFunction(() => window.vibeDiagnostics.preview?.type === 'campGate');
   for (let attempt = 0; attempt < 4; attempt++) {
@@ -71,7 +71,7 @@ try {
   assert.ok(gate && gate.owner === id && gate.open === false);
   assert.deepEqual({ferrite: player.inventory.ferrite, fiber: player.inventory.fiber}, {ferrite: 0, fiber: 0});
   assert.equal(blocked(app.game.world, gate.x, gate.z - 1.5), true);
-  await page.locator('#buildAction').click();
+  await page.keyboard.press('KeyB');
   Object.assign(player, {x: 9, z: 2});
   await page.waitForFunction(() => document.querySelector('#interaction').textContent.includes('Open Camp gate'));
   await page.keyboard.press('KeyE');
