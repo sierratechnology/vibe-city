@@ -23,7 +23,7 @@ const planetFields = new Set(['version', 'circumference', 'solarDistanceAU', 'ro
 const settingsFields = new Set(['name', 'description', 'maxPlayers', 'public', 'pvp', 'structureDamage', 'offlineRaiding', 'survivalRate', 'gatherRate', 'daySeconds', 'nightSeconds', 'sleepPercent', 'vehicleSpeed']);
 const monumentFields = new Set(['id', 'kind', 'name', 'x', 'z']);
 const vehicleFields = new Set(['id', 'type', 'x', 'z', 'yaw', 'health', 'battery', 'modules', 'occupants', 'inventory', 'owner']);
-const structureFields = new Set(['id', 'type', 'x', 'z', 'rotation', 'site', 'gx', 'gz', 'health', 'power', 'owner', 'open', 'cycleUntil', 'water', 'readyAt', 'lastDamage', 'canDismantle', 'dismantleGrantedTo', 'canAccessCargo', 'cargoGrantedTo', 'canUseWorkbench', 'workbenchGrantedTo', 'canCancelWorkbench', 'workbenchCancelJobId', 'canYieldWorkbench', 'workbenchYieldJobId', 'canModerateWorkbench', 'workbenchModerationJobId', 'workbenchModerationOwnerName', 'canUseHydroponics', 'hydroponicsGrantedTo']);
+const structureFields = new Set(['id', 'type', 'x', 'z', 'rotation', 'site', 'gx', 'gz', 'health', 'power', 'owner', 'open', 'on', 'cycleUntil', 'water', 'readyAt', 'lastDamage', 'canDismantle', 'dismantleGrantedTo', 'canAccessCargo', 'cargoGrantedTo', 'canUseWorkbench', 'workbenchGrantedTo', 'canCancelWorkbench', 'workbenchCancelJobId', 'canYieldWorkbench', 'workbenchYieldJobId', 'canModerateWorkbench', 'workbenchModerationJobId', 'workbenchModerationOwnerName', 'canUseHydroponics', 'hydroponicsGrantedTo']);
 const creatureFields = new Set(['id', 'type', 'x', 'z', 'homeX', 'homeZ', 'health', 'yaw', 'attackAt', 'respawnAt', 'fleeUntil']);
 const resourceFields = new Set(['id', 'type', 'x', 'z', 'y', 'amount', 'regeneratesAt']);
 const inventoryFields = new Set(['ice', 'water', 'copper', 'silica', 'carbon', 'scrap', 'ferrite', 'fiber', 'meat', 'ration', 'crystal']);
@@ -250,6 +250,7 @@ function validateSnapshotSchema(snapshot) {
     if (Object.hasOwn(structure, 'site')) {exactKeys(structure.site,new Set(['face','i','j']),['face','i','j'],'structure site');for(const value of Object.values(structure.site)) safeInteger(value,'structure site');}
     for (const key of ['owner']) if (Object.hasOwn(structure, key)) stringValue(structure[key], 'structure');
     if (Object.hasOwn(structure, 'open')) booleanValue(structure.open, 'structure');
+    if (Object.hasOwn(structure, 'on')) booleanValue(structure.on, 'structure');
     if (Object.hasOwn(structure, 'canDismantle')) booleanValue(structure.canDismantle, 'structure');
     if (Object.hasOwn(structure, 'dismantleGrantedTo')) stringArray(structure.dismantleGrantedTo, 'structure dismantle grants');
     if (Object.hasOwn(structure, 'canAccessCargo')) booleanValue(structure.canAccessCargo, 'structure cargo access');
