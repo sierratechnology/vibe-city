@@ -23,7 +23,7 @@ const planetFields = new Set(['version', 'circumference', 'solarDistanceAU', 'ro
 const settingsFields = new Set(['name', 'description', 'maxPlayers', 'public', 'pvp', 'structureDamage', 'offlineRaiding', 'survivalRate', 'gatherRate', 'daySeconds', 'nightSeconds', 'sleepPercent', 'vehicleSpeed']);
 const monumentFields = new Set(['id', 'kind', 'name', 'x', 'z']);
 const vehicleFields = new Set(['id', 'type', 'x', 'z', 'yaw', 'health', 'battery', 'modules', 'occupants', 'inventory', 'owner']);
-const structureFields = new Set(['id', 'type', 'x', 'z', 'rotation', 'site', 'gx', 'gz', 'health', 'power', 'owner', 'open', 'cycleUntil', 'water', 'readyAt', 'lastDamage', 'canDismantle', 'dismantleGrantedTo', 'canAccessCargo', 'cargoGrantedTo', 'canUseWorkbench', 'workbenchGrantedTo', 'canCancelWorkbench', 'workbenchCancelJobId', 'canModerateWorkbench', 'workbenchModerationJobId', 'workbenchModerationOwnerName', 'canUseHydroponics', 'hydroponicsGrantedTo']);
+const structureFields = new Set(['id', 'type', 'x', 'z', 'rotation', 'site', 'gx', 'gz', 'health', 'power', 'owner', 'open', 'cycleUntil', 'water', 'readyAt', 'lastDamage', 'canDismantle', 'dismantleGrantedTo', 'canAccessCargo', 'cargoGrantedTo', 'canUseWorkbench', 'workbenchGrantedTo', 'canCancelWorkbench', 'workbenchCancelJobId', 'canYieldWorkbench', 'workbenchYieldJobId', 'canModerateWorkbench', 'workbenchModerationJobId', 'workbenchModerationOwnerName', 'canUseHydroponics', 'hydroponicsGrantedTo']);
 const creatureFields = new Set(['id', 'type', 'x', 'z', 'homeX', 'homeZ', 'health', 'yaw', 'attackAt', 'respawnAt', 'fleeUntil']);
 const resourceFields = new Set(['id', 'type', 'x', 'z', 'y', 'amount', 'regeneratesAt']);
 const inventoryFields = new Set(['ice', 'water', 'copper', 'silica', 'carbon', 'scrap', 'ferrite', 'fiber', 'meat', 'ration', 'crystal']);
@@ -282,6 +282,13 @@ function validateSnapshotSchema(snapshot) {
       if (structure.canCancelWorkbench !== true) fail('structure workbench cancellation shape');
       stringValue(structure.workbenchCancelJobId, 'structure workbench cancellation');
       if (!/^[A-Za-z0-9_-]{1,64}$/.test(structure.workbenchCancelJobId)) fail('structure workbench cancellation shape');
+    }
+    const hasYield = Object.hasOwn(structure, 'canYieldWorkbench');
+    if (hasYield !== Object.hasOwn(structure, 'workbenchYieldJobId')) fail('structure workbench yield field set');
+    if (hasYield) {
+      if (structure.canYieldWorkbench !== true) fail('structure workbench yield shape');
+      stringValue(structure.workbenchYieldJobId, 'structure workbench yield');
+      if (!/^[A-Za-z0-9_-]{1,64}$/.test(structure.workbenchYieldJobId)) fail('structure workbench yield shape');
     }
     const moderationFields = ['canModerateWorkbench', 'workbenchModerationJobId', 'workbenchModerationOwnerName'];
     const hasModeration = moderationFields.map(key => Object.hasOwn(structure, key));
