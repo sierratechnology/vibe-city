@@ -15,11 +15,11 @@ const playerFields = new Set([
   'id', 'name', 'x', 'z', 'yaw', 'aimYaw', 'health', 'charge', 'inventory', 'cutter', 'unlocked',
   'completed', 'flashlightOwned', 'flashlightOn', 'oxygen', 'water', 'food', 'stamina', 'suit',
   'skills', 'belt', 'survey', 'markers', 'vehicle', 'sleeping', 'room', 'rifle', 'repair', 'recovered',
-  'discoveries', 'discoveredBiomes', 'firstBiomeContacts', 'airReading', 'lastDamage',
+  'jumpHeight', 'jumpVelocity', 'discoveries', 'discoveredBiomes', 'firstBiomeContacts', 'airReading', 'lastDamage',
 ]);
 const biomeDiscoveryIds = new Set(['quiet-basin', 'coral-shelf']);
 const firstBiomeContactIds = new Set(['coral-shelf']);
-const planetFields = new Set(['version', 'circumference', 'solarDistanceAU', 'rotationSeconds', 'daySeconds', 'nightSeconds']);
+const planetFields = new Set(['version', 'circumference', 'solarDistanceAU', 'rotationSeconds', 'daySeconds', 'nightSeconds', 'gravity']);
 const settingsFields = new Set(['name', 'description', 'maxPlayers', 'public', 'pvp', 'structureDamage', 'offlineRaiding', 'survivalRate', 'gatherRate', 'daySeconds', 'nightSeconds', 'sleepPercent', 'vehicleSpeed']);
 const monumentFields = new Set(['id', 'kind', 'name', 'x', 'z']);
 const vehicleFields = new Set(['id', 'type', 'x', 'z', 'yaw', 'health', 'battery', 'modules', 'occupants', 'inventory', 'owner']);
@@ -210,8 +210,9 @@ function validateInventory(value, label) {
 }
 
 function validateSnapshotSchema(snapshot) {
-  exactKeys(snapshot.planet, planetFields, [...planetFields], 'planet');
+  exactKeys(snapshot.planet, planetFields, [...planetFields].filter(key=>key!=='gravity'), 'planet');
   safeInteger(snapshot.planet.version, 'planet');
+  if(Object.hasOwn(snapshot.planet,'gravity')&&(!Number.isFinite(snapshot.planet.gravity)||snapshot.planet.gravity<1||snapshot.planet.gravity>30))fail('planet gravity');
   for (const key of ['circumference', 'solarDistanceAU', 'rotationSeconds', 'daySeconds', 'nightSeconds']) numberValue(snapshot.planet[key], 'planet');
 
   exactKeys(snapshot.settings, settingsFields, ['name', 'maxPlayers'], 'settings');
@@ -298,7 +299,7 @@ function validateSnapshotSchema(snapshot) {
     exactKeys(player, playerFields, ['id', 'x', 'z'], 'player');
     stringValue(player.id, 'player');
     for (const key of ['name']) if (Object.hasOwn(player, key)) stringValue(player[key], 'player');
-    for (const key of ['x', 'z', 'yaw', 'aimYaw', 'health', 'charge', 'oxygen', 'water', 'food', 'stamina', 'lastDamage']) if (Object.hasOwn(player, key)) numberValue(player[key], 'player');
+    for (const key of ['x', 'z', 'yaw', 'aimYaw', 'health', 'charge', 'oxygen', 'water', 'food', 'stamina', 'jumpHeight', 'jumpVelocity', 'lastDamage']) if (Object.hasOwn(player, key)) numberValue(player[key], 'player');
     for (const key of ['cutter', 'unlocked', 'completed', 'flashlightOwned', 'flashlightOn', 'suit', 'sleeping', 'rifle', 'repair']) if (Object.hasOwn(player, key)) booleanValue(player[key], 'player');
     if (Object.hasOwn(player, 'vehicle') && player.vehicle !== null) stringValue(player.vehicle, 'player vehicle');
     if (Object.hasOwn(player, 'recovered')) safeInteger(player.recovered, 'player');
