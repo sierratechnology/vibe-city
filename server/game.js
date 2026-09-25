@@ -125,6 +125,7 @@ export class Game {
  }
  if(m.type==='build'){
  if(m.piece==='deckGate'&&Object.keys(m).sort().join(',')!=='piece,rotation,type,x,z')return fail('Invalid Deck gate build request.');
+ if(m.piece==='windowedBulkhead'&&Object.keys(m).sort().join(',')!=='piece,rotation,type,x,z')return fail('Invalid Windowed bulkhead build request.');
  const piece={type:m.piece,x:m.x,z:m.z,rotation:m.rotation,...(m.site?{site:m.site,gx:m.gx,gz:m.gz}:{})};const error=placementError(this.world,freeBuild?{...p,unlocked:true}:p,piece,[...this.online].map(id=>this.world.players[id]));if(error)return fail(error);
  if(this.world.structures.length>=5000)return fail('Server structure limit reached.');if(!freeBuild&&!canAfford(p,piece.type))return fail('Not enough resources.');if(!freeBuild)pay(p,piece.type);skill(p,'construction');const structure={...piece,health:200,...(piece.type==='lifeSupport'?{power:20}:{}),...(['campGate','deckGate'].includes(piece.type)?{open:false}:{}),id:`s${this.world.nextStructure++}`,owner:id,...(piece.type==='workbench'?{workbenchQueue:[],workbenchNextSequence:0}:{})};this.world.structures.push(structure);if(piece.type==='cargo')this.world.containers[structure.id]={};this.cooldowns.set(id,now+.2);return{ok:true,message:`${RECIPES[piece.type].name} constructed.`};
  }
@@ -150,7 +151,7 @@ export class Game {
  if(s.type==='workbench'){const queue=workbenchQueueFor(this.world,s);if(queue===null)return fail('Invalid workbench queue state.');if(queue.length)return fail('Finish the workbench queue before dismantling it.');}
  if(s.type==='cargo'&&!canAccess(this.world,p,s.id))return fail('Unlock the locker first.');if(s.type==='cargo'&&itemCount(this.world.containers[s.id]))return fail('Empty the cargo locker first.');
  if(itemCount(p.inventory)+itemCount(RECIPES[s.type].cost)>60)return fail('Make room in your backpack for the returned items.');
- if(['wall','perimeter'].includes(s.type)&&this.world.structures.some(b=>b.type==='lamp'&&b.x===s.x&&b.z===s.z&&b.rotation===s.rotation))return fail('Remove the wall light first.');
+ if(['wall','windowedBulkhead','perimeter'].includes(s.type)&&this.world.structures.some(b=>b.type==='lamp'&&b.x===s.x&&b.z===s.z&&b.rotation===s.rotation))return fail('Remove the wall light first.');
  if(s.type==='floor'&&this.world.structures.some(b=>b.x===s.x&&b.z===s.z&&b.type!=='floor'))return fail('Remove the pieces above this deck first.');
  for(const [k,v] of Object.entries(RECIPES[s.type].cost))p.inventory[k]+=v;this.world.structures.splice(i,1);delete this.world.containers[s.id];this.cooldowns.set(id,now+.2);return{ok:true,message:'Dismantled. Resources returned.'};
  }
