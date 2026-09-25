@@ -38,4 +38,9 @@ html:not(.touch-enabled) #stick{display:none}
 @media(max-width:460px){.inventory-panes{grid-template-columns:1fr}.inventory-slot{height:72px}.inventory-slot svg{width:32px;height:32px}.inventory-slot .slot-name{font-size:9px}.storage-panel .panel-head{margin-bottom:12px}.storage-panel .panel-head h2{margin-bottom:10px}.inventory-pane meter{margin:4px 0 8px}.inventory-pane>p{margin:5px 0 0}}
 
 /* Compact play controls; secondary actions live in Field Guide → Controls. */
-#actionButtons{grid-template-columns:repeat(2,76px)}.secondary-actions{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px}#backpackAction{min-height:44px}#pointerControls{bottom:18px}@media(max-width:700px){#bottom{bottom:145px}#interaction,#buildHint{bottom:202px}}
+#actionButtons{grid-template-columns:repeat(2,76px)}.secondary-actions{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px}#pointerControls{bottom:18px}@media(max-width:700px){#bottom{bottom:145px}#interaction,#buildHint{bottom:202px}}
+
+/* Keep the play view clear: Action already names the current interaction. */
+#interaction{display:none!important}
+#toast{top:auto;bottom:0;left:0;right:0;transform:none;width:auto;max-width:none;padding:8px 16px;border-radius:0;text-align:left;font-size:12px;max-height:64px;overflow:auto;pointer-events:none}
+#buildHint{top:auto;bottom:76px;left:auto;right:12px;transform:none;width:260px;max-width:calc(100vw - 24px);text-align:right;padding:7px 10px;font-size:11px}
