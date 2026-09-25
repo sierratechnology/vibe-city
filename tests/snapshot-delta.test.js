@@ -122,6 +122,19 @@ test('workbench cancellation projection round-trips deltas and rejects malformed
   ]) assert.throws(() => acceptSnapshotBaseline(snapshot({structures: [structure]}), 0), /Invalid snapshot delta/);
 });
 
+test('workbench owner moderation projection round-trips deltas and rejects partial or malformed meaning', () => {
+  const before = snapshot({structures: [{id: 'bench', type: 'workbench', canModerateWorkbench: true, workbenchModerationJobId: 'workbench-7', workbenchModerationOwnerName: 'Bo'}]});
+  const after = snapshot({time: 2, structures: [{id: 'bench', type: 'workbench'}]});
+  const accepted = acceptSnapshotBaseline(before, 0);
+  assert.deepEqual(applySnapshotDelta(accepted, createSnapshotDelta(before, after, 0, 1), 0), after);
+  for (const structure of [
+    {id: 'bench', type: 'workbench', canModerateWorkbench: 'yes', workbenchModerationJobId: 'workbench-7', workbenchModerationOwnerName: 'Bo'},
+    {id: 'bench', type: 'workbench', canModerateWorkbench: true, workbenchModerationJobId: 7, workbenchModerationOwnerName: 'Bo'},
+    {id: 'bench', type: 'workbench', canModerateWorkbench: true, workbenchModerationJobId: 'workbench-7'},
+    {id: 'bench', type: 'workbench', workbenchModerationJobId: 'workbench-7', workbenchModerationOwnerName: 'Bo'},
+  ]) assert.throws(() => acceptSnapshotBaseline(snapshot({structures: [structure]}), 0), /Invalid snapshot delta/);
+});
+
 test('two-player viewer snapshot supplies finite remote aim yaw before input', () => {
   const game = new Game();
   const viewer = game.join('viewer', 'Viewer');
