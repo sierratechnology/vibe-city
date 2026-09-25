@@ -28,6 +28,7 @@ export function adminTools({character,selectPiece,notify}){
   },
   role:()=>role,
   quickBuild:()=>quick&&['owner','admin'].includes(role),
+  vehicle:vehicle=>run({action:'vehicle',vehicle}),
   build:piece=>run({action:'build',piece})
  };
 }
