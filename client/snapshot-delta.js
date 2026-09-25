@@ -14,7 +14,7 @@ const privateKeys = new Set(['account', 'role', 'email', 'emailVerified', 'verif
 const playerFields = new Set([
   'id', 'name', 'x', 'z', 'yaw', 'aimYaw', 'health', 'charge', 'inventory', 'cutter', 'fabricator', 'unlocked',
   'completed', 'flashlightOwned', 'flashlightOn', 'oxygen', 'water', 'food', 'stamina', 'suit',
-  'skills', 'belt', 'survey', 'markers', 'vehicle', 'sleeping', 'room', 'rifle', 'repair', 'recovered',
+  'journey', 'homeBed', 'skills', 'belt', 'survey', 'markers', 'vehicle', 'sleeping', 'room', 'rifle', 'repair', 'recovered',
   'jumpHeight', 'jumpVelocity', 'discoveries', 'discoveredBiomes', 'firstBiomeContacts', 'airReading', 'lastDamage',
 ]);
 const biomeDiscoveryIds = new Set(['quiet-basin', 'coral-shelf']);
@@ -300,10 +300,11 @@ function validateSnapshotSchema(snapshot) {
   for (const player of snapshot.players) {
     exactKeys(player, playerFields, ['id', 'x', 'z'], 'player');
     stringValue(player.id, 'player');
-    for (const key of ['name']) if (Object.hasOwn(player, key)) stringValue(player[key], 'player');
+    for (const key of ['name', 'homeBed']) if (Object.hasOwn(player, key)) stringValue(player[key], 'player');
     for (const key of ['x', 'z', 'yaw', 'aimYaw', 'health', 'charge', 'oxygen', 'water', 'food', 'stamina', 'jumpHeight', 'jumpVelocity', 'lastDamage']) if (Object.hasOwn(player, key)) numberValue(player[key], 'player');
     for (const key of ['cutter', 'fabricator', 'unlocked', 'completed', 'flashlightOwned', 'flashlightOn', 'suit', 'sleeping', 'rifle', 'repair']) if (Object.hasOwn(player, key)) booleanValue(player[key], 'player');
     if (Object.hasOwn(player, 'vehicle') && player.vehicle !== null) stringValue(player.vehicle, 'player vehicle');
+    if (Object.hasOwn(player, 'journey')) {safeInteger(player.journey,'player journey');if(player.journey<0||player.journey>127)fail('player journey shape');}
     if (Object.hasOwn(player, 'recovered')) safeInteger(player.recovered, 'player');
     if (Object.hasOwn(player, 'inventory')) validateInventory(player.inventory, 'player inventory');
     if (Object.hasOwn(player, 'skills')) {

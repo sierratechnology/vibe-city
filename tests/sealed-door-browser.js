@@ -121,7 +121,7 @@ try {
     await page.waitForFunction(() => window.vibeDiagnostics?.connected);
     await page.locator('#menuButton').click();
     const recipe = page.locator('.recipe').filter({has: page.locator('b', {hasText: 'Sealed door'})});
-    assert.equal(await recipe.locator('button').getAttribute('aria-label'), 'Select sealed door');
+    assert.equal(await recipe.locator('button:not(.pin-recipe)').getAttribute('aria-label'), 'Select sealed door');
     await recipe.locator('button', {hasText: 'SELECT'}).click();
     await page.waitForFunction(() => window.vibeDiagnostics.buildMode && window.vibeDiagnostics.selected === 'door');
     assert.equal(await page.locator('[data-piece="door"]').getAttribute('aria-label'), 'Build sealed door');

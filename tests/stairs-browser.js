@@ -28,7 +28,7 @@ async function join(page, name) {
 async function verifySelection(page, activate) {
   await activate('#menuButton');
   const recipe = page.locator('.recipe').filter({has: page.locator('b', {hasText: 'Deck stair'})});
-  assert.equal(await recipe.locator('button').getAttribute('aria-label'), 'Select deck stair');
+  assert.equal(await recipe.locator('button:not(.pin-recipe)').getAttribute('aria-label'), 'Select deck stair');
   const select = recipe.locator('button', {hasText: 'SELECT'});
   if (mode === 'touch') await select.tap(); else await activate(select);
   await page.waitForFunction(() => window.vibeDiagnostics.buildMode && window.vibeDiagnostics.selected === 'stairs');

@@ -122,3 +122,7 @@ function snapshotFixture() {
     containers: {}, creatures: [], resources: [], playerCount: 0, players: [],
   };
 }
+
+test('optimized outbound snapshots stay detached and reject malformed/private data before advancing',()=>{
+ const original=snapshotFixture();original.players=[{id:'p',x:0,z:3,account:'private',role:'admin'}];original.playerCount=1;const session=createSnapshotSession(original),first=nextSnapshotPacket(session,{...original,time:.1});assert.equal(first.state.players[0].account,undefined);first.state.players[0].x=999;original.players[0].x=1;const packet=nextSnapshotPacket(session,{...original,time:.2});assert.equal(packet.type,'delta');assert.equal(packet.delta.changes.players[0].x,1);packet.delta.changes.players[0].x=777;assert.equal(session.state.players[0].x,1);const before=session.revision;assert.throws(()=>nextSnapshotPacket(session,{...original,time:NaN}));assert.equal(session.revision,before);assert.throws(()=>nextSnapshotPacket(session,{...original,players:[{id:'p',x:0,z:3,email:'private@example.invalid'}]}));assert.equal(session.revision,before);
+});

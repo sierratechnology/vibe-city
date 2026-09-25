@@ -103,7 +103,7 @@ try {
 
   await page.locator('#menuButton').click();
   const recipe = page.locator('.recipe').filter({has: page.locator('b', {hasText: 'Angled canopy'})});
-  assert.equal(await recipe.locator('button').getAttribute('aria-label'), 'Select angled canopy');
+  assert.equal(await recipe.locator('button:not(.pin-recipe)').getAttribute('aria-label'), 'Select angled canopy');
   await recipe.locator('button', {hasText: 'SELECT'}).click();
   await page.waitForFunction(() => window.vibeDiagnostics.selected === 'angledCanopy' && window.vibeDiagnostics.previewSlope);
   assert.equal(await page.locator('[data-piece="angledCanopy"]').getAttribute('aria-label'), 'Build angled canopy');

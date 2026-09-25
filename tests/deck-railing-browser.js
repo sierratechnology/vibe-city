@@ -91,7 +91,7 @@ try {
 
   await activate(page.locator('#menuButton'), touch);
   const recipe = page.locator('.recipe').filter({has: page.locator('b', {hasText: 'Deck railing'})});
-  assert.equal(await recipe.locator('button').getAttribute('aria-label'), 'Select deck railing');
+  assert.equal(await recipe.locator('button:not(.pin-recipe)').getAttribute('aria-label'), 'Select deck railing');
   assert.equal(await recipe.locator('small').innerText(), '1 Ferrite');
   assert.equal(await recipe.locator('p').innerText(), 'A low barrier on a supported Deck edge. R rotates to another edge.');
   await activate(page.locator('#closeGuide'), touch);

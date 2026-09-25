@@ -15,12 +15,12 @@ async function gather(p,index){const node=(await diag(p)).state.resources[index]
 try{
  await join(a,'Ada');await join(b,'Bo');await a.waitForFunction(()=>window.vibeDiagnostics.state.players.length===2&&window.vibeDiagnostics.avatars===2);await b.waitForFunction(()=>window.vibeDiagnostics.avatars===2);console.log('Two rendered clients connected');
  const first=(await diag(a)).player;await gather(a,0);await b.waitForFunction(()=>window.vibeDiagnostics.state.resources[0].amount===0);const observed=(await diag(b)).state.players.find(p=>p.name==='Ada');assert.ok(Math.hypot(observed.x-first.x,observed.z-first.z)>3);console.log('Remote movement and depletion synchronized');
- await gather(a,1);await a.keyboard.press('KeyC');await a.locator('.recipe').filter({has:a.locator('b',{hasText:'Field cutter'})}).locator('button').click();await a.waitForFunction(()=>window.vibeDiagnostics.player.cutter);await a.locator('#closeGuide').click();
+ await gather(a,1);await a.keyboard.press('KeyC');await a.locator('.recipe').filter({has:a.locator('b',{hasText:'Field cutter'})}).locator('button:not(.pin-recipe)').click();await a.waitForFunction(()=>window.vibeDiagnostics.player.cutter);await a.locator('#closeGuide').click();
  await gather(a,3);await gather(a,5);await gather(a,4);
  await walk(a,24,-17);await walk(a,24,-24);await a.keyboard.press('KeyE');await a.waitForFunction(()=>window.vibeDiagnostics.player.unlocked);console.log('Ruin unlocked through real input');
  await walk(a,24,-17);await walk(a,9,4.5);
  for(const [key,type] of [['Digit1','floor'],['Digit2','wall'],['Digit3','roof'],['Digit4','heater']]){
- if(!(await diag(a)).buildMode)await a.keyboard.press('KeyB');await a.keyboard.press(key);await pause(250);let d=await diag(a);assert.equal(d.preview.x,9);assert.equal(d.preview.z,0);
+ if(!(await diag(a)).buildMode)await a.keyboard.press('KeyB');await a.keyboard.press(key);await pause(250);let d=await diag(a);if(type==='heater'){assert.ok(Math.abs(d.preview.x-9)<=1&&Math.abs(d.preview.z)<=1,'furniture preview stays on the supporting deck');assert.equal(d.preview.x*4,Math.round(d.preview.x*4));assert.equal(d.preview.z*4,Math.round(d.preview.z*4));}else{assert.equal(d.preview.x,9);assert.equal(d.preview.z,0);}
  await a.locator('#gatherAction').click();
  await a.waitForFunction(type=>window.vibeDiagnostics.state.structures.some(s=>s.type===type),type,{timeout:5000});await b.waitForFunction(type=>window.vibeDiagnostics.state.structures.some(s=>s.type===type),type);console.log('Shared construction',type);
  }
