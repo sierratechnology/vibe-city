@@ -50,7 +50,7 @@ export class Game {
  if(p.sleeping&&m.type!=='sleep')return{ok:false,message:'Wake up before taking an action.'};
  if(m.type==='jump'){if(p.vehicle||p.sleeping||p.jumpHeight>0||p.jumpVelocity>0)return{ok:false,message:'Jump requires standing on the ground.'};if(p.stamina<JUMP_COST)return{ok:false,message:'Not enough stamina to jump.'};p.stamina-=JUMP_COST;p.jumpVelocity=JUMP_SPEED;return{ok:true,message:'Jump'};}
  if(m.type==='campGate'){const keys=Object.keys(m).sort();if(keys.length!==2||keys.join(',')!=='id,type'||typeof m.id!=='string')return{ok:false,message:'Invalid Camp gate request.'};const gate=nearestOperableDoor(this.world,p,4,['campGate']);if(!gate||gate.id!==m.id)return{ok:false,message:'Move closer to the Camp gate.'};gate.open=!gate.open;return{ok:true,message:gate.open?'Camp gate open.':'Camp gate closed.'};}
- const special=expeditionAction(this,p,m);if(special)return special;
+ const special=expeditionAction(this,p,m,{freeBuild});if(special)return special;
  const now=this.world.time,ready=this.cooldowns.get(id)||0;
  if(now<ready&&['gather','build','dismantle','attack','eat'].includes(m.type))return{ok:false,message:'Tool cycling…'};
  const fail=message=>({ok:false,message});

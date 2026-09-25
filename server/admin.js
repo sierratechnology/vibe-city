@@ -28,7 +28,7 @@ export function adminHandler(accounts,updateWorld) {
    if(typeof body==='string')body=JSON.parse(body);
    if(!body||typeof body!=='object'||Array.isArray(body))return respond(400,{error:'Invalid request.'});
    const actor=session.account.username;
-   if(['build','spawn','refill','settings'].includes(body.action)) {
+   if(['build','vehicle','spawn','refill','settings'].includes(body.action)) {
     if(role==='moderator')return respond(403,{error:'Building, items and world settings require admin access.'});
     if(body.action==='settings'){
      validateSettings(body.settings);
@@ -40,7 +40,12 @@ export function adminHandler(accounts,updateWorld) {
     if(body.action==='spawn'&&(!Object.hasOwn(RESOURCES,body.item)||!Number.isSafeInteger(body.amount)||body.amount<1||body.amount>200||!['inventory','ground'].includes(body.destination)))return respond(400,{error:'Choose an item, 1–200 units, and a destination.'});
     await updateWorld(w=>{
      const p=w.players[identity.id];if(!p||p.account!==actor)throw Error('Join the world with this character first.');
-     if(body.action==='build') {
+     if(body.action==='vehicle') {
+      const game=new Game(w);game.online=new Set(Object.keys(w.players));
+      const result=game.action(p.id,{type:'vehicleBuild',vehicle:body.vehicle},{freeBuild:true});
+      if(!result.ok)throw Error(result.message);
+      audit(w,actor,'vehicle',{vehicle:w.vehicles.at(-1).id,type:body.vehicle,character:p.id});
+     } else if(body.action==='build') {
       if(!body.piece||typeof body.piece!=='object')throw Error('Choose a construction piece.');
       const game=new Game(w);game.online=new Set(Object.keys(w.players));
       const result=game.action(p.id,{...body.piece,type:'build'},{freeBuild:true});
@@ -60,7 +65,7 @@ export function adminHandler(accounts,updateWorld) {
       audit(w,actor,'refill',{character:p.id});
      }
     });
-    return respond(200,{message:body.action==='build'?'Admin construction placed.':body.action==='spawn'?'Items spawned.':'Survival meters refilled.'});
+    return respond(200,{message:body.action==='vehicle'?'Admin vehicle constructed.':body.action==='build'?'Admin construction placed.':body.action==='spawn'?'Items spawned.':'Survival meters refilled.'});
    }
    if(!['grant','revoke','role','ban','unban'].includes(body.action))return respond(400,{error:'Unknown admin action.'});
    const roleChange=['grant','revoke','role'].includes(body.action);
