@@ -2,8 +2,9 @@ import {depositKind,depositLabels} from './resource-deposits.js';
 import {dist,interactionTarget,RESOURCES,RECIPES,RUIN,shape} from './world.js';
 import {MONUMENTS,direction} from './planet.js';
 import {SPECIES} from './ecology.js';
+export function readableActionLabel(world,action){if(action?.message?.type!=='deckGate')return action?.label||null;const gate=world.structures.find(s=>s.id===action.message.id&&s.type==='deckGate');return gate?`Deck gate ${gate.open?'open':'closed'} · ${action.label}`:action.label;}
 export function contextAction(world,p,{buildMode=false,reclaimMode=false,yaw=0}={}){
- if(!p)return null;if(p.vehicle)return{kind:'message',message:{type:'vehicle',id:p.vehicle},label:'Exit vehicle',repeat:false};if(reclaimMode){const s=world.structures.filter(s=>(s.canDismantle||s.owner===p.id)&&dist(p,s)<=6).sort((a,b)=>dist(p,a)-dist(p,b))[0];return s?{kind:'message',message:{type:'dismantle',id:s.id},label:`Reclaim ${RECIPES[s.type]?.name||s.type}`,repeat:false}:null;}if(buildMode)return{kind:'place',label:'Place',repeat:false};
+ if(!p)return null;if(p.vehicle)return{kind:'message',message:{type:'vehicle',id:p.vehicle},label:'Exit vehicle',repeat:false};if(reclaimMode){const supportsDependent=s=>s.type==='floor'&&world.structures.some(b=>b.type!=='floor'&&b.x===s.x&&b.z===s.z),s=world.structures.filter(s=>(s.canDismantle||s.owner===p.id)&&dist(p,s)<=6).sort((a,b)=>dist(p,a)-dist(p,b)||Number(supportsDependent(a))-Number(supportsDependent(b)))[0];return s?{kind:'message',message:{type:'dismantle',id:s.id},label:`Reclaim ${RECIPES[s.type]?.name||s.type}`,repeat:false}:null;}if(buildMode)return{kind:'place',label:'Place',repeat:false};
  const choices=[];
  const add=(object,range,action)=>{const distance=dist(p,object);if(distance<=range)choices.push({...action,distance});};
  const target=interactionTarget(world,p);
