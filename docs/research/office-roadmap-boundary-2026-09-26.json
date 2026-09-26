@@ -1,0 +1,289 @@
+{
+  "schemaVersion": 1,
+  "artifactType": "non_runtime_product_boundary",
+  "currentFirstSignal": {
+    "commit": "f270a5de538a0ed4963bccf7a885bae2d1c9099c",
+    "tree": "1f95bb3d51644ab68f2c370eecc2c3d73e5c4ca3",
+    "product": "Vibe City: First Signal",
+    "productionDeployment": {
+      "id": "6682629451",
+      "commit": "f270a5de538a0ed4963bccf7a885bae2d1c9099c",
+      "evidenceOnly": true
+    }
+  },
+  "historicalOfficeRoadmap": {
+    "commit": "84a7f1cd3f8514869d6c0d5e1744a203aac267f3",
+    "tree": "39ff66c7f4b7bc94343d5f2f8ce2892d56e5b687",
+    "milestone3PacketCommit": "1b2302e082a5bc03c5903587fbdebb41dc7ef65d",
+    "milestone3Slice1Release": "8bf044d9de4465b7df86ed59df7292e8effca09c",
+    "replacementCommit": "3550f164747a75a1d19a3fcc5fee3f4fe9d69dcc"
+  },
+  "compositionPolicy": "separate_application_required",
+  "separateApplicationBoundary": {
+    "independent": [
+      "name_or_repository_or_long_lived_application_branch",
+      "runtime",
+      "deployment",
+      "data",
+      "credentials",
+      "backups",
+      "privacy_security_policy",
+      "release_history"
+    ],
+    "prohibitedReuse": [
+      "first_signal_production_route",
+      "first_signal_saves",
+      "first_signal_world_keys",
+      "first_signal_redis_namespace",
+      "first_signal_credentials",
+      "first_signal_identity_semantics"
+    ]
+  },
+  "milestones": [
+    {
+      "id": "M3",
+      "implementedInHistory": [
+        "8bf044d9de4465b7df86ed59df7292e8effca09c",
+        "c86b9a35b4a5fadbb98e0d3664a5d0a771df8aa9",
+        "f642320e143183354afbc0590b726aba3bc75f2f",
+        "47c344b4dd668048ed6b84df62601da359becdc7",
+        "a5fd4159ae529cf8400d09945ab53d8f9190fa85"
+      ],
+      "presentOnCurrentMain": false,
+      "replacedBy": "3550f164747a75a1d19a3fcc5fee3f4fe9d69dcc",
+      "producedOnly": false,
+      "blockedBy": [
+        "M3.6_human_gates"
+      ],
+      "notStarted": false,
+      "slices": [
+        {
+          "id": "M3.1",
+          "implementedInHistory": [
+            "8bf044d9de4465b7df86ed59df7292e8effca09c"
+          ],
+          "presentOnCurrentMain": false,
+          "replacedBy": "3550f164747a75a1d19a3fcc5fee3f4fe9d69dcc",
+          "producedOnly": false,
+          "blockedBy": [],
+          "notStarted": false
+        },
+        {
+          "id": "M3.2",
+          "implementedInHistory": [
+            "c86b9a35b4a5fadbb98e0d3664a5d0a771df8aa9"
+          ],
+          "presentOnCurrentMain": false,
+          "replacedBy": "3550f164747a75a1d19a3fcc5fee3f4fe9d69dcc",
+          "producedOnly": false,
+          "blockedBy": [],
+          "notStarted": false
+        },
+        {
+          "id": "M3.3",
+          "implementedInHistory": [
+            "f642320e143183354afbc0590b726aba3bc75f2f"
+          ],
+          "presentOnCurrentMain": false,
+          "replacedBy": "3550f164747a75a1d19a3fcc5fee3f4fe9d69dcc",
+          "producedOnly": false,
+          "blockedBy": [],
+          "notStarted": false
+        },
+        {
+          "id": "M3.4",
+          "implementedInHistory": [
+            "47c344b4dd668048ed6b84df62601da359becdc7"
+          ],
+          "presentOnCurrentMain": false,
+          "replacedBy": "3550f164747a75a1d19a3fcc5fee3f4fe9d69dcc",
+          "producedOnly": false,
+          "blockedBy": [],
+          "notStarted": false
+        },
+        {
+          "id": "M3.5",
+          "implementedInHistory": [
+            "a5fd4159ae529cf8400d09945ab53d8f9190fa85"
+          ],
+          "presentOnCurrentMain": false,
+          "replacedBy": "3550f164747a75a1d19a3fcc5fee3f4fe9d69dcc",
+          "producedOnly": false,
+          "blockedBy": [],
+          "notStarted": false
+        },
+        {
+          "id": "M3.6",
+          "implementedInHistory": [],
+          "presentOnCurrentMain": false,
+          "replacedBy": null,
+          "producedOnly": false,
+          "blockedBy": [
+            "human_identity_provider_credential_retention_security_privacy_deployment_decisions"
+          ],
+          "notStarted": true
+        }
+      ]
+    },
+    {
+      "id": "M4",
+      "implementedInHistory": [
+        "4ce035c4282c0575b27a8771b17adf5e70affd75",
+        "6d5f9800d666e011a006a9904346834750ff867b",
+        "7304705099ef7690cf7c6e91774a1673469072d0",
+        "fbf1b4d2eb41836905e0946f173dab91d7901a25",
+        "ae01948056280af5bbbe0f3d777be23358ccf2a7",
+        "4260465f90b2dfd66a54a648d7eedc0ce727941e",
+        "6574791e8682850ea6ddf5a6ddbe1b34b5c64c01",
+        "36339d3524451599d38725f49294971599e89835",
+        "a29572deb36f3a63dedf9734c4d856911e510334",
+        "3abf535af0515710f5905f2381247a1180c9da2f"
+      ],
+      "presentOnCurrentMain": false,
+      "replacedBy": "3550f164747a75a1d19a3fcc5fee3f4fe9d69dcc",
+      "producedOnly": false,
+      "blockedBy": [
+        "real_hosted_identity_provider_private_runtime_device_activation"
+      ],
+      "notStarted": false
+    },
+    {
+      "id": "M5",
+      "implementedInHistory": [
+        "0aa3252bb6b67676bf4613145888637506203480",
+        "bbf8a5d633e8e2ff7708dd7da5385895cbb51b50",
+        "c895a48e87da9efdfb39375b41e4bdd351c3eaba",
+        "f07c7c2f195371b74a046b76a60c1381c9ed0fac",
+        "ac45ff1d96f81245f4577910dee94c1c0e85a98c",
+        "c8d1e2bb4f6dcdaad622a32014e1fea0a1ebf6bb",
+        "2392558a37e908eca241aef68b897f61e79a9087",
+        "15a11ee66141a9eb9542cac2197e47ad3ce90237",
+        "6cfb160200e47410bbc1fd0dc132f4359f03eb2a",
+        "e0a11a96ee8e6cdfa55bca63125f382eb007f0df",
+        "aeccf2782911f4e2c0bb580c3e9881b58715f876"
+      ],
+      "presentOnCurrentMain": false,
+      "replacedBy": "3550f164747a75a1d19a3fcc5fee3f4fe9d69dcc",
+      "producedOnly": false,
+      "blockedBy": [
+        "M3.6_hosted_canary"
+      ],
+      "notStarted": false
+    },
+    {
+      "id": "M6",
+      "implementedInHistory": [
+        "03d8ef21b9c9388886d5f34ad40194c2a799098d",
+        "c8ede56f925319e1bd1e8f63244ffe19637d59b2",
+        "e0b20865ee788520991b756dbb3094926aec1db7",
+        "c4cd54e719258a65dbe25007eecaa856f9349499"
+      ],
+      "presentOnCurrentMain": false,
+      "replacedBy": "3550f164747a75a1d19a3fcc5fee3f4fe9d69dcc",
+      "producedOnly": false,
+      "blockedBy": [
+        "real_provider_source_acquisition"
+      ],
+      "notStarted": false
+    },
+    {
+      "id": "M7",
+      "implementedInHistory": [
+        "1ba5f543676dd04177d0c99fa8f4f7528ce83f55",
+        "4d2891ea24afa6a3e7ae08440824d1f60d9f31d6",
+        "d1f586c525afbbb47bfe3a5c50faa931949262c7",
+        "6f1887f9fcc86058af4adb0d8956990fc1957213",
+        "132571c1395d1fd9e406fa5c7100c4bd290b3be6"
+      ],
+      "presentOnCurrentMain": false,
+      "replacedBy": "3550f164747a75a1d19a3fcc5fee3f4fe9d69dcc",
+      "producedOnly": {
+        "integrated": false,
+        "candidateTree": "35daf686ff7cdc43e39abcd5c04e3f56e733a45e"
+      },
+      "blockedBy": [
+        "remaining_tenant_skyscraper_activation"
+      ],
+      "notStarted": false
+    },
+    {
+      "id": "M8",
+      "implementedInHistory": [],
+      "presentOnCurrentMain": false,
+      "replacedBy": null,
+      "producedOnly": false,
+      "blockedBy": [],
+      "notStarted": true
+    },
+    {
+      "id": "M9",
+      "implementedInHistory": [],
+      "presentOnCurrentMain": false,
+      "replacedBy": null,
+      "producedOnly": false,
+      "blockedBy": [
+        "pricing_consent_accounting_legal_refunds_payments_authority_policy"
+      ],
+      "notStarted": true
+    },
+    {
+      "id": "M10",
+      "implementedInHistory": [],
+      "presentOnCurrentMain": false,
+      "replacedBy": null,
+      "producedOnly": false,
+      "blockedBy": [],
+      "notStarted": true
+    },
+    {
+      "id": "M11",
+      "implementedInHistory": [],
+      "presentOnCurrentMain": false,
+      "replacedBy": null,
+      "producedOnly": false,
+      "blockedBy": [],
+      "notStarted": true
+    }
+  ],
+  "immutableGates": {
+    "privacyPrivateByDefault": true,
+    "backendTenantIsolation": true,
+    "representationalIntegrity": true,
+    "accessibility": {
+      "keyboard": true,
+      "touch": true,
+      "nonSpatial": true
+    },
+    "piClassMeaningParity": true,
+    "backupRollback": true,
+    "exactIdentityReview": true,
+    "truthfulStatus": {
+      "required": true,
+      "distinctStates": [
+        "Produced",
+        "Verified",
+        "Recorded",
+        "Reviewed",
+        "Approved",
+        "Activated",
+        "Working",
+        "Blocked",
+        "Not configured"
+      ]
+    }
+  },
+  "humanOnlyGates": {
+    "provider": true,
+    "credential": true,
+    "legal": true,
+    "securityPolicy": true,
+    "retention": true,
+    "publicData": true,
+    "spending": true
+  },
+  "runtimeContract": {
+    "importedByCurrentRuntime": false,
+    "consumedByCurrentRuntime": false,
+    "changesProductionBehavior": false
+  }
+}
