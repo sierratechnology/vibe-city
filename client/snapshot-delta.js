@@ -14,7 +14,7 @@ const privateKeys = new Set(['account', 'role', 'email', 'emailVerified', 'verif
 const playerFields = new Set([
   'id', 'name', 'x', 'z', 'yaw', 'aimYaw', 'health', 'charge', 'inventory', 'cutter', 'fabricator', 'unlocked',
   'completed', 'flashlightOwned', 'flashlightOn', 'oxygen', 'water', 'food', 'stamina', 'suit',
-  'journey', 'homeBed', 'skills', 'belt', 'survey', 'markers', 'vehicle', 'sleeping', 'room', 'rifle', 'repair', 'recovered',
+  'journey', 'homeBed', 'skills', 'belt', 'survey', 'markers', 'markerRevision', 'vehicle', 'sleeping', 'room', 'rifle', 'repair', 'recovered',
   'jumpHeight', 'jumpVelocity', 'discoveries', 'discoveredBiomes', 'firstBiomeContacts', 'airReading', 'lastDamage',
 ]);
 const biomeDiscoveryIds = new Set(['quiet-basin', 'coral-shelf']);
@@ -349,12 +349,14 @@ function validateSnapshotSchema(snapshot) {
       }
     }
     if (Object.hasOwn(player, 'markers')) {
-      if (!Array.isArray(player.markers)) fail('player markers shape');
+      if (!Array.isArray(player.markers) || player.markers.length > 30) fail('player markers shape');
       for (const marker of player.markers) {
         exactKeys(marker, markerFields, [...markerFields], 'player marker');
         numberValue(marker.x, 'player marker'); numberValue(marker.z, 'player marker'); stringValue(marker.name, 'player marker');
+        if (marker.name.length > 32) fail('player marker shape');
       }
     }
+    if (Object.hasOwn(player, 'markerRevision') && (typeof player.markerRevision !== 'string' || !/^[a-f0-9]{64}$/.test(player.markerRevision) || !Object.hasOwn(player, 'markers'))) fail('player marker revision shape');
     if (Object.hasOwn(player, 'airReading')) {
       exactKeys(player.airReading, airFields, [...airFields], 'player air reading');
       stringValue(player.airReading.name, 'player air reading');
