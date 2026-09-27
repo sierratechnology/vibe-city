@@ -13,6 +13,10 @@ const BLOCK_REASONS = Object.freeze({
   capability: true,
   transient: true,
 } as const);
+const ACTIVITY_STATES = Object.freeze({
+  reviewing: Object.freeze({ state: 'reviewing', reason: 'review_activity' }),
+  researching: Object.freeze({ state: 'researching', reason: 'research_activity' }),
+} as const);
 const TRUSTED_MAPPINGS = new WeakSet<object>();
 const REQUEST_PROVENANCE = new WeakMap<object, object>();
 const OBSERVATION_PROVENANCE = new WeakMap<object, Readonly<{
@@ -21,6 +25,7 @@ const OBSERVATION_PROVENANCE = new WeakMap<object, Readonly<{
 }>>();
 
 type UnknownRecord = Record<string, unknown>;
+type SourceActivity = keyof typeof ACTIVITY_STATES;
 
 function fail(): never {
   throw new TypeError(GENERIC_ERROR);
@@ -244,11 +249,12 @@ function requireCurrentActivity(
   const runId = requireOpaqueId(activity.runId);
   const taskId = requireOpaqueId(activity.taskId);
   const occurredAt = requireCanonicalTimestamp(activity.occurredAt);
+  const activityName = activity.activity;
   if (runId !== run.runId || taskId !== run.taskId
-    || activity.activity !== 'reviewing'
+    || typeof activityName !== 'string' || !Object.hasOwn(ACTIVITY_STATES, activityName)
     || occurredAt < (run.spawnedAt as string)
     || occurredAt > (run.heartbeatAt as string)) fail();
-  return Object.freeze({ runId, taskId, activity: 'reviewing', occurredAt });
+  return Object.freeze({ runId, taskId, activity: activityName as SourceActivity, occurredAt });
 }
 
 function requireActivityEvent(
@@ -262,10 +268,10 @@ function requireActivityEvent(
   const taskId = requireOpaqueId(event.taskId);
   const occurredAt = requireCanonicalTimestamp(event.occurredAt);
   if (runId !== activity.runId || taskId !== activity.taskId
-    || event.activity !== 'reviewing' || occurredAt !== activity.occurredAt) fail();
+    || event.activity !== activity.activity || occurredAt !== activity.occurredAt) fail();
   return Object.freeze({
     eventId: requireOpaqueId(event.eventId), runId, taskId,
-    activity: 'reviewing', occurredAt,
+    activity: activity.activity as SourceActivity, occurredAt,
   });
 }
 
@@ -430,6 +436,12 @@ export type DerivedHostedAgentPresenceState =
     runId: string;
   }>)
   | (DerivedPresenceBase & Readonly<{
+    state: 'researching';
+    reason: 'research_activity';
+    taskId: string;
+    runId: string;
+  }>)
+  | (DerivedPresenceBase & Readonly<{
     state: 'blocked';
     reason: 'run_blocked';
     taskId: string;
@@ -460,6 +472,19 @@ export function deriveHostedAgentPresenceState(
     if (observation.currentRun !== null) {
       const run = observation.currentRun as Readonly<{ runId: string; taskId: string }>;
       if (observation.currentActivity !== undefined && observation.activityEvent !== undefined) {
+        const activity = observation.currentActivity as Readonly<{ activity: SourceActivity }>;
+        if (activity.activity === 'researching') {
+          return Object.freeze({
+            identityId: mapping.identityId,
+            subjectId: mapping.subjectId,
+            profileName: mapping.profileName,
+            state: 'researching',
+            reason: 'research_activity',
+            observedAt: observation.observedAt,
+            taskId: run.taskId,
+            runId: run.runId,
+          });
+        }
         return Object.freeze({
           identityId: mapping.identityId,
           subjectId: mapping.subjectId,
