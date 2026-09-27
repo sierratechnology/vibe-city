@@ -49,7 +49,7 @@ async function readJsonBody(request) {
 }
 
 function parseRoute(rawUrl) {
-  const match = /^\/api\/private\/tenants\/([^/]+)\/records(?:\/([^/]+)(?:\/(rename|reassignment|history))?)?$/.exec(rawUrl ?? '/');
+  const match = /^\/api\/private\/tenants\/([^/]+)\/records(?:\/([^/]+)(?:\/(rename|reassignment|block|unblock|history))?)?$/.exec(rawUrl ?? '/');
   if (match === null) return null;
   return { tenantId: match[1], recordId: match[2] ?? null, action: match[3] ?? null };
 }
@@ -74,6 +74,160 @@ export function createPrivateWorkRecordsApiHandler({
       const trusted = domain.createTrustedAuthorizationContext(await resolveTrustedIdentity(request));
       const membership = trusted.memberships.find((candidate) => candidate.tenantId === route.tenantId);
       if (!trusted.authenticated || !membership || membership.status !== 'active') return deny(response);
+      if (request.method === 'POST' && route.recordId !== null && route.action === 'block') {
+        if (!trusted.permissions.includes('record.block')) return deny(response);
+        if (request.headers['content-type']?.split(';', 1)[0].trim().toLowerCase() !== 'application/json') {
+          return deny(response);
+        }
+        const body = await readJsonBody(request);
+        if (!isObject(body)
+          || Object.keys(body).sort().join(',') !== 'blockReason,expectedRevision,reasonRef,requestId'
+          || !Number.isSafeInteger(body.expectedRevision)
+          || typeof body.requestId !== 'string' || !REQUEST_ID.test(body.requestId)
+          || !isObject(body.blockReason)
+          || !['blockedAt,category,resolutionAuthoritySubjectId,summary', 'blockedAt,category,summary']
+            .includes(Object.keys(body.blockReason).sort().join(','))
+          || body.blockReason.category !== 'dependency'
+          || typeof body.blockReason.summary !== 'string'
+          || body.blockReason.summary.trim() !== body.blockReason.summary
+          || body.blockReason.summary.length < 1 || body.blockReason.summary.length > 240
+          || (body.blockReason.resolutionAuthoritySubjectId !== undefined
+            && (typeof body.blockReason.resolutionAuthoritySubjectId !== 'string'
+              || !REQUEST_ID.test(body.blockReason.resolutionAuthoritySubjectId)))
+          || typeof body.blockReason.blockedAt !== 'string'
+          || !Number.isFinite(new Date(body.blockReason.blockedAt).getTime())
+          || new Date(body.blockReason.blockedAt).toISOString() !== body.blockReason.blockedAt
+          || typeof body.reasonRef !== 'string' || body.reasonRef.trim() !== body.reasonRef
+          || body.reasonRef.length < 1 || body.reasonRef.length > 240) return deny(response);
+        const current = store.read(route.tenantId, route.recordId);
+        if (current === null) return deny(response);
+        domain.authorizeRecordAction(trusted, {
+          action: 'record.block', requestedTenantId: route.tenantId,
+        }, current);
+        const requestIdentity = {
+          tenantId: route.tenantId, principalId: trusted.actorSubjectId,
+          authorizationId: trusted.authorizationId, policyRevision: trusted.policyRevision,
+          operation: 'block', requestId: body.requestId,
+          requestSemantics: canonicalJson({
+            recordId: route.recordId, expectedRevision: body.expectedRevision,
+            blockReason: body.blockReason, reasonRef: body.reasonRef,
+          }),
+        };
+        const replay = store.replayMutation(requestIdentity);
+        if (replay !== null) {
+          return replay.ok
+            ? sendJson(response, 200, { record: replay.record })
+            : sendJson(response, 409, { error: 'conflict' });
+        }
+        if (!['open', 'in_progress'].includes(current.lifecycle)
+          && body.expectedRevision === current.revision) {
+          return sendJson(response, 409, { error: 'conflict' });
+        }
+        if (body.blockReason.resolutionAuthoritySubjectId !== undefined) {
+          const referencesAllowed = await resolveTrustedReferences({
+            tenantId: route.tenantId, principalId: trusted.actorSubjectId,
+            authorizationId: trusted.authorizationId, policyRevision: trusted.policyRevision,
+            resolutionAuthoritySubjectId: body.blockReason.resolutionAuthoritySubjectId,
+          });
+          if (referencesAllowed !== true) return deny(response);
+        }
+        const timestamp = now();
+        if (!Number.isFinite(timestamp)) return deny(response);
+        const recordedAt = new Date(timestamp).toISOString();
+        if (body.blockReason.blockedAt < current.updatedAt
+          || body.blockReason.blockedAt > recordedAt
+          || recordedAt < current.source.recordedAt) return deny(response);
+        const record = domain.validateWorkRecord({
+          ...current,
+          lifecycle: 'blocked', blockReason: body.blockReason,
+          stateChangedAt: body.blockReason.blockedAt,
+          revision: current.revision + 1, updatedAt: recordedAt,
+        });
+        const audit = {
+          auditId: generateId('audit'), tenantId: route.tenantId, recordId: route.recordId,
+          eventKind: 'block', actorSubjectId: trusted.actorSubjectId,
+          authorizationId: trusted.authorizationId, policyRevision: trusted.policyRevision,
+          sourceId: current.source.sourceId, reasonRef: body.reasonRef,
+          priorRevision: current.revision, newRevision: record.revision,
+          occurredAt: body.blockReason.blockedAt, recordedAt,
+          changedFields: {
+            lifecycle: { prior: current.lifecycle, next: 'blocked' },
+            blockReason: { prior: current.blockReason ?? null, next: body.blockReason },
+          },
+        };
+        const result = store.mutate(record, audit, body.expectedRevision, requestIdentity);
+        if (!result.ok) return sendJson(response, 409, { error: 'conflict' });
+        return sendJson(response, 200, { record: result.replayed ? result.record : record });
+      }
+      if (request.method === 'POST' && route.recordId !== null && route.action === 'unblock') {
+        if (!trusted.permissions.includes('record.unblock')) return deny(response);
+        if (request.headers['content-type']?.split(';', 1)[0].trim().toLowerCase() !== 'application/json') {
+          return deny(response);
+        }
+        const body = await readJsonBody(request);
+        if (!isObject(body)
+          || Object.keys(body).sort().join(',') !== 'expectedRevision,occurredAt,reasonRef,requestId'
+          || !Number.isSafeInteger(body.expectedRevision)
+          || typeof body.requestId !== 'string' || !REQUEST_ID.test(body.requestId)
+          || typeof body.reasonRef !== 'string' || body.reasonRef.trim() !== body.reasonRef
+          || body.reasonRef.length < 1 || body.reasonRef.length > 240
+          || typeof body.occurredAt !== 'string') return deny(response);
+        const current = store.read(route.tenantId, route.recordId);
+        if (current === null) return deny(response);
+        domain.authorizeRecordAction(trusted, {
+          action: 'record.unblock', requestedTenantId: route.tenantId,
+        }, current);
+        const requestIdentity = {
+          tenantId: route.tenantId, principalId: trusted.actorSubjectId,
+          authorizationId: trusted.authorizationId, policyRevision: trusted.policyRevision,
+          operation: 'unblock', requestId: body.requestId,
+          requestSemantics: canonicalJson({
+            recordId: route.recordId, expectedRevision: body.expectedRevision,
+            reasonRef: body.reasonRef, occurredAt: body.occurredAt,
+          }),
+        };
+        const replay = store.replayMutation(requestIdentity);
+        if (replay !== null) {
+          return replay.ok
+            ? sendJson(response, 200, { record: replay.record })
+            : sendJson(response, 409, { error: 'conflict' });
+        }
+        if (current.lifecycle !== 'blocked' && body.expectedRevision === current.revision) {
+          return sendJson(response, 409, { error: 'conflict' });
+        }
+        const blockEvent = store.readLatestBlock(route.tenantId, route.recordId);
+        const unblockedLifecycle = blockEvent?.changedFields?.lifecycle?.prior;
+        if (!['open', 'in_progress'].includes(unblockedLifecycle)) return deny(response);
+        const timestamp = now();
+        if (!Number.isFinite(timestamp)) return deny(response);
+        const recordedAt = new Date(timestamp).toISOString();
+        const occurred = new Date(body.occurredAt);
+        if (!Number.isFinite(occurred.getTime()) || occurred.toISOString() !== body.occurredAt
+          || body.occurredAt < current.stateChangedAt || body.occurredAt > recordedAt
+          || recordedAt < current.updatedAt
+          || recordedAt < current.source.recordedAt) return deny(response);
+        const priorReason = structuredClone(current.blockReason);
+        const record = domain.validateWorkRecord({
+          ...current,
+          lifecycle: unblockedLifecycle, blockReason: null, stateChangedAt: body.occurredAt,
+          revision: current.revision + 1, updatedAt: recordedAt,
+        });
+        const audit = {
+          auditId: generateId('audit'), tenantId: route.tenantId, recordId: route.recordId,
+          eventKind: 'unblock', actorSubjectId: trusted.actorSubjectId,
+          authorizationId: trusted.authorizationId, policyRevision: trusted.policyRevision,
+          sourceId: current.source.sourceId, reasonRef: body.reasonRef,
+          priorRevision: current.revision, newRevision: record.revision,
+          occurredAt: body.occurredAt, recordedAt,
+          changedFields: {
+            lifecycle: { prior: 'blocked', next: unblockedLifecycle },
+            blockReason: { prior: priorReason, next: null },
+          },
+        };
+        const result = store.mutate(record, audit, body.expectedRevision, requestIdentity);
+        if (!result.ok) return sendJson(response, 409, { error: 'conflict' });
+        return sendJson(response, 200, { record: result.replayed ? result.record : record });
+      }
       if (request.method === 'POST' && route.recordId !== null && route.action === 'reassignment') {
         if (!trusted.permissions.includes('record.reassign')) return deny(response);
         if (request.headers['content-type']?.split(';', 1)[0].trim().toLowerCase() !== 'application/json') {

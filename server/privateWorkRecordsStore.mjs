@@ -89,6 +89,12 @@ export class PrivateWorkRecordsStore {
         SELECT event_json FROM private_material_audit_events
         WHERE tenant_id = ? AND record_id = ? ORDER BY rowid ASC LIMIT ?
       `);
+      this.readLatestBlockStatement = this.database.prepare(`
+        SELECT event_json FROM private_material_audit_events
+        WHERE tenant_id = ? AND record_id = ?
+          AND json_extract(event_json, '$.eventKind') = 'block'
+        ORDER BY rowid DESC LIMIT 1
+      `);
       this.updateRecordStatement = this.database.prepare(`
         UPDATE private_work_records
         SET revision = ?, record_json = ?, recorded_at = ?
@@ -227,6 +233,21 @@ export class PrivateWorkRecordsStore {
     return row ? JSON.parse(row.record_json) : null;
   }
 
+  replayMutation(requestIdentity) {
+    const existing = this.readMutationRequestStatement.get(
+      requestIdentity.tenantId,
+      requestIdentity.principalId,
+      requestIdentity.authorizationId,
+      requestIdentity.policyRevision,
+      requestIdentity.operation,
+      requestIdentity.requestId,
+    );
+    if (!existing) return null;
+    return existing.request_semantics === requestIdentity.requestSemantics
+      ? { ok: true, replayed: true, record: JSON.parse(existing.record_json) }
+      : { ok: false, code: 'idempotency_conflict' };
+  }
+
   list(tenantId, limit) {
     return this.listStatement.all(tenantId, limit).map((row) => JSON.parse(row.record_json));
   }
@@ -234,6 +255,11 @@ export class PrivateWorkRecordsStore {
   readHistory(tenantId, recordId, limit) {
     return this.readHistoryStatement.all(tenantId, recordId, limit)
       .map((row) => JSON.parse(row.event_json));
+  }
+
+  readLatestBlock(tenantId, recordId) {
+    const row = this.readLatestBlockStatement.get(tenantId, recordId);
+    return row ? JSON.parse(row.event_json) : null;
   }
 
   countRecords(tenantId) {

@@ -114,7 +114,8 @@ export function validateWorkRecord(input: unknown): UnknownRecord {
   const record = requireClosedObject(input, 'work record', [
     'tenantId', 'recordId', 'title', 'owner', 'assignees', 'lifecycle', 'freshness',
     'sensitivity', 'revision', 'createdAt', 'updatedAt', 'source', 'evidence',
-    'supersedes', 'correctionOf', 'archivedAt', 'deletedAt',
+    'supersedes', 'correctionOf', 'archivedAt', 'deletedAt', 'blockReason',
+    'stateChangedAt',
   ]);
   const tenantId = requireId(record.tenantId, 'tenantId');
   requireId(record.recordId, 'recordId');
@@ -127,7 +128,8 @@ export function validateWorkRecord(input: unknown): UnknownRecord {
   if (!Number.isSafeInteger(record.revision) || Number(record.revision) < 1) {
     throw new TypeError('record revision must be a positive safe integer');
   }
-  if (!['open', 'in_progress', 'completed', 'archived', 'deleted'].includes(record.lifecycle as string)) {
+  if (!['open', 'in_progress', 'blocked', 'completed', 'archived', 'deleted']
+    .includes(record.lifecycle as string)) {
     throw new TypeError('record lifecycle is invalid');
   }
   if (!['unknown', 'fresh', 'stale'].includes(record.freshness as string)) {
@@ -158,6 +160,35 @@ export function validateWorkRecord(input: unknown): UnknownRecord {
   if ((archivedAt !== null && archivedAt > updatedAt)
     || (deletedAt !== null && (archivedAt === null || deletedAt < archivedAt || deletedAt > updatedAt))) {
     throw new TypeError('lifecycle chronology is invalid');
+  }
+
+  if (record.lifecycle === 'blocked'
+    && (!Object.hasOwn(record, 'blockReason') || !Object.hasOwn(record, 'stateChangedAt'))) {
+    throw new TypeError('blocked lifecycle requires own blockReason and stateChangedAt fields');
+  }
+  const stateChangedAt = record.stateChangedAt === undefined
+    ? undefined
+    : requireCanonicalTimestamp(record.stateChangedAt, 'stateChangedAt');
+  if (stateChangedAt !== undefined && (stateChangedAt < createdAt || stateChangedAt > updatedAt)) {
+    throw new TypeError('stateChangedAt chronology is invalid');
+  }
+  if (record.lifecycle === 'blocked') {
+    const reason = requireClosedObject(record.blockReason, 'blockReason', [
+      'category', 'summary', 'resolutionAuthoritySubjectId', 'blockedAt',
+    ]);
+    if (reason.category !== 'dependency') {
+      throw new TypeError('blockReason category is invalid');
+    }
+    requireBoundedString(reason.summary, 'blockReason summary', 240);
+    if (reason.resolutionAuthoritySubjectId !== undefined) {
+      requireId(reason.resolutionAuthoritySubjectId, 'resolutionAuthoritySubjectId');
+    }
+    const blockedAt = requireCanonicalTimestamp(reason.blockedAt, 'blockedAt');
+    if (stateChangedAt === undefined || blockedAt !== stateChangedAt || blockedAt > updatedAt) {
+      throw new TypeError('blocked state chronology is invalid');
+    }
+  } else if (record.blockReason !== undefined && record.blockReason !== null) {
+    throw new TypeError('blockReason is valid only for blocked lifecycle');
   }
 
   const owner = requireClosedObject(record.owner, 'owner', ['tenantId', 'subjectId']);
@@ -239,7 +270,8 @@ export function createWorkRecord(input: unknown): UnknownRecord {
   const record = requireClosedObject(input, 'work record', [
     'tenantId', 'recordId', 'title', 'owner', 'assignees', 'lifecycle', 'freshness',
     'sensitivity', 'revision', 'createdAt', 'updatedAt', 'source', 'evidence',
-    'supersedes', 'correctionOf', 'archivedAt', 'deletedAt',
+    'supersedes', 'correctionOf', 'archivedAt', 'deletedAt', 'blockReason',
+    'stateChangedAt',
   ]);
   return validateWorkRecord({
     ...record,
@@ -321,6 +353,7 @@ export function createTrustedAuthorizationContext(input: unknown): TrustedAuthor
   });
   const allowedPermissions = [
     'record.create', 'record.read', 'record.rename', 'record.reassign', 'record.history.read',
+    'record.block', 'record.unblock',
     'record.transition', 'record.sensitivity.change', 'record.archive', 'record.delete',
     'record.restore', 'record.correct', 'record.supersede',
   ];
@@ -525,6 +558,7 @@ export function transitionWorkRecord(
     record: {
       ...record,
       lifecycle: toLifecycle,
+      stateChangedAt: recordedAt,
       revision: nextRevision,
       updatedAt: recordedAt,
     },
@@ -614,6 +648,9 @@ export function archiveWorkRecord(
   if (!Number.isSafeInteger(command.expectedRevision) || command.expectedRevision !== record.revision) {
     throw new TypeError('expected revision must match current revision');
   }
+  if (record.lifecycle === 'blocked') {
+    throw new TypeError('blocked record must be unblocked before archival');
+  }
   if (record.lifecycle === 'archived' || record.lifecycle === 'deleted') {
     throw new TypeError('record lifecycle cannot be archived');
   }
@@ -654,6 +691,7 @@ export function archiveWorkRecord(
       ...record,
       lifecycle: 'archived',
       archivedAt: recordedAt,
+      stateChangedAt: recordedAt,
       revision: nextRevision,
       updatedAt: recordedAt,
     },
@@ -718,6 +756,7 @@ export function tombstoneWorkRecord(
       ...record,
       lifecycle: 'deleted',
       deletedAt: recordedAt,
+      stateChangedAt: recordedAt,
       revision: nextRevision,
       updatedAt: recordedAt,
     },
@@ -782,6 +821,7 @@ export function restoreWorkRecord(
       ...record,
       lifecycle: 'archived',
       deletedAt: null,
+      stateChangedAt: recordedAt,
       revision: nextRevision,
       updatedAt: recordedAt,
     },
