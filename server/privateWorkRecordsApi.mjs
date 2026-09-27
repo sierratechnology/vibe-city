@@ -43,6 +43,16 @@ function canonicalJson(value) {
   return JSON.stringify(value);
 }
 
+function projectRecordEvidence(_store, record) {
+  return {
+    ...record,
+    evidence: record.evidence.map((evidence) => {
+      const { locator: _locator, ...citation } = evidence;
+      return citation;
+    }),
+  };
+}
+
 async function readJsonBody(request) {
   let size = 0;
   const chunks = [];
@@ -59,9 +69,14 @@ async function readJsonBody(request) {
 }
 
 function parseRoute(rawUrl) {
-  const match = /^\/api\/private\/tenants\/([^/]+)\/records(?:\/([^/]+)(?:\/(rename|reassignment|block|unblock|archive|tombstone|restore|correction|history))?)?$/.exec(rawUrl ?? '/');
+  const match = /^\/api\/private\/tenants\/([^/]+)\/records(?:\/([^/]+)(?:\/(rename|reassignment|block|unblock|archive|tombstone|restore|correction|history|trace|evidence)(?:\/([^/]+))?)?)?$/.exec(rawUrl ?? '/');
   if (match === null) return null;
-  return { tenantId: match[1], recordId: match[2] ?? null, action: match[3] ?? null };
+  const route = {
+    tenantId: match[1], recordId: match[2] ?? null,
+    action: match[3] ?? null, childId: match[4] ?? null,
+  };
+  if ((route.action === 'evidence') !== (route.childId !== null)) return null;
+  return route;
 }
 
 export function createPrivateWorkRecordsApiHandler({
@@ -69,6 +84,7 @@ export function createPrivateWorkRecordsApiHandler({
   domain,
   resolveTrustedIdentity,
   resolveTrustedReferences,
+  resolveTracePolicy = async () => false,
   now = Date.now,
   generateId,
 }) {
@@ -84,6 +100,297 @@ export function createPrivateWorkRecordsApiHandler({
       const trusted = domain.createTrustedAuthorizationContext(await resolveTrustedIdentity(request));
       const membership = trusted.memberships.find((candidate) => candidate.tenantId === route.tenantId);
       if (!trusted.authenticated || !membership || membership.status !== 'active') return deny(response);
+      if (request.method === 'GET' && route.recordId !== null && route.action === 'evidence') {
+        if (!trusted.permissions.includes('record.evidence.resolve')) return deny(response);
+        const record = store.read(route.tenantId, route.recordId);
+        const trace = store.readTrace(route.tenantId, route.recordId);
+        const evidence = trace?.evidence.find((candidate) => candidate.evidenceId === route.childId);
+        if (record === null || trace === null || evidence === undefined) return deny(response);
+        domain.authorizeRecordAction(trusted, {
+          action: 'record.evidence.resolve', requestedTenantId: route.tenantId,
+        }, record);
+        const allowed = await resolveTracePolicy({
+          tenantId: route.tenantId, principalId: trusted.actorSubjectId,
+          policyRevision: trusted.policyRevision, action: 'read', link: 'evidence', value: evidence,
+          recordSensitivity: record.sensitivity, authorizationScope: record.recordId,
+          evidenceSensitivity: evidence.sensitivity,
+          locatorClass: evidence.locator.startsWith('https:')
+            ? 'https_repository_artifact' : 'internal_object',
+          availability: evidence.availability, relation: evidence.relation,
+        }) === true;
+        if (!allowed) return deny(response);
+        const inspectable = ['available', 'stale'].includes(evidence.availability);
+        if (inspectable) {
+          return sendJson(response, 200, {
+            state: evidence.availability, inspectable: true,
+            decision: { allowed: true, code: 'allowed' }, evidence,
+          });
+        }
+        const { locator: _locator, ...citation } = evidence;
+        return sendJson(response, 200, {
+          state: evidence.availability, inspectable: false,
+          decision: { allowed: true, code: 'allowed' }, evidence: citation,
+        });
+      }
+      if (request.method === 'PATCH' && route.recordId !== null && route.action === 'evidence') {
+        if (!trusted.permissions.includes('record.evidence.availability.update')) return deny(response);
+        if (request.headers['content-type']?.split(';', 1)[0].trim().toLowerCase() !== 'application/json') {
+          return deny(response);
+        }
+        const body = await readJsonBody(request);
+        if (!hasExactKeys(body, ['availability', 'expectedRevision', 'requestId'])
+          || !['unavailable', 'withdrawn'].includes(body.availability)
+          || !Number.isSafeInteger(body.expectedRevision)
+          || typeof body.requestId !== 'string' || !REQUEST_ID.test(body.requestId)) return deny(response);
+        const current = store.read(route.tenantId, route.recordId);
+        const trace = store.readTrace(route.tenantId, route.recordId);
+        if (current === null || trace === null) return deny(response);
+        domain.authorizeRecordAction(trusted, {
+          action: 'record.evidence.availability.update', requestedTenantId: route.tenantId,
+        }, current);
+        const requestIdentity = {
+          tenantId: route.tenantId, principalId: trusted.actorSubjectId,
+          authorizationId: trusted.authorizationId, policyRevision: trusted.policyRevision,
+          operation: 'evidence_availability', requestId: body.requestId,
+          requestSemantics: canonicalJson({
+            recordId: route.recordId, evidenceId: route.childId,
+            availability: body.availability, expectedRevision: body.expectedRevision,
+          }),
+        };
+        const replay = store.replayMutation(requestIdentity);
+        if (replay !== null && !replay.ok) {
+          return sendJson(response, 409, { error: 'conflict' });
+        }
+        const evidenceIndex = trace.evidence.findIndex(
+          (candidate) => candidate.evidenceId === route.childId,
+        );
+        if (evidenceIndex < 0) return deny(response);
+        const evidence = trace.evidence[evidenceIndex];
+        if (await resolveTracePolicy({
+          tenantId: route.tenantId, principalId: trusted.actorSubjectId,
+          policyRevision: trusted.policyRevision, action: 'write', link: 'evidence', value: evidence,
+          recordSensitivity: current.sensitivity, authorizationScope: current.recordId,
+          evidenceSensitivity: evidence.sensitivity,
+          locatorClass: evidence.locator.startsWith('https:')
+            ? 'https_repository_artifact' : 'internal_object',
+          availability: evidence.availability, relation: evidence.relation,
+        }) !== true) return deny(response);
+        if (replay?.ok) {
+          return sendJson(response, 200, {
+            record: projectRecordEvidence(store, replay.record),
+          });
+        }
+        if (body.expectedRevision !== current.revision) {
+          return sendJson(response, 409, { error: 'conflict' });
+        }
+        if (evidence.availability === body.availability
+          || ['withdrawn', 'deleted_tombstone'].includes(evidence.availability)) {
+          return deny(response);
+        }
+        const timestamp = now();
+        if (!Number.isFinite(timestamp)) return deny(response);
+        const recordedAt = new Date(timestamp).toISOString();
+        if (recordedAt < current.updatedAt) return deny(response);
+        const nextEvidence = { ...evidence, availability: body.availability };
+        const nextTrace = {
+          ...trace,
+          evidence: trace.evidence.map((candidate, index) =>
+            index === evidenceIndex ? nextEvidence : candidate),
+        };
+        const nextRecord = domain.validateWorkRecord({
+          ...current, revision: current.revision + 1, updatedAt: recordedAt,
+        });
+        const audit = {
+          auditId: generateId('audit'), tenantId: route.tenantId, recordId: route.recordId,
+          eventKind: 'evidence_detach', actorSubjectId: trusted.actorSubjectId,
+          authorizationId: trusted.authorizationId, policyRevision: trusted.policyRevision,
+          sourceId: current.source.sourceId, reasonRef: null,
+          priorRevision: current.revision, newRevision: nextRecord.revision,
+          occurredAt: recordedAt, recordedAt,
+          changedFields: {
+            evidenceAvailability: {
+              evidenceId: evidence.evidenceId,
+              prior: evidence.availability,
+              next: body.availability,
+            },
+          },
+        };
+        if (!REQUEST_ID.test(audit.auditId)) return deny(response);
+        const result = store.mutateEvidence(
+          nextRecord, audit, nextTrace, body.expectedRevision, requestIdentity,
+        );
+        if (!result.ok) return sendJson(response, 409, { error: 'conflict' });
+        return sendJson(response, 200, {
+          record: projectRecordEvidence(store, result.record),
+        });
+      }
+      if (request.method === 'POST' && route.recordId !== null && route.action === 'trace') {
+        if (!trusted.permissions.includes('record.trace.write')) return deny(response);
+        if (request.headers['content-type']?.split(';', 1)[0].trim().toLowerCase() !== 'application/json') {
+          return deny(response);
+        }
+        const current = store.read(route.tenantId, route.recordId);
+        if (current === null) return deny(response);
+        domain.authorizeRecordAction(trusted, {
+          action: 'record.trace.write', requestedTenantId: route.tenantId,
+        }, current);
+        const body = await readJsonBody(request);
+        if (!hasExactKeys(body, ['expectedRevision', 'requestId', 'trace'])
+          || !Number.isSafeInteger(body.expectedRevision)
+          || typeof body.requestId !== 'string' || !REQUEST_ID.test(body.requestId)) return deny(response);
+        const requestIdentity = {
+          tenantId: route.tenantId, principalId: trusted.actorSubjectId,
+          authorizationId: trusted.authorizationId, policyRevision: trusted.policyRevision,
+          operation: 'trace', requestId: body.requestId,
+          requestSemantics: canonicalJson({
+            recordId: route.recordId, expectedRevision: body.expectedRevision, trace: body.trace,
+          }),
+        };
+        const replay = store.replayMutation(requestIdentity);
+        if (replay !== null && !replay.ok) {
+          return sendJson(response, 409, { error: 'conflict' });
+        }
+        if (!replay?.ok && ['completed', 'archived', 'deleted'].includes(current.lifecycle)) {
+          return deny(response);
+        }
+        if (!replay?.ok && body.expectedRevision !== current.revision) {
+          return sendJson(response, 409, { error: 'conflict' });
+        }
+        const validation = domain.validateTraceBundle(body.trace);
+        if (!validation.ok) return deny(response);
+        const trace = validation.value;
+        if (trace.tenantId !== route.tenantId || trace.recordId !== route.recordId
+          || trace.assignment.acceptedRevision !== body.expectedRevision
+          || trace.assignment.owner.subjectId !== current.owner.subjectId
+          || trace.direction.directingSubject.subjectId !== current.owner.subjectId
+          || trace.authorization.authorizer.subjectId !== trusted.actorSubjectId
+          || !trace.assignment.assignees.some(({ subjectId }) =>
+            subjectId === trace.authorization.beneficiary.subjectId)
+          || trace.activities.some(({ actor }) =>
+            !trace.assignment.assignees.some(({ subjectId }) => subjectId === actor.subjectId))
+          || trace.outcome.acceptanceActor.subjectId !== trusted.actorSubjectId
+          || trace.authorization.authorizationId !== trusted.authorizationId
+          || String(trace.authorization.policyRevision) !== trusted.policyRevision) return deny(response);
+        const links = [
+          ['direction', trace.direction],
+          ['authorization', trace.authorization],
+          ['assignment', trace.assignment],
+          ...trace.activities.map((activity) => ['activity', activity]),
+          ...trace.evidence.map((evidence) => ['evidence', evidence]),
+          ['outcome', trace.outcome],
+        ];
+        for (const [link, value] of links) {
+          const evidenceScope = link === 'evidence' ? {
+            evidenceSensitivity: value.sensitivity,
+            locatorClass: value.locator.startsWith('https:')
+              ? 'https_repository_artifact' : 'internal_object',
+            availability: value.availability,
+            relation: value.relation,
+          } : {};
+          if (await resolveTracePolicy({
+            tenantId: route.tenantId, principalId: trusted.actorSubjectId,
+            policyRevision: trusted.policyRevision, action: 'write', link, value,
+            recordSensitivity: current.sensitivity, authorizationScope: current.recordId,
+            ...evidenceScope,
+          }) !== true) return deny(response);
+        }
+        if (replay?.ok) {
+          return sendJson(response, 200, {
+            record: projectRecordEvidence(store, replay.record),
+          });
+        }
+        const timestamp = now();
+        if (!Number.isFinite(timestamp)) return deny(response);
+        const recordedAt = new Date(timestamp).toISOString();
+        if (trace.outcome.acceptedAt < current.updatedAt || trace.outcome.acceptedAt > recordedAt) {
+          return deny(response);
+        }
+        const record = domain.validateWorkRecord({
+          ...current,
+          assignees: trace.assignment.assignees,
+          evidence: trace.evidence.map((evidence) => ({
+            tenantId: evidence.tenantId, evidenceId: evidence.evidenceId,
+            locator: evidence.locator, recordedAt: evidence.recordedAt,
+          })),
+          lifecycle: 'completed', stateChangedAt: trace.outcome.acceptedAt,
+          revision: current.revision + 1, updatedAt: recordedAt,
+        });
+        const audit = {
+          auditId: generateId('audit'), tenantId: route.tenantId, recordId: route.recordId,
+          eventKind: 'outcome_acceptance', actorSubjectId: trusted.actorSubjectId,
+          authorizationId: trusted.authorizationId, policyRevision: trusted.policyRevision,
+          sourceId: current.source.sourceId, reasonRef: trace.direction.directionId,
+          priorRevision: current.revision, newRevision: record.revision,
+          occurredAt: trace.outcome.acceptedAt, recordedAt,
+          changedFields: {
+            assignees: { prior: current.assignees, next: record.assignees },
+            evidence: {
+              prior: current.evidence.map(({ evidenceId }) => evidenceId),
+              next: record.evidence.map(({ evidenceId }) => evidenceId),
+            },
+            lifecycle: { prior: current.lifecycle, next: 'completed' },
+          },
+        };
+        if (!REQUEST_ID.test(audit.auditId)) return deny(response);
+        const result = store.completeTrace(
+          record, audit, trace, body.expectedRevision, requestIdentity,
+        );
+        if (!result.ok) return sendJson(response, 409, { error: 'conflict' });
+        return sendJson(response, result.replayed ? 200 : 201, {
+          record: projectRecordEvidence(store, result.record),
+        });
+      }
+      if (request.method === 'GET' && route.recordId !== null && route.action === 'trace') {
+        if (!trusted.permissions.includes('record.trace.read')) return deny(response);
+        const record = store.read(route.tenantId, route.recordId);
+        const trace = store.readTrace(route.tenantId, route.recordId);
+        if (record === null || trace === null) return deny(response);
+        domain.authorizeRecordAction(trusted, {
+          action: 'record.trace.read', requestedTenantId: route.tenantId,
+        }, record);
+        const edges = [];
+        for (const [link, value] of [
+          ['direction', trace.direction],
+          ['authorization', trace.authorization],
+          ['assignment', trace.assignment],
+          ...trace.activities.map((activity) => ['activity', activity]),
+          ...trace.evidence.map((evidence) => ['evidence', evidence]),
+          ['outcome', trace.outcome],
+        ]) {
+          const evidenceScope = link === 'evidence' ? {
+            evidenceSensitivity: value.sensitivity,
+            locatorClass: value.locator.startsWith('https:')
+              ? 'https_repository_artifact' : 'internal_object',
+            availability: value.availability,
+            relation: value.relation,
+          } : {};
+          const allowed = await resolveTracePolicy({
+            tenantId: route.tenantId, principalId: trusted.actorSubjectId,
+            policyRevision: trusted.policyRevision, action: 'read', link, value,
+            recordSensitivity: record.sensitivity, authorizationScope: record.recordId,
+            ...evidenceScope,
+          }) === true;
+          if (!allowed) {
+            edges.push({
+              link, state: 'not_authorized',
+              decision: { allowed: false, code: 'not_authorized' },
+            });
+            continue;
+          }
+          const state = link === 'evidence' ? value.availability : 'available';
+          let projected = value;
+          if (link === 'evidence' && !['available', 'stale'].includes(value.availability)) {
+            const { locator: _locator, ...citation } = value;
+            projected = citation;
+          }
+          edges.push({
+            link, state, decision: { allowed: true, code: 'allowed' }, value: projected,
+          });
+        }
+        return sendJson(response, 200, {
+          trace: { tenantId: route.tenantId, recordId: route.recordId, edges },
+        });
+      }
       if (request.method === 'POST' && route.recordId !== null && route.action === 'correction') {
         if (!trusted.permissions.includes('record.correct')) return deny(response);
         if (request.headers['content-type']?.split(';', 1)[0].trim().toLowerCase() !== 'application/json') {
@@ -725,7 +1032,9 @@ export function createPrivateWorkRecordsApiHandler({
           action: 'record.read',
           requestedTenantId: route.tenantId,
         }, record);
-        return sendJson(response, 200, { record });
+        return sendJson(response, 200, {
+          record: projectRecordEvidence(store, record),
+        });
       }
       if (request.method === 'GET' && route.recordId === null) {
         if (!trusted.permissions.includes('record.read')) return deny(response);
@@ -736,7 +1045,11 @@ export function createPrivateWorkRecordsApiHandler({
             requestedTenantId: route.tenantId,
           }, record);
         }
-        return sendJson(response, 200, { records, count: records.length, cursor: null });
+        return sendJson(response, 200, {
+          records: records.map((record) => projectRecordEvidence(store, record)),
+          count: records.length,
+          cursor: null,
+        });
       }
       if (request.method !== 'POST' || route.recordId !== null) return deny(response);
       if (request.headers['content-type']?.split(';', 1)[0].trim().toLowerCase() !== 'application/json') {

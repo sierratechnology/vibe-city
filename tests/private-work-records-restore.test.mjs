@@ -528,12 +528,14 @@ test('restored state interval history references active list and replay survive 
     assert.deepEqual(running.store.read(TENANT_A, RECORD), accepted.body.record);
     assert.equal(running.store.countRecords(TENANT_A), 1);
     const root = `${running.base}/api/private/tenants/${TENANT_A}/records`;
+    const ordinaryRecord = structuredClone(accepted.body.record);
+    for (const evidence of ordinaryRecord.evidence) delete evidence.locator;
     assert.deepEqual(await json(fetch(root, {
       headers: { authorization: 'Bearer operator' },
-    })), { status: 200, body: { records: [accepted.body.record], count: 1, cursor: null } });
+    })), { status: 200, body: { records: [ordinaryRecord], count: 1, cursor: null } });
     assert.deepEqual(await json(fetch(`${root}/${RECORD}`, {
       headers: { authorization: 'Bearer operator' },
-    })), accepted);
+    })), { status: 200, body: { record: ordinaryRecord } });
     const history = await json(fetch(`${root}/${RECORD}/history`, {
       headers: { authorization: 'Bearer operator' },
     }));

@@ -66,6 +66,83 @@ function recordFixture(overrides = {}) {
   };
 }
 
+function traceFixture(overrides = {}) {
+  const source = {
+    tenantId: IDS.tenant,
+    sourceId: IDS.source,
+    sourceRecordId: 'synthetic-direction-1',
+    sourceEventId: 'synthetic-event-1',
+    contractVersion: '1.0',
+    occurredAt: '2026-09-26T11:58:00.000Z',
+    observedAt: '2026-09-26T11:59:00.000Z',
+  };
+  const subject = (subjectId) => ({ tenantId: IDS.tenant, subjectId });
+  return {
+    tenantId: IDS.tenant,
+    recordId: IDS.record,
+    direction: {
+      tenantId: IDS.tenant, directionId: 'id_a111111111111111',
+      directingSubject: subject(IDS.owner), source,
+      occurredAt: source.occurredAt, sensitivity: 'tenant_private',
+    },
+    authorization: {
+      tenantId: IDS.tenant, authorizationId: 'id_a222222222222222',
+      directionId: 'id_a111111111111111', action: 'assign', scope: IDS.record,
+      authorizer: subject(IDS.owner), beneficiary: subject('id_a333333333333333'),
+      constraints: ['synthetic-only'], policyRevision: 1, effectiveAt: source.observedAt,
+    },
+    assignment: {
+      tenantId: IDS.tenant, recordId: IDS.record,
+      authorizationId: 'id_a222222222222222', owner: subject(IDS.owner),
+      assignees: [subject('id_a333333333333333')], acceptedRevision: 1, source,
+      occurredAt: '2026-09-26T12:00:00.000Z',
+    },
+    activities: [{
+      tenantId: IDS.tenant, recordId: IDS.record, activityId: 'id_a444444444444444',
+      actor: subject('id_a333333333333333'), source, eventKind: 'work_performed',
+      occurredAt: source.occurredAt, observedAt: source.observedAt,
+      recordedAt: '2026-09-26T12:00:00.000Z',
+    }],
+    evidence: [{
+      tenantId: IDS.tenant, evidenceId: 'id_a555555555555555', relation: 'result',
+      activityId: 'id_a444444444444444',
+      locator: 'urn:stg:evidence:synthetic-result', label: 'Synthetic result',
+      sensitivity: 'tenant_private', integrity: null, sourceOccurredAt: source.occurredAt,
+      observedAt: source.observedAt, recordedAt: '2026-09-26T12:00:00.000Z',
+      availability: 'available',
+    }],
+    outcome: {
+      tenantId: IDS.tenant, recordId: IDS.record, outcomeId: 'id_a666666666666666',
+      acceptanceActor: subject(IDS.owner), acceptanceAuthorizationId: 'id_a222222222222222',
+      requiredEvidenceIds: ['id_a555555555555555'], acceptedAt: '2026-09-26T12:01:00.000Z',
+    },
+    ...overrides,
+  };
+}
+
+test('trace chronology rejects activity before authorization becomes effective', async () => {
+  const domain = await loadDomain();
+  const trace = traceFixture();
+
+  assert.deepEqual(domain.validateTraceBundle(trace), {
+    ok: false, code: 'invalid_activity_chronology',
+  });
+});
+
+test('trace chronology rejects activity after authorization but before assignment', async () => {
+  const domain = await loadDomain();
+  const trace = traceFixture();
+  trace.activities[0] = {
+    ...trace.activities[0],
+    occurredAt: '2026-09-26T11:59:30.000Z',
+    observedAt: '2026-09-26T11:59:45.000Z',
+  };
+
+  assert.deepEqual(domain.validateTraceBundle(trace), {
+    ok: false, code: 'invalid_activity_chronology',
+  });
+});
+
 test('work record validation rejects missing or mismatched tenant', async () => {
   const domain = await loadDomain();
 
@@ -1158,5 +1235,112 @@ test('exact trust and durable chronology corrections fail closed', async (t) => 
       assert.throws(() => domain[method](trustedContextFor(domain, permission), record,
         boundary.command), { message: /chronology|predate/i });
     });
+  }
+});
+
+test('private trace preserves explicit stable links across all six stages', async () => {
+  const domain = await loadDomain();
+  const source = {
+    tenantId: IDS.tenant,
+    sourceId: IDS.source,
+    sourceRecordId: 'synthetic-direction-1',
+    sourceEventId: 'synthetic-event-1',
+    contractVersion: '1.0',
+    occurredAt: '2026-09-26T11:58:00.000Z',
+    observedAt: '2026-09-26T11:59:00.000Z',
+  };
+  const subject = (subjectId) => ({ tenantId: IDS.tenant, subjectId });
+  const trace = {
+    tenantId: IDS.tenant,
+    recordId: IDS.record,
+    direction: {
+      tenantId: IDS.tenant,
+      directionId: 'id_a111111111111111',
+      directingSubject: subject(IDS.owner),
+      source,
+      occurredAt: source.occurredAt,
+      sensitivity: 'tenant_private',
+    },
+    authorization: {
+      tenantId: IDS.tenant,
+      authorizationId: 'id_a222222222222222',
+      directionId: 'id_a111111111111111',
+      action: 'assign',
+      scope: IDS.record,
+      authorizer: subject(IDS.owner),
+      beneficiary: subject('id_a333333333333333'),
+      constraints: ['synthetic-only'],
+      policyRevision: 1,
+      effectiveAt: source.observedAt,
+    },
+    assignment: {
+      tenantId: IDS.tenant,
+      recordId: IDS.record,
+      authorizationId: 'id_a222222222222222',
+      owner: subject(IDS.owner),
+      assignees: [subject('id_a333333333333333')],
+      acceptedRevision: 1,
+      source,
+      occurredAt: '2026-09-26T12:00:00.000Z',
+    },
+    activities: [{
+      tenantId: IDS.tenant,
+      recordId: IDS.record,
+      activityId: 'id_a444444444444444',
+      actor: subject('id_a333333333333333'),
+      source,
+      eventKind: 'work_performed',
+      occurredAt: '2026-09-26T12:00:00.000Z',
+      observedAt: '2026-09-26T12:00:00.000Z',
+      recordedAt: '2026-09-26T12:00:00.000Z',
+    }],
+    evidence: [{
+      tenantId: IDS.tenant,
+      evidenceId: 'id_a555555555555555',
+      activityId: 'id_a444444444444444',
+      relation: 'result',
+      locator: 'urn:stg:evidence:synthetic-result',
+      label: 'Synthetic result',
+      sensitivity: 'tenant_private',
+      integrity: null,
+      sourceOccurredAt: source.occurredAt,
+      observedAt: source.observedAt,
+      recordedAt: '2026-09-26T12:00:00.000Z',
+      availability: 'available',
+    }],
+    outcome: {
+      tenantId: IDS.tenant,
+      recordId: IDS.record,
+      outcomeId: 'id_a666666666666666',
+      acceptanceActor: subject(IDS.owner),
+      acceptanceAuthorizationId: 'id_a222222222222222',
+      requiredEvidenceIds: ['id_a555555555555555'],
+      acceptedAt: '2026-09-26T12:01:00.000Z',
+    },
+  };
+
+  const validated = domain.validateTraceBundle?.(trace);
+
+  assert.deepEqual(validated, { ok: true, value: trace });
+  assert.notEqual(validated.value, trace);
+
+  const brokenSourceLink = structuredClone(trace);
+  brokenSourceLink.assignment.source = {
+    ...brokenSourceLink.assignment.source, sourceId: 'id_b111111111111111',
+  };
+  assert.equal(domain.validateTraceBundle(brokenSourceLink).ok, false);
+  const impossibleAcceptance = structuredClone(trace);
+  impossibleAcceptance.outcome.acceptedAt = '2026-09-26T11:59:30.000Z';
+  assert.equal(domain.validateTraceBundle(impossibleAcceptance).ok, false);
+
+  const polluted = structuredClone(trace);
+  delete polluted.outcome.acceptedAt;
+  Object.defineProperty(Object.prototype, 'acceptedAt', {
+    value: '2026-09-26T12:01:00.000Z', configurable: true,
+  });
+  try {
+    assert.equal(domain.validateTraceBundle(polluted).ok, false);
+  } finally {
+    delete Object.prototype.acceptedAt;
   }
 });
