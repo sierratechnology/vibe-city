@@ -234,6 +234,41 @@ function requireCurrentRun(value: unknown, observedAt: string): Readonly<Unknown
   });
 }
 
+function requireCurrentActivity(
+  value: unknown,
+  run: Readonly<UnknownRecord>,
+): Readonly<UnknownRecord> {
+  const activity = requireClosedObject(value, [
+    'runId', 'taskId', 'activity', 'occurredAt',
+  ]);
+  const runId = requireOpaqueId(activity.runId);
+  const taskId = requireOpaqueId(activity.taskId);
+  const occurredAt = requireCanonicalTimestamp(activity.occurredAt);
+  if (runId !== run.runId || taskId !== run.taskId
+    || activity.activity !== 'reviewing'
+    || occurredAt < (run.spawnedAt as string)
+    || occurredAt > (run.heartbeatAt as string)) fail();
+  return Object.freeze({ runId, taskId, activity: 'reviewing', occurredAt });
+}
+
+function requireActivityEvent(
+  value: unknown,
+  activity: Readonly<UnknownRecord>,
+): Readonly<UnknownRecord> {
+  const event = requireClosedObject(value, [
+    'eventId', 'runId', 'taskId', 'activity', 'occurredAt',
+  ]);
+  const runId = requireOpaqueId(event.runId);
+  const taskId = requireOpaqueId(event.taskId);
+  const occurredAt = requireCanonicalTimestamp(event.occurredAt);
+  if (runId !== activity.runId || taskId !== activity.taskId
+    || event.activity !== 'reviewing' || occurredAt !== activity.occurredAt) fail();
+  return Object.freeze({
+    eventId: requireOpaqueId(event.eventId), runId, taskId,
+    activity: 'reviewing', occurredAt,
+  });
+}
+
 function requireRecentRun(
   value: unknown,
   synchronizedAt: string,
@@ -296,6 +331,8 @@ export type HermesPresenceObservation = Readonly<{
   status: 'available' | 'degraded' | 'unavailable';
   reason: string;
   currentRun: unknown;
+  currentActivity?: unknown;
+  activityEvent?: unknown;
   recentRun?: unknown;
   decisiveEvent: unknown;
 }>;
@@ -315,7 +352,7 @@ export function createHermesPresenceObservation(
     const object = requireClosedObject(input, [
       'profileName', 'mappingRevision', 'observedAt', 'status', 'reason',
       'currentRun', 'decisiveEvent',
-    ], ['recentRun']);
+    ], ['recentRun', 'currentActivity', 'activityEvent']);
     const observedAt = requireCanonicalTimestamp(object.observedAt);
     const reason = requireReason(object.reason);
     const status = object.status;
@@ -328,6 +365,8 @@ export function createHermesPresenceObservation(
       || SOURCE_REASONS[sourceStatus] !== reason
       || (mapping.status !== 'active' && sourceStatus === 'available')) fail();
     let currentRun: Readonly<UnknownRecord> | null = null;
+    let currentActivity: Readonly<UnknownRecord> | undefined;
+    let activityEvent: Readonly<UnknownRecord> | undefined;
     let recentRun: Readonly<UnknownRecord> | undefined;
     let decisiveEvent: Readonly<UnknownRecord> | null = null;
     if (Object.hasOwn(object, 'recentRun')) {
@@ -344,6 +383,14 @@ export function createHermesPresenceObservation(
       if (sourceStatus !== 'available' || recentRun === undefined) fail();
       decisiveEvent = requireDecisiveEvent(object.decisiveEvent, recentRun);
     }
+    const hasCurrentActivity = Object.hasOwn(object, 'currentActivity');
+    const hasActivityEvent = Object.hasOwn(object, 'activityEvent');
+    if (hasCurrentActivity !== hasActivityEvent
+      || ((hasCurrentActivity || hasActivityEvent) && currentRun === null)) fail();
+    if (hasCurrentActivity && hasActivityEvent && currentRun !== null) {
+      currentActivity = requireCurrentActivity(object.currentActivity, currentRun);
+      activityEvent = requireActivityEvent(object.activityEvent, currentActivity);
+    }
     const accepted = Object.freeze({
       profileName: mapping.profileName,
       mappingRevision: mapping.registryRevision,
@@ -351,6 +398,7 @@ export function createHermesPresenceObservation(
       status: sourceStatus,
       reason,
       currentRun,
+      ...(currentActivity === undefined ? {} : { currentActivity, activityEvent }),
       ...(recentRun === undefined ? {} : { recentRun }),
       decisiveEvent,
     });
@@ -372,6 +420,12 @@ export type DerivedHostedAgentPresenceState =
   | (DerivedPresenceBase & Readonly<{
     state: 'working';
     reason: 'heartbeat';
+    taskId: string;
+    runId: string;
+  }>)
+  | (DerivedPresenceBase & Readonly<{
+    state: 'reviewing';
+    reason: 'review_activity';
     taskId: string;
     runId: string;
   }>)
@@ -405,6 +459,18 @@ export function deriveHostedAgentPresenceState(
     const observation = observationInput as HermesPresenceObservation;
     if (observation.currentRun !== null) {
       const run = observation.currentRun as Readonly<{ runId: string; taskId: string }>;
+      if (observation.currentActivity !== undefined && observation.activityEvent !== undefined) {
+        return Object.freeze({
+          identityId: mapping.identityId,
+          subjectId: mapping.subjectId,
+          profileName: mapping.profileName,
+          state: 'reviewing',
+          reason: 'review_activity',
+          observedAt: observation.observedAt,
+          taskId: run.taskId,
+          runId: run.runId,
+        });
+      }
       return Object.freeze({
         identityId: mapping.identityId,
         subjectId: mapping.subjectId,
