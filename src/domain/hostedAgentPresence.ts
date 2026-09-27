@@ -16,6 +16,7 @@ const BLOCK_REASONS = Object.freeze({
 const ACTIVITY_STATES = Object.freeze({
   reviewing: Object.freeze({ state: 'reviewing', reason: 'review_activity' }),
   researching: Object.freeze({ state: 'researching', reason: 'research_activity' }),
+  meeting: Object.freeze({ state: 'meeting', reason: 'meeting_activity' }),
 } as const);
 const TRUSTED_MAPPINGS = new WeakSet<object>();
 const REQUEST_PROVENANCE = new WeakMap<object, object>();
@@ -442,6 +443,12 @@ export type DerivedHostedAgentPresenceState =
     runId: string;
   }>)
   | (DerivedPresenceBase & Readonly<{
+    state: 'meeting';
+    reason: 'meeting_activity';
+    taskId: string;
+    runId: string;
+  }>)
+  | (DerivedPresenceBase & Readonly<{
     state: 'blocked';
     reason: 'run_blocked';
     taskId: string;
@@ -473,6 +480,18 @@ export function deriveHostedAgentPresenceState(
       const run = observation.currentRun as Readonly<{ runId: string; taskId: string }>;
       if (observation.currentActivity !== undefined && observation.activityEvent !== undefined) {
         const activity = observation.currentActivity as Readonly<{ activity: SourceActivity }>;
+        if (activity.activity === 'meeting') {
+          return Object.freeze({
+            identityId: mapping.identityId,
+            subjectId: mapping.subjectId,
+            profileName: mapping.profileName,
+            state: 'meeting',
+            reason: 'meeting_activity',
+            observedAt: observation.observedAt,
+            taskId: run.taskId,
+            runId: run.runId,
+          });
+        }
         if (activity.activity === 'researching') {
           return Object.freeze({
             identityId: mapping.identityId,
