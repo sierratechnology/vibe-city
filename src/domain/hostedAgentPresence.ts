@@ -239,22 +239,28 @@ function requireRecentRun(
   synchronizedAt: string,
   observedAt: string,
 ): Readonly<UnknownRecord> {
-  const run = requireClosedObject(value, [
-    'runId', 'taskId', 'status', 'outcome', 'claimedAt', 'spawnedAt',
-    'endedAt', 'blockReason',
-  ]);
+  const baseKeys = [
+    'runId', 'taskId', 'status', 'outcome', 'claimedAt', 'spawnedAt', 'endedAt',
+  ];
+  const run = requireClosedObject(value, baseKeys, ['blockReason']);
+  const blocked = run.status === 'blocked';
   const claimedAt = requireCanonicalTimestamp(run.claimedAt);
   const spawnedAt = requireCanonicalTimestamp(run.spawnedAt);
   const endedAt = requireCanonicalTimestamp(run.endedAt);
-  const blockReason = run.blockReason;
-  if (run.status !== 'blocked' || run.outcome !== 'blocked'
-    || typeof blockReason !== 'string' || !Object.hasOwn(BLOCK_REASONS, blockReason)
+  const completed = run.status === 'completed';
+  const blockReason = blocked ? run.blockReason : undefined;
+  if ((!blocked && !completed) || run.outcome !== run.status
+    || Object.hasOwn(run, 'blockReason') !== blocked
+    || (blocked && (typeof blockReason !== 'string'
+      || !Object.hasOwn(BLOCK_REASONS, blockReason)))
     || claimedAt < synchronizedAt || claimedAt > spawnedAt
     || spawnedAt > endedAt || endedAt > observedAt) fail();
   return Object.freeze({
     runId: requireOpaqueId(run.runId), taskId: requireOpaqueId(run.taskId),
-    status: 'blocked', outcome: 'blocked', claimedAt, spawnedAt, endedAt,
-    blockReason,
+    status: blocked ? 'blocked' : 'completed',
+    outcome: blocked ? 'blocked' : 'completed',
+    claimedAt, spawnedAt, endedAt,
+    ...(blocked ? { blockReason } : {}),
   });
 }
 
@@ -263,6 +269,7 @@ function requireDecisiveEvent(
   run: Readonly<UnknownRecord>,
 ): Readonly<UnknownRecord> {
   const blocked = run.status === 'blocked';
+  const completed = run.status === 'completed';
   const event = requireClosedObject(
     value,
     ['eventId', 'runId', 'kind', 'occurredAt', ...(blocked ? ['blockReason'] : [])],
@@ -272,10 +279,12 @@ function requireDecisiveEvent(
     || (blocked
       ? event.kind !== 'blocked' || occurredAt !== run.endedAt
         || event.blockReason !== run.blockReason
-      : event.kind !== 'heartbeat' || occurredAt !== run.heartbeatAt)) fail();
+      : completed
+        ? event.kind !== 'completed' || occurredAt !== run.endedAt
+        : event.kind !== 'heartbeat' || occurredAt !== run.heartbeatAt)) fail();
   return Object.freeze({
     eventId: requireOpaqueId(event.eventId), runId: requireOpaqueId(event.runId),
-    kind: blocked ? 'blocked' : 'heartbeat', occurredAt,
+    kind: blocked ? 'blocked' : completed ? 'completed' : 'heartbeat', occurredAt,
     ...(blocked ? { blockReason: event.blockReason as string } : {}),
   });
 }
@@ -373,6 +382,12 @@ export type DerivedHostedAgentPresenceState =
     runId: string;
   }>)
   | (DerivedPresenceBase & Readonly<{
+    state: 'completed';
+    reason: 'run_completed';
+    taskId: string;
+    runId: string;
+  }>)
+  | (DerivedPresenceBase & Readonly<{
     state: 'idle' | 'offline' | 'not_derived';
     reason: 'source_available' | 'source_unavailable' | 'heartbeat_delayed';
   }>);
@@ -402,7 +417,23 @@ export function deriveHostedAgentPresenceState(
       });
     }
     if (observation.recentRun !== undefined && observation.decisiveEvent !== null) {
-      const run = observation.recentRun as Readonly<{ runId: string; taskId: string }>;
+      const run = observation.recentRun as Readonly<{
+        runId: string;
+        taskId: string;
+        status: 'blocked' | 'completed';
+      }>;
+      if (run.status === 'completed') {
+        return Object.freeze({
+          identityId: mapping.identityId,
+          subjectId: mapping.subjectId,
+          profileName: mapping.profileName,
+          state: 'completed',
+          reason: 'run_completed',
+          observedAt: observation.observedAt,
+          taskId: run.taskId,
+          runId: run.runId,
+        });
+      }
       return Object.freeze({
         identityId: mapping.identityId,
         subjectId: mapping.subjectId,

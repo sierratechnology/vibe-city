@@ -728,6 +728,274 @@ test('exact trusted blocked facts derive a frozen minimal blocked result without
   assert.equal(domain.deriveHostedAgentPresenceState(mapping, recentOnly).state, 'idle');
 });
 
+test('coherent completed run with its decisive event derives a frozen minimal completed result', async () => {
+  const domain = await loadDomain();
+  const mapping = domain.createReviewedHostedIdentityMapping(mappingFixture());
+  const request = domain.createHostedPresenceRequest(mapping, {
+    boardScope: 'default', profileName: 'spiders', mappingRevision: 7,
+    evaluatedAt: '2026-09-27T10:01:00.000Z',
+  });
+  const recentRun = {
+    runId: 'id_3333333333333333', taskId: 'id_4444444444444444', status: 'completed',
+    outcome: 'completed', claimedAt: '2026-09-27T10:00:05.000Z',
+    spawnedAt: '2026-09-27T10:00:10.000Z', endedAt: '2026-09-27T10:00:20.000Z',
+  };
+  const observation = domain.createHermesPresenceObservation(mapping, request, {
+    profileName: 'spiders', mappingRevision: 7,
+    observedAt: '2026-09-27T10:00:30.000Z', status: 'available',
+    reason: 'source_available', currentRun: null, recentRun,
+    decisiveEvent: {
+      eventId: 'id_5555555555555555', runId: recentRun.runId,
+      kind: 'completed', occurredAt: recentRun.endedAt,
+    },
+  });
+
+  const result = domain.deriveHostedAgentPresenceState(mapping, observation);
+  assert.deepEqual(result, {
+    identityId: 'stg-spiders',
+    subjectId: IDS.subject,
+    profileName: 'spiders',
+    state: 'completed',
+    reason: 'run_completed',
+    observedAt: '2026-09-27T10:00:30.000Z',
+    taskId: recentRun.taskId,
+    runId: recentRun.runId,
+  });
+  assert.equal(Object.isFrozen(result), true);
+  assert.deepEqual(Reflect.ownKeys(result), [
+    'identityId', 'subjectId', 'profileName', 'state', 'reason', 'observedAt',
+    'taskId', 'runId',
+  ]);
+});
+
+test('incomplete or mismatched completion evidence never derives completed', async () => {
+  const domain = await loadDomain();
+  const mapping = domain.createReviewedHostedIdentityMapping(mappingFixture());
+  const request = domain.createHostedPresenceRequest(mapping, {
+    boardScope: 'default', profileName: 'spiders', mappingRevision: 7,
+    evaluatedAt: '2026-09-27T10:01:00.000Z',
+  });
+  const recentRun = {
+    runId: 'id_3333333333333333', taskId: 'id_4444444444444444', status: 'completed',
+    outcome: 'completed', claimedAt: '2026-09-27T10:00:05.000Z',
+    spawnedAt: '2026-09-27T10:00:10.000Z', endedAt: '2026-09-27T10:00:20.000Z',
+  };
+  const event = {
+    eventId: 'id_5555555555555555', runId: recentRun.runId,
+    kind: 'completed', occurredAt: recentRun.endedAt,
+  };
+  const base = {
+    profileName: 'spiders', mappingRevision: 7,
+    observedAt: '2026-09-27T10:00:30.000Z', status: 'available',
+    reason: 'source_available', currentRun: null,
+  };
+
+  const runOnly = domain.createHermesPresenceObservation(mapping, request, {
+    ...base, recentRun, decisiveEvent: null,
+  });
+  assert.equal(domain.deriveHostedAgentPresenceState(mapping, runOnly).state, 'idle');
+
+  for (const input of [
+    { ...base, decisiveEvent: event },
+    { ...base, cardStatus: 'done', decisiveEvent: null },
+    { ...base, recentRun, decisiveEvent: { ...event, runId: 'id_6666666666666666' } },
+    { ...base, recentRun, decisiveEvent: { ...event, occurredAt: '2026-09-27T10:00:20.001Z' } },
+    { ...base, recentRun, decisiveEvent: { ...event, kind: 'blocked' } },
+  ]) {
+    assert.throws(() => domain.createHermesPresenceObservation(mapping, request, input),
+      { message: 'Invalid hosted agent presence input' });
+  }
+});
+
+test('hostile completion discriminators fail closed without coercion or retention', async () => {
+  const domain = await loadDomain();
+  const mapping = domain.createReviewedHostedIdentityMapping(mappingFixture());
+  const request = domain.createHostedPresenceRequest(mapping, {
+    boardScope: 'default', profileName: 'spiders', mappingRevision: 7,
+    evaluatedAt: '2026-09-27T10:01:00.000Z',
+  });
+  const recentRun = {
+    runId: 'id_3333333333333333', taskId: 'id_4444444444444444', status: 'completed',
+    outcome: 'completed', claimedAt: '2026-09-27T10:00:05.000Z',
+    spawnedAt: '2026-09-27T10:00:10.000Z', endedAt: '2026-09-27T10:00:20.000Z',
+  };
+  const decisiveEvent = {
+    eventId: 'id_5555555555555555', runId: recentRun.runId,
+    kind: 'completed', occurredAt: recentRun.endedAt,
+  };
+  const base = {
+    profileName: 'spiders', mappingRevision: 7,
+    observedAt: '2026-09-27T10:00:30.000Z', status: 'available',
+    reason: 'source_available', currentRun: null, recentRun, decisiveEvent,
+  };
+  let coercionCalls = 0;
+  const coercible = {
+    mutablePrivateDetail: 'must not be retained',
+    [Symbol.toPrimitive]() {
+      coercionCalls += 1;
+      return 'completed';
+    },
+  };
+  const boxed = new String('completed');
+  Object.defineProperty(boxed, Symbol.toPrimitive, {
+    value() {
+      coercionCalls += 1;
+      return 'completed';
+    },
+  });
+
+  for (const discriminator of [coercible, boxed, Symbol('completed'), 1, true, null]) {
+    for (const input of [
+      { ...base, recentRun: { ...recentRun, status: discriminator } },
+      { ...base, recentRun: { ...recentRun, outcome: discriminator } },
+      { ...base, decisiveEvent: { ...decisiveEvent, kind: discriminator } },
+    ]) {
+      let accepted;
+      assert.throws(() => {
+        accepted = domain.createHermesPresenceObservation(mapping, request, input);
+      }, { message: 'Invalid hosted agent presence input' });
+      assert.equal(accepted, undefined);
+    }
+  }
+  assert.equal(coercionCalls, 0);
+});
+
+test('completion run rejects stale malformed or hostile snapshots', async () => {
+  const domain = await loadDomain();
+  const mapping = domain.createReviewedHostedIdentityMapping(mappingFixture());
+  const request = domain.createHostedPresenceRequest(mapping, {
+    boardScope: 'default', profileName: 'spiders', mappingRevision: 7,
+    evaluatedAt: '2026-09-27T10:01:00.000Z',
+  });
+  const recentRun = {
+    runId: 'id_3333333333333333', taskId: 'id_4444444444444444', status: 'completed',
+    outcome: 'completed', claimedAt: '2026-09-27T10:00:05.000Z',
+    spawnedAt: '2026-09-27T10:00:10.000Z', endedAt: '2026-09-27T10:00:20.000Z',
+  };
+  const decisiveEvent = {
+    eventId: 'id_5555555555555555', runId: recentRun.runId,
+    kind: 'completed', occurredAt: recentRun.endedAt,
+  };
+  const base = {
+    profileName: 'spiders', mappingRevision: 7,
+    observedAt: '2026-09-27T10:00:30.000Z', status: 'available',
+    reason: 'source_available', currentRun: null, decisiveEvent,
+  };
+  let accessorCalls = 0;
+  const accessorRun = Object.defineProperty({ ...recentRun }, 'outcome', {
+    get() {
+      accessorCalls += 1;
+      return 'completed';
+    },
+  });
+  let ownKeyReads = 0;
+  const racingRun = new Proxy({ ...recentRun }, {
+    ownKeys(target) {
+      ownKeyReads += 1;
+      return ownKeyReads === 1 ? Reflect.ownKeys(target) : [...Reflect.ownKeys(target), 'raced'];
+    },
+    getOwnPropertyDescriptor(target, key) {
+      if (key === 'raced') return { value: true, enumerable: true, configurable: true };
+      return Reflect.getOwnPropertyDescriptor(target, key);
+    },
+  });
+
+  for (const candidate of [
+    { ...recentRun, claimedAt: '2026-09-27T09:59:59.999Z' },
+    { ...recentRun, claimedAt: '2026-09-27T10:00:10.001Z' },
+    { ...recentRun, spawnedAt: '2026-09-27T10:00:20.001Z' },
+    { ...recentRun, endedAt: '2026-09-27T10:00:30.001Z' },
+    { ...recentRun, endedAt: 'not-a-timestamp' },
+    { ...recentRun, privateSummary: 'must not be retained' },
+    accessorRun,
+    racingRun,
+  ]) {
+    assert.throws(() => domain.createHermesPresenceObservation(mapping, request, {
+      ...base, recentRun: candidate,
+    }), { message: 'Invalid hosted agent presence input' });
+  }
+  assert.equal(accessorCalls, 0);
+});
+
+test('completion event rejects hostile snapshots', async () => {
+  const domain = await loadDomain();
+  const mapping = domain.createReviewedHostedIdentityMapping(mappingFixture());
+  const request = domain.createHostedPresenceRequest(mapping, {
+    boardScope: 'default', profileName: 'spiders', mappingRevision: 7,
+    evaluatedAt: '2026-09-27T10:01:00.000Z',
+  });
+  const recentRun = {
+    runId: 'id_3333333333333333', taskId: 'id_4444444444444444', status: 'completed',
+    outcome: 'completed', claimedAt: '2026-09-27T10:00:05.000Z',
+    spawnedAt: '2026-09-27T10:00:10.000Z', endedAt: '2026-09-27T10:00:20.000Z',
+  };
+  const decisiveEvent = {
+    eventId: 'id_5555555555555555', runId: recentRun.runId,
+    kind: 'completed', occurredAt: recentRun.endedAt,
+  };
+  const base = {
+    profileName: 'spiders', mappingRevision: 7,
+    observedAt: '2026-09-27T10:00:30.000Z', status: 'available',
+    reason: 'source_available', currentRun: null, recentRun,
+  };
+  let accessorCalls = 0;
+  const accessorEvent = Object.defineProperty({ ...decisiveEvent }, 'kind', {
+    get() {
+      accessorCalls += 1;
+      return 'completed';
+    },
+  });
+  let ownKeyReads = 0;
+  const racingEvent = new Proxy({ ...decisiveEvent }, {
+    ownKeys(target) {
+      ownKeyReads += 1;
+      return ownKeyReads === 1 ? Reflect.ownKeys(target) : [...Reflect.ownKeys(target), 'raced'];
+    },
+    getOwnPropertyDescriptor(target, key) {
+      if (key === 'raced') return { value: true, enumerable: true, configurable: true };
+      return Reflect.getOwnPropertyDescriptor(target, key);
+    },
+  });
+
+  for (const event of [
+    { ...decisiveEvent, occurredAt: 'not-a-timestamp' },
+    { ...decisiveEvent, privateResult: 'must not be retained' },
+    accessorEvent,
+    racingEvent,
+  ]) {
+    assert.throws(() => domain.createHermesPresenceObservation(mapping, request, {
+      ...base, decisiveEvent: event,
+    }), { message: 'Invalid hosted agent presence input' });
+  }
+  assert.equal(accessorCalls, 0);
+});
+
+test('non-current mappings cannot present completed presence', async () => {
+  const domain = await loadDomain();
+  const recentRun = {
+    runId: 'id_3333333333333333', taskId: 'id_4444444444444444', status: 'completed',
+    outcome: 'completed', claimedAt: '2026-09-27T10:00:05.000Z',
+    spawnedAt: '2026-09-27T10:00:10.000Z', endedAt: '2026-09-27T10:00:20.000Z',
+  };
+  const decisiveEvent = {
+    eventId: 'id_5555555555555555', runId: recentRun.runId,
+    kind: 'completed', occurredAt: recentRun.endedAt,
+  };
+
+  for (const status of ['revoked', 'retired']) {
+    const mapping = domain.createReviewedHostedIdentityMapping(mappingFixture({ status }));
+    const request = domain.createHostedPresenceRequest(mapping, {
+      boardScope: 'default', profileName: 'spiders', mappingRevision: 7,
+      evaluatedAt: '2026-09-27T10:01:00.000Z',
+    });
+    assert.throws(() => domain.createHermesPresenceObservation(mapping, request, {
+      profileName: 'spiders', mappingRevision: 7,
+      observedAt: '2026-09-27T10:00:30.000Z', status: 'available',
+      reason: 'source_available', currentRun: null, recentRun, decisiveEvent,
+    }), { message: 'Invalid hosted agent presence input' });
+  }
+});
+
 test('available observation without a current run derives idle without run identifiers', async () => {
   const domain = await loadDomain();
   const mapping = domain.createReviewedHostedIdentityMapping(mappingFixture());
