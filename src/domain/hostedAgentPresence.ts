@@ -301,6 +301,82 @@ export function createHermesPresenceObservation(
   }
 }
 
+type DerivedPresenceBase = Readonly<{
+  identityId: 'stg-spiders';
+  subjectId: string;
+  profileName: string;
+  observedAt: string;
+}>;
+
+export type DerivedHostedAgentPresenceState =
+  | (DerivedPresenceBase & Readonly<{
+    state: 'working';
+    reason: 'heartbeat';
+    taskId: string;
+    runId: string;
+  }>)
+  | (DerivedPresenceBase & Readonly<{
+    state: 'idle' | 'offline' | 'not_derived';
+    reason: 'source_available' | 'source_unavailable' | 'heartbeat_delayed';
+  }>);
+
+export function deriveHostedAgentPresenceState(
+  mappingInput: unknown,
+  observationInput: unknown,
+): DerivedHostedAgentPresenceState {
+  try {
+    if (mappingInput === null || typeof mappingInput !== 'object'
+      || !TRUSTED_MAPPINGS.has(mappingInput)
+      || observationInput === null || typeof observationInput !== 'object'
+      || OBSERVATION_PROVENANCE.get(observationInput)?.mapping !== mappingInput) fail();
+    const mapping = mappingInput as ReviewedHostedIdentityMapping;
+    const observation = observationInput as HermesPresenceObservation;
+    if (observation.currentRun !== null) {
+      const run = observation.currentRun as Readonly<{ runId: string; taskId: string }>;
+      return Object.freeze({
+        identityId: mapping.identityId,
+        subjectId: mapping.subjectId,
+        profileName: mapping.profileName,
+        state: 'working',
+        reason: 'heartbeat',
+        observedAt: observation.observedAt,
+        taskId: run.taskId,
+        runId: run.runId,
+      });
+    }
+    if (observation.status === 'available') {
+      return Object.freeze({
+        identityId: mapping.identityId,
+        subjectId: mapping.subjectId,
+        profileName: mapping.profileName,
+        state: 'idle',
+        reason: 'source_available',
+        observedAt: observation.observedAt,
+      });
+    }
+    if (observation.status === 'unavailable') {
+      return Object.freeze({
+        identityId: mapping.identityId,
+        subjectId: mapping.subjectId,
+        profileName: mapping.profileName,
+        state: 'offline',
+        reason: 'source_unavailable',
+        observedAt: observation.observedAt,
+      });
+    }
+    return Object.freeze({
+      identityId: mapping.identityId,
+      subjectId: mapping.subjectId,
+      profileName: mapping.profileName,
+      state: 'not_derived',
+      reason: 'heartbeat_delayed',
+      observedAt: observation.observedAt,
+    });
+  } catch {
+    throw new TypeError(GENERIC_ERROR);
+  }
+}
+
 function requirePrivateRecord(
   value: unknown,
   mapping: ReviewedHostedIdentityMapping,
