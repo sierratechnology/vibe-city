@@ -59,7 +59,7 @@ async function readJsonBody(request) {
 }
 
 function parseRoute(rawUrl) {
-  const match = /^\/api\/private\/tenants\/([^/]+)\/records(?:\/([^/]+)(?:\/(rename|reassignment|block|unblock|archive|tombstone|restore|history))?)?$/.exec(rawUrl ?? '/');
+  const match = /^\/api\/private\/tenants\/([^/]+)\/records(?:\/([^/]+)(?:\/(rename|reassignment|block|unblock|archive|tombstone|restore|correction|history))?)?$/.exec(rawUrl ?? '/');
   if (match === null) return null;
   return { tenantId: match[1], recordId: match[2] ?? null, action: match[3] ?? null };
 }
@@ -84,6 +84,89 @@ export function createPrivateWorkRecordsApiHandler({
       const trusted = domain.createTrustedAuthorizationContext(await resolveTrustedIdentity(request));
       const membership = trusted.memberships.find((candidate) => candidate.tenantId === route.tenantId);
       if (!trusted.authenticated || !membership || membership.status !== 'active') return deny(response);
+      if (request.method === 'POST' && route.recordId !== null && route.action === 'correction') {
+        if (!trusted.permissions.includes('record.correct')) return deny(response);
+        if (request.headers['content-type']?.split(';', 1)[0].trim().toLowerCase() !== 'application/json') {
+          return deny(response);
+        }
+        const body = await readJsonBody(request);
+        if (!isObject(body)
+          || Object.keys(body).sort().join(',') !== 'expectedRevision,occurredAt,reasonRef,record,requestId'
+          || !Number.isSafeInteger(body.expectedRevision)
+          || typeof body.requestId !== 'string' || !REQUEST_ID.test(body.requestId)
+          || typeof body.reasonRef !== 'string' || body.reasonRef.trim() !== body.reasonRef
+          || body.reasonRef.length < 1 || body.reasonRef.length > 240
+          || typeof body.occurredAt !== 'string'
+          || !isObject(body.record)
+          || ['tenantId', 'recordId', 'createdAt', 'updatedAt', 'revision',
+            'sensitivity', 'correctionOf'].some((key) => Object.hasOwn(body.record, key))
+          || body.record.supersedes !== null) return deny(response);
+        const original = store.read(route.tenantId, route.recordId);
+        if (original === null) return deny(response);
+        domain.authorizeRecordAction(trusted, {
+          action: 'record.correct', requestedTenantId: route.tenantId,
+        }, original);
+        if (original.correctionOf !== null) return deny(response);
+        const requestIdentity = {
+          tenantId: route.tenantId, principalId: trusted.actorSubjectId,
+          authorizationId: trusted.authorizationId, policyRevision: trusted.policyRevision,
+          operation: 'correction', requestId: body.requestId,
+          requestSemantics: canonicalJson({
+            originalRecordId: route.recordId, expectedRevision: body.expectedRevision,
+            occurredAt: body.occurredAt, reasonRef: body.reasonRef, record: body.record,
+          }),
+        };
+        const replay = store.replayMutation(requestIdentity);
+        if (replay !== null) {
+          return replay.ok
+            ? sendJson(response, 200, { record: replay.record })
+            : sendJson(response, 409, { error: 'conflict' });
+        }
+        if (body.expectedRevision !== original.revision) {
+          return sendJson(response, 409, { error: 'conflict' });
+        }
+        const timestamp = now();
+        if (!Number.isFinite(timestamp)) return deny(response);
+        const recordedAt = new Date(timestamp).toISOString();
+        const occurred = new Date(body.occurredAt);
+        if (!Number.isFinite(occurred.getTime()) || occurred.toISOString() !== body.occurredAt
+          || body.occurredAt < original.updatedAt || body.occurredAt > recordedAt) return deny(response);
+        const recordId = generateId('record');
+        if (original.correctionOf?.recordId === recordId) return deny(response);
+        const record = domain.createCorrectionRecord(trusted, original, domain.createWorkRecord({
+          ...body.record,
+          tenantId: route.tenantId, recordId,
+          sensitivity: 'tenant_private',
+          correctionOf: { tenantId: route.tenantId, recordId: route.recordId },
+          revision: 1, createdAt: recordedAt, updatedAt: recordedAt,
+        }));
+        const referencesAllowed = await resolveTrustedReferences({
+          tenantId: route.tenantId, principalId: trusted.actorSubjectId,
+          authorizationId: trusted.authorizationId, policyRevision: trusted.policyRevision,
+          originalRecordId: route.recordId, record,
+        });
+        if (referencesAllowed !== true) return deny(response);
+        const audit = {
+          auditId: generateId('audit'), tenantId: route.tenantId, recordId,
+          eventKind: 'correction', actorSubjectId: trusted.actorSubjectId,
+          authorizationId: trusted.authorizationId, policyRevision: trusted.policyRevision,
+          sourceId: record.source.sourceId, reasonRef: body.reasonRef,
+          priorRevision: 0, newRevision: 1,
+          occurredAt: body.occurredAt, recordedAt,
+          changedFields: {
+            recordId: { prior: null, next: recordId },
+            correctionOf: { prior: null, next: record.correctionOf },
+          },
+        };
+        if (!REQUEST_ID.test(audit.auditId)) return deny(response);
+        const result = store.createCorrection(
+          record, audit, route.recordId, body.expectedRevision, requestIdentity,
+        );
+        if (!result.ok) return sendJson(response, 409, { error: 'conflict' });
+        return sendJson(response, result.replayed ? 200 : 201, {
+          record: result.replayed ? result.record : record,
+        });
+      }
       if (request.method === 'POST' && route.recordId !== null && route.action === 'restore') {
         if (!trusted.permissions.includes('record.restore')) return deny(response);
         if (request.headers['content-type']?.split(';', 1)[0].trim().toLowerCase() !== 'application/json') {

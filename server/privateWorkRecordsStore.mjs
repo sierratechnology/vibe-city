@@ -135,6 +135,10 @@ export class PrivateWorkRecordsStore {
            request_semantics, record_json)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       `);
+      this.readRecordRevisionStatement = this.database.prepare(`
+        SELECT revision FROM private_work_records
+        WHERE tenant_id = ? AND record_id = ?
+      `);
     } catch (error) {
       try { this.database.close(); } catch { /* preserve initialization failure */ }
       throw error;
@@ -230,6 +234,52 @@ export class PrivateWorkRecordsStore {
           ...requestParameters, requestIdentity.requestSemantics, JSON.stringify(record),
         );
       }
+      this.database.exec('COMMIT');
+      return { ok: true, replayed: false };
+    } catch (error) {
+      try { this.database.exec('ROLLBACK'); } catch { /* no active transaction */ }
+      if (Number.isInteger(error?.errcode) && (error.errcode & 0xff) === 19) {
+        return { ok: false, code: 'duplicate' };
+      }
+      throw error;
+    }
+  }
+
+  createCorrection(record, auditEvent, originalRecordId, expectedRevision, requestIdentity) {
+    if (record.revision !== 1 || auditEvent.priorRevision !== 0 || auditEvent.newRevision !== 1) {
+      return { ok: false, code: 'stale_revision' };
+    }
+    try {
+      this.database.exec('BEGIN IMMEDIATE');
+      const requestParameters = [
+        requestIdentity.tenantId, requestIdentity.principalId,
+        requestIdentity.authorizationId, requestIdentity.policyRevision,
+        requestIdentity.operation, requestIdentity.requestId,
+      ];
+      const existing = this.readMutationRequestStatement.get(...requestParameters);
+      if (existing) {
+        this.database.exec('COMMIT');
+        return existing.request_semantics === requestIdentity.requestSemantics
+          ? { ok: true, replayed: true, record: JSON.parse(existing.record_json) }
+          : { ok: false, code: 'idempotency_conflict' };
+      }
+      const original = this.readRecordRevisionStatement.get(record.tenantId, originalRecordId);
+      if (!original || Number(original.revision) !== expectedRevision) {
+        this.database.exec('ROLLBACK');
+        return { ok: false, code: 'stale_revision' };
+      }
+      this.insertRecordStatement.run(
+        record.tenantId, record.recordId, record.revision,
+        JSON.stringify(record), record.updatedAt,
+      );
+      this.insertAuditStatement.run(
+        auditEvent.tenantId, auditEvent.auditId, auditEvent.recordId,
+        auditEvent.priorRevision, auditEvent.newRevision,
+        JSON.stringify(auditEvent), auditEvent.recordedAt,
+      );
+      this.insertMutationRequestStatement.run(
+        ...requestParameters, requestIdentity.requestSemantics, JSON.stringify(record),
+      );
       this.database.exec('COMMIT');
       return { ok: true, replayed: false };
     } catch (error) {
