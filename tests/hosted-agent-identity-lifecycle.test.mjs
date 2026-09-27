@@ -110,6 +110,341 @@ function reviewedWorkplaceReassignmentEvent(domain, overrides = {}) {
   );
 }
 
+function retirementEvent(overrides = {}) {
+  return {
+    tenantId: IDS.tenant,
+    subjectId: IDS.subject,
+    identityId: 'stg-spiders',
+    profileName: 'spiders',
+    priorRevision: 7,
+    nextRevision: 8,
+    occurredAt: '2026-09-27T10:00:30.000Z',
+    ...overrides,
+  };
+}
+
+function reviewedRetirementEvent(domain, overrides = {}) {
+  const event = retirementEvent(overrides);
+  return domain.createHostedIdentityRetirementEvent(
+    event.tenantId,
+    event.subjectId,
+    event.identityId,
+    event.profileName,
+    event.priorRevision,
+    event.nextRevision,
+    event.occurredAt,
+  );
+}
+
+test('exact reviewed identity retirement produces minimal detached frozen historical continuity', async () => {
+  const domain = await loadDomain();
+  assert.equal(typeof domain.createHostedIdentityRetirementHistory, 'function');
+  const before = domain.createReviewedHostedIdentityMapping(mappingFixture());
+  const after = domain.createReviewedHostedIdentityMapping(mappingFixture({
+    status: 'retired',
+    registryRevision: 8,
+    synchronizedAt: '2026-09-27T10:01:00.000Z',
+  }));
+  const event = domain.createHostedIdentityRetirementEvent(
+    IDS.tenant,
+    IDS.subject,
+    'stg-spiders',
+    'spiders',
+    7,
+    8,
+    '2026-09-27T10:00:30.000Z',
+  );
+
+  const history = domain.createHostedIdentityRetirementHistory(before, after, event);
+
+  assert.deepEqual(history, {
+    ...event,
+    priorStatus: 'active',
+    nextStatus: 'retired',
+    reason: 'identity_retired',
+  });
+  assert.notEqual(history, event);
+  assert.equal(Object.isFrozen(history), true);
+  assert.equal(Object.isFrozen(event), true);
+  assert.throws(() => { event.profileName = 'tampered'; }, TypeError);
+  assert.equal(history.profileName, 'spiders');
+  assert.throws(() => { history.nextStatus = 'active'; }, TypeError);
+});
+
+test('identity retirement accepts only an active to retired status transition', async () => {
+  const domain = await loadDomain();
+  const validBefore = domain.createReviewedHostedIdentityMapping(mappingFixture());
+  const validAfterInput = {
+    status: 'retired', registryRevision: 8,
+    synchronizedAt: '2026-09-27T10:01:00.000Z',
+  };
+  const rejectedPairs = [
+    [domain.createReviewedHostedIdentityMapping(mappingFixture({ status: 'retired' })), validAfterInput],
+    [domain.createReviewedHostedIdentityMapping(mappingFixture({ status: 'revoked' })), validAfterInput],
+    [validBefore, { ...validAfterInput, status: 'active' }],
+    [validBefore, { ...validAfterInput, status: 'revoked' }],
+  ];
+
+  for (const [before, afterInput] of rejectedPairs) {
+    const after = domain.createReviewedHostedIdentityMapping(mappingFixture(afterInput));
+    assert.throws(
+      () => domain.createHostedIdentityRetirementHistory(
+        before, after, reviewedRetirementEvent(domain),
+      ),
+      { message: 'Invalid hosted agent presence input' },
+    );
+  }
+});
+
+test('identity retirement rejects drift in every variable identity fact', async () => {
+  const domain = await loadDomain();
+  const before = domain.createReviewedHostedIdentityMapping(mappingFixture());
+  for (const drift of [
+    { tenantId: 'id_9999999999999999' },
+    { subjectId: 'id_9999999999999999' },
+    { profileName: 'spiders-renamed' },
+    { workplaceLabel: 'Executive Office' },
+    { skills: ['different-skill'] },
+  ]) {
+    const after = domain.createReviewedHostedIdentityMapping(mappingFixture({
+      status: 'retired', registryRevision: 8,
+      synchronizedAt: '2026-09-27T10:01:00.000Z', ...drift,
+    }));
+    assert.throws(
+      () => domain.createHostedIdentityRetirementHistory(
+        before, after, reviewedRetirementEvent(domain),
+      ),
+      { message: 'Invalid hosted agent presence input' },
+    );
+  }
+});
+
+test('identity retirement requires one adjacent registry revision', async () => {
+  const domain = await loadDomain();
+  const before = domain.createReviewedHostedIdentityMapping(mappingFixture());
+  for (const registryRevision of [7, 9]) {
+    const after = domain.createReviewedHostedIdentityMapping(mappingFixture({
+      status: 'retired', registryRevision,
+      synchronizedAt: '2026-09-27T10:01:00.000Z',
+    }));
+    assert.throws(
+      () => domain.createHostedIdentityRetirementHistory(
+        before, after, reviewedRetirementEvent(domain, { nextRevision: registryRevision }),
+      ),
+      { message: 'Invalid hosted agent presence input' },
+    );
+  }
+});
+
+test('identity retirement requires synchronized time to advance strictly', async () => {
+  const domain = await loadDomain();
+  const before = domain.createReviewedHostedIdentityMapping(mappingFixture());
+  for (const synchronizedAt of [
+    '2026-09-27T10:00:00.000Z',
+    '2026-09-27T09:59:59.999Z',
+  ]) {
+    const after = domain.createReviewedHostedIdentityMapping(mappingFixture({
+      status: 'retired', registryRevision: 8, synchronizedAt,
+    }));
+    assert.throws(
+      () => domain.createHostedIdentityRetirementHistory(
+        before, after, reviewedRetirementEvent(domain, { occurredAt: synchronizedAt }),
+      ),
+      { message: 'Invalid hosted agent presence input' },
+    );
+  }
+});
+
+test('identity retirement requires an exact closed source event bound to the transition', async () => {
+  const domain = await loadDomain();
+  const before = domain.createReviewedHostedIdentityMapping(mappingFixture());
+  const after = domain.createReviewedHostedIdentityMapping(mappingFixture({
+    status: 'retired', registryRevision: 8,
+    synchronizedAt: '2026-09-27T10:01:00.000Z',
+  }));
+  const disagreements = [
+    { tenantId: 'id_9999999999999999' },
+    { subjectId: 'id_9999999999999999' },
+    { identityId: 'other' },
+    { profileName: 'other' },
+    { priorRevision: 6 },
+    { nextRevision: 9 },
+    { occurredAt: '2026-09-27T09:59:59.999Z' },
+    { occurredAt: '2026-09-27T10:01:00.001Z' },
+  ];
+
+  for (const disagreement of disagreements) {
+    assert.throws(
+      () => domain.createHostedIdentityRetirementHistory(
+        before, after, reviewedRetirementEvent(domain, disagreement),
+      ),
+      { message: 'Invalid hosted agent presence input' },
+    );
+  }
+  assert.throws(
+    () => domain.createHostedIdentityRetirementHistory(before, after, retirementEvent()),
+    { message: 'Invalid hosted agent presence input' },
+  );
+});
+
+test('identity retirement event rejects malformed coercible and unsafe scalars', async () => {
+  const domain = await loadDomain();
+  let coercionCalls = 0;
+  const coercible = {
+    [Symbol.toPrimitive]() {
+      coercionCalls += 1;
+      return 7;
+    },
+  };
+  for (const overrides of [
+    { tenantId: '' },
+    { subjectId: new String(IDS.subject) },
+    { identityId: 'other' },
+    { profileName: 'Spiders' },
+    { priorRevision: -0 },
+    { priorRevision: '7' },
+    { priorRevision: coercible },
+    { nextRevision: Number.MAX_SAFE_INTEGER + 1 },
+    { nextRevision: Number.NaN },
+    { occurredAt: 'not-a-timestamp' },
+  ]) {
+    const event = retirementEvent(overrides);
+    assert.throws(
+      () => domain.createHostedIdentityRetirementEvent(
+        event.tenantId,
+        event.subjectId,
+        event.identityId,
+        event.profileName,
+        event.priorRevision,
+        event.nextRevision,
+        event.occurredAt,
+      ),
+      { message: 'Invalid hosted agent presence input' },
+    );
+  }
+  assert.equal(coercionCalls, 0);
+});
+
+test('identity retirement rejects forged inherited unknown-key and Proxy source events', async () => {
+  const domain = await loadDomain();
+  const before = domain.createReviewedHostedIdentityMapping(mappingFixture());
+  const after = domain.createReviewedHostedIdentityMapping(mappingFixture({
+    status: 'retired', registryRevision: 8,
+    synchronizedAt: '2026-09-27T10:01:00.000Z',
+  }));
+  const reviewed = reviewedRetirementEvent(domain);
+  const forgedEvents = [
+    { ...reviewed },
+    Object.assign(Object.create(reviewed), {}),
+    { ...reviewed, reason: 'free text' },
+    Object.assign({ ...reviewed }, { [Symbol('hidden')]: true }),
+    new Proxy(reviewed, {}),
+  ];
+
+  for (const event of forgedEvents) {
+    assert.throws(
+      () => domain.createHostedIdentityRetirementHistory(before, after, event),
+      { message: 'Invalid hosted agent presence input' },
+    );
+  }
+});
+
+test('identity retirement rejects accessor and racing source events without executing hooks', async () => {
+  const domain = await loadDomain();
+  const before = domain.createReviewedHostedIdentityMapping(mappingFixture());
+  const after = domain.createReviewedHostedIdentityMapping(mappingFixture({
+    status: 'retired', registryRevision: 8,
+    synchronizedAt: '2026-09-27T10:01:00.000Z',
+  }));
+  let hookCalls = 0;
+  const accessorEvent = Object.defineProperty(retirementEvent(), 'occurredAt', {
+    enumerable: true,
+    get() { hookCalls += 1; return '2026-09-27T10:00:30.000Z'; },
+  });
+  const racingEvent = new Proxy(retirementEvent(), {
+    ownKeys(target) { hookCalls += 1; return Reflect.ownKeys(target); },
+    get(target, key) { hookCalls += 1; return Reflect.get(target, key); },
+  });
+
+  for (const event of [accessorEvent, racingEvent]) {
+    assert.throws(
+      () => domain.createHostedIdentityRetirementHistory(before, after, event),
+      { message: 'Invalid hosted agent presence input' },
+    );
+  }
+  assert.equal(hookCalls, 0);
+});
+
+test('identity retirement rejects forged reviewed mappings without executing Proxy traps', async () => {
+  const domain = await loadDomain();
+  const before = domain.createReviewedHostedIdentityMapping(mappingFixture());
+  const after = domain.createReviewedHostedIdentityMapping(mappingFixture({
+    status: 'retired', registryRevision: 8,
+    synchronizedAt: '2026-09-27T10:01:00.000Z',
+  }));
+  let trapCalls = 0;
+  const forgedBefore = new Proxy(before, {
+    get() { trapCalls += 1; return undefined; },
+    getPrototypeOf() { trapCalls += 1; return Object.prototype; },
+    ownKeys() { trapCalls += 1; return []; },
+  });
+  for (const [candidateBefore, candidateAfter] of [
+    [{ ...before }, after],
+    [Object.assign(Object.create(before), {}), after],
+    [forgedBefore, after],
+    [before, { ...after }],
+  ]) {
+    assert.throws(
+      () => domain.createHostedIdentityRetirementHistory(
+        candidateBefore, candidateAfter, reviewedRetirementEvent(domain),
+      ),
+      { message: 'Invalid hosted agent presence input' },
+    );
+  }
+  assert.equal(trapCalls, 0);
+});
+
+test('identity retirement history grants no current operational state or authority', async () => {
+  const domain = await loadDomain();
+  const before = domain.createReviewedHostedIdentityMapping(mappingFixture());
+  const after = domain.createReviewedHostedIdentityMapping(mappingFixture({
+    status: 'retired', registryRevision: 8,
+    synchronizedAt: '2026-09-27T10:01:00.000Z',
+  }));
+  const history = domain.createHostedIdentityRetirementHistory(
+    before, after, reviewedRetirementEvent(domain),
+  );
+
+  assert.deepEqual(Object.keys(history).sort(), [
+    'identityId', 'nextRevision', 'nextStatus', 'occurredAt', 'priorRevision',
+    'priorStatus', 'profileName', 'reason', 'subjectId', 'tenantId',
+  ]);
+  for (const forbidden of [
+    'available', 'state', 'currentWork', 'work', 'movement', 'occupancy',
+    'session', 'membership', 'tenantMembership', 'recordAccess', 'roleLabel',
+    'skills', 'permissions', 'actionAuthorities', 'spending',
+    'externalCommunication', 'releaseAuthority', 'providerAccess', 'deleted',
+    'revoked', 'reactivation',
+  ]) {
+    assert.equal(Object.hasOwn(history, forbidden), false);
+  }
+});
+
+test('identity retirement event time accepts both synchronized boundaries', async () => {
+  const domain = await loadDomain();
+  const before = domain.createReviewedHostedIdentityMapping(mappingFixture());
+  const after = domain.createReviewedHostedIdentityMapping(mappingFixture({
+    status: 'retired', registryRevision: 8,
+    synchronizedAt: '2026-09-27T10:01:00.000Z',
+  }));
+  for (const occurredAt of [before.synchronizedAt, after.synchronizedAt]) {
+    const history = domain.createHostedIdentityRetirementHistory(
+      before, after, reviewedRetirementEvent(domain, { occurredAt }),
+    );
+    assert.equal(history.occurredAt, occurredAt);
+  }
+});
+
 test('exact reviewed workplace reassignment produces minimal detached frozen historical continuity', async () => {
   const domain = await loadDomain();
   assert.equal(typeof domain.createHostedIdentityWorkplaceReassignmentHistory, 'function');
