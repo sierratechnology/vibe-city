@@ -7,6 +7,12 @@ const SOURCE_REASONS = Object.freeze({
   degraded: 'heartbeat_delayed',
   unavailable: 'source_unavailable',
 } as const);
+const BLOCK_REASONS = Object.freeze({
+  dependency: true,
+  needs_input: true,
+  capability: true,
+  transient: true,
+} as const);
 const TRUSTED_MAPPINGS = new WeakSet<object>();
 const REQUEST_PROVENANCE = new WeakMap<object, object>();
 const OBSERVATION_PROVENANCE = new WeakMap<object, Readonly<{
@@ -228,17 +234,49 @@ function requireCurrentRun(value: unknown, observedAt: string): Readonly<Unknown
   });
 }
 
+function requireRecentRun(
+  value: unknown,
+  synchronizedAt: string,
+  observedAt: string,
+): Readonly<UnknownRecord> {
+  const run = requireClosedObject(value, [
+    'runId', 'taskId', 'status', 'outcome', 'claimedAt', 'spawnedAt',
+    'endedAt', 'blockReason',
+  ]);
+  const claimedAt = requireCanonicalTimestamp(run.claimedAt);
+  const spawnedAt = requireCanonicalTimestamp(run.spawnedAt);
+  const endedAt = requireCanonicalTimestamp(run.endedAt);
+  const blockReason = run.blockReason;
+  if (run.status !== 'blocked' || run.outcome !== 'blocked'
+    || typeof blockReason !== 'string' || !Object.hasOwn(BLOCK_REASONS, blockReason)
+    || claimedAt < synchronizedAt || claimedAt > spawnedAt
+    || spawnedAt > endedAt || endedAt > observedAt) fail();
+  return Object.freeze({
+    runId: requireOpaqueId(run.runId), taskId: requireOpaqueId(run.taskId),
+    status: 'blocked', outcome: 'blocked', claimedAt, spawnedAt, endedAt,
+    blockReason,
+  });
+}
+
 function requireDecisiveEvent(
   value: unknown,
   run: Readonly<UnknownRecord>,
 ): Readonly<UnknownRecord> {
-  const event = requireClosedObject(value, ['eventId', 'runId', 'kind', 'occurredAt']);
+  const blocked = run.status === 'blocked';
+  const event = requireClosedObject(
+    value,
+    ['eventId', 'runId', 'kind', 'occurredAt', ...(blocked ? ['blockReason'] : [])],
+  );
   const occurredAt = requireCanonicalTimestamp(event.occurredAt);
-  if (event.runId !== run.runId || event.kind !== 'heartbeat'
-    || occurredAt !== run.heartbeatAt) fail();
+  if (event.runId !== run.runId
+    || (blocked
+      ? event.kind !== 'blocked' || occurredAt !== run.endedAt
+        || event.blockReason !== run.blockReason
+      : event.kind !== 'heartbeat' || occurredAt !== run.heartbeatAt)) fail();
   return Object.freeze({
     eventId: requireOpaqueId(event.eventId), runId: requireOpaqueId(event.runId),
-    kind: 'heartbeat', occurredAt,
+    kind: blocked ? 'blocked' : 'heartbeat', occurredAt,
+    ...(blocked ? { blockReason: event.blockReason as string } : {}),
   });
 }
 
@@ -249,6 +287,7 @@ export type HermesPresenceObservation = Readonly<{
   status: 'available' | 'degraded' | 'unavailable';
   reason: string;
   currentRun: unknown;
+  recentRun?: unknown;
   decisiveEvent: unknown;
 }>;
 
@@ -267,31 +306,43 @@ export function createHermesPresenceObservation(
     const object = requireClosedObject(input, [
       'profileName', 'mappingRevision', 'observedAt', 'status', 'reason',
       'currentRun', 'decisiveEvent',
-    ]);
+    ], ['recentRun']);
     const observedAt = requireCanonicalTimestamp(object.observedAt);
     const reason = requireReason(object.reason);
+    const status = object.status;
+    if (typeof status !== 'string' || !Object.hasOwn(SOURCE_REASONS, status)) fail();
+    const sourceStatus = status as keyof typeof SOURCE_REASONS;
     if (object.profileName !== mapping.profileName
       || object.mappingRevision !== mapping.registryRevision
       || observedAt < mapping.synchronizedAt
       || observedAt > request.evaluatedAt
-      || !Object.hasOwn(SOURCE_REASONS, object.status as PropertyKey)
-      || SOURCE_REASONS[object.status as keyof typeof SOURCE_REASONS] !== reason
-      || (mapping.status !== 'active' && object.status === 'available')) fail();
+      || SOURCE_REASONS[sourceStatus] !== reason
+      || (mapping.status !== 'active' && sourceStatus === 'available')) fail();
     let currentRun: Readonly<UnknownRecord> | null = null;
+    let recentRun: Readonly<UnknownRecord> | undefined;
     let decisiveEvent: Readonly<UnknownRecord> | null = null;
-    if (object.currentRun !== null || object.decisiveEvent !== null) {
-      if (object.status !== 'available'
-        || object.currentRun === null || object.decisiveEvent === null) fail();
+    if (Object.hasOwn(object, 'recentRun')) {
+      if (sourceStatus !== 'available' || mapping.status !== 'active'
+        || object.currentRun !== null || object.recentRun === null) fail();
+      recentRun = requireRecentRun(object.recentRun, mapping.synchronizedAt, observedAt);
+    }
+    if (object.currentRun !== null) {
+      if (sourceStatus !== 'available' || recentRun !== undefined
+        || object.decisiveEvent === null) fail();
       currentRun = requireCurrentRun(object.currentRun, observedAt);
       decisiveEvent = requireDecisiveEvent(object.decisiveEvent, currentRun);
+    } else if (object.decisiveEvent !== null) {
+      if (sourceStatus !== 'available' || recentRun === undefined) fail();
+      decisiveEvent = requireDecisiveEvent(object.decisiveEvent, recentRun);
     }
     const accepted = Object.freeze({
       profileName: mapping.profileName,
       mappingRevision: mapping.registryRevision,
       observedAt,
-      status: object.status as HermesPresenceObservation['status'],
+      status: sourceStatus,
       reason,
       currentRun,
+      ...(recentRun === undefined ? {} : { recentRun }),
       decisiveEvent,
     });
     OBSERVATION_PROVENANCE.set(accepted, { mapping, request });
@@ -312,6 +363,12 @@ export type DerivedHostedAgentPresenceState =
   | (DerivedPresenceBase & Readonly<{
     state: 'working';
     reason: 'heartbeat';
+    taskId: string;
+    runId: string;
+  }>)
+  | (DerivedPresenceBase & Readonly<{
+    state: 'blocked';
+    reason: 'run_blocked';
     taskId: string;
     runId: string;
   }>)
@@ -339,6 +396,19 @@ export function deriveHostedAgentPresenceState(
         profileName: mapping.profileName,
         state: 'working',
         reason: 'heartbeat',
+        observedAt: observation.observedAt,
+        taskId: run.taskId,
+        runId: run.runId,
+      });
+    }
+    if (observation.recentRun !== undefined && observation.decisiveEvent !== null) {
+      const run = observation.recentRun as Readonly<{ runId: string; taskId: string }>;
+      return Object.freeze({
+        identityId: mapping.identityId,
+        subjectId: mapping.subjectId,
+        profileName: mapping.profileName,
+        state: 'blocked',
+        reason: 'run_blocked',
         observedAt: observation.observedAt,
         taskId: run.taskId,
         runId: run.runId,
