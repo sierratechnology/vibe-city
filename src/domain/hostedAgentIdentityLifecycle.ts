@@ -7,11 +7,39 @@ import {
 const GENERIC_ERROR = 'Invalid hosted agent presence input';
 const OPAQUE_ID = /^id_[a-f0-9]{16,64}$/;
 const PROFILE_NAME = /^[a-z][a-z0-9_-]{0,63}$/;
+const reviewedOnboardingEventMappings = new WeakMap<object, ReviewedHostedIdentityMapping>();
 const reviewedProfileRenameEvents = new WeakSet<object>();
 const reviewedWorkplaceReassignmentEvents = new WeakSet<object>();
 const reviewedRetirementEvents = new WeakSet<object>();
 
 type UnknownRecord = Record<string, unknown>;
+
+export type HostedIdentityOnboardingHistory = Readonly<{
+  tenantId: string;
+  subjectId: string;
+  identityId: 'stg-spiders';
+  profileName: string;
+  initialRevision: 1;
+  occurredAt: string;
+  synchronizedAt: string;
+  status: 'active';
+  reason: 'identity_onboarded';
+}>;
+
+export type ReviewedHostedIdentityOnboardingEvent = Readonly<{
+  tenantId: string;
+  subjectId: string;
+  identityId: 'stg-spiders';
+  displayName: 'Spiders';
+  profileName: string;
+  roleLabel: 'Chief Agent';
+  workplaceLabel: ReviewedHostedIdentityMapping['workplaceLabel'];
+  skills: readonly string[];
+  permissions: readonly never[];
+  actionAuthorities: readonly never[];
+  initialRevision: 1;
+  occurredAt: string;
+}>;
 
 export type HostedIdentityProfileRenameHistory = Readonly<{
   tenantId: string;
@@ -117,6 +145,90 @@ function requireCanonicalTimestamp(value: unknown): string {
 
 function timestampEpoch(value: string): number {
   return new Date(value).getTime();
+}
+
+export function createHostedIdentityOnboardingEvent(
+  mappingInput: unknown,
+  tenantId: unknown,
+  subjectId: unknown,
+  identityId: unknown,
+  displayName: unknown,
+  profileName: unknown,
+  roleLabel: unknown,
+  workplaceLabel: unknown,
+  initialRevision: unknown,
+  occurredAtInput: unknown,
+): ReviewedHostedIdentityOnboardingEvent {
+  try {
+    const mapping = requireTrustedMapping(mappingInput);
+    if (mapping.status !== 'active' || mapping.registryRevision !== 1
+      || tenantId !== mapping.tenantId
+      || subjectId !== mapping.subjectId
+      || identityId !== mapping.identityId
+      || displayName !== mapping.displayName
+      || profileName !== mapping.profileName
+      || roleLabel !== mapping.roleLabel
+      || workplaceLabel !== mapping.workplaceLabel
+      || initialRevision !== mapping.registryRevision) fail();
+    const occurredAt = requireCanonicalTimestamp(occurredAtInput);
+    const event = Object.freeze({
+      tenantId,
+      subjectId,
+      identityId,
+      displayName,
+      profileName,
+      roleLabel,
+      workplaceLabel,
+      skills: Object.freeze([...mapping.skills]),
+      permissions: Object.freeze([...mapping.permissions]),
+      actionAuthorities: Object.freeze([...mapping.actionAuthorities]),
+      initialRevision,
+      occurredAt,
+    }) as ReviewedHostedIdentityOnboardingEvent;
+    reviewedOnboardingEventMappings.set(event, mapping);
+    return event;
+  } catch {
+    throw new TypeError(GENERIC_ERROR);
+  }
+}
+
+export function createHostedIdentityOnboardingHistory(
+  mappingInput: unknown,
+  eventInput: unknown,
+): HostedIdentityOnboardingHistory {
+  try {
+    const mapping = requireTrustedMapping(mappingInput);
+    if (eventInput === null || typeof eventInput !== 'object'
+      || reviewedOnboardingEventMappings.get(eventInput) !== mapping) fail();
+    const event = eventInput as UnknownRecord;
+    if (mapping.status !== 'active' || mapping.registryRevision !== 1
+      || event.tenantId !== mapping.tenantId
+      || event.subjectId !== mapping.subjectId
+      || event.identityId !== mapping.identityId
+      || event.displayName !== mapping.displayName
+      || event.profileName !== mapping.profileName
+      || event.roleLabel !== mapping.roleLabel
+      || event.workplaceLabel !== mapping.workplaceLabel
+      || !sameStrings(event.skills as readonly string[], mapping.skills)
+      || !sameStrings(event.permissions as readonly string[], mapping.permissions)
+      || !sameStrings(event.actionAuthorities as readonly string[], mapping.actionAuthorities)
+      || event.initialRevision !== mapping.registryRevision) fail();
+    const occurredAt = requireCanonicalTimestamp(event.occurredAt);
+    if (timestampEpoch(occurredAt) > timestampEpoch(mapping.synchronizedAt)) fail();
+    return Object.freeze({
+      tenantId: mapping.tenantId,
+      subjectId: mapping.subjectId,
+      identityId: mapping.identityId,
+      profileName: mapping.profileName,
+      initialRevision: 1,
+      occurredAt,
+      synchronizedAt: mapping.synchronizedAt,
+      status: 'active',
+      reason: 'identity_onboarded',
+    });
+  } catch {
+    throw new TypeError(GENERIC_ERROR);
+  }
 }
 
 export function createHostedIdentityProfileRenameEvent(
