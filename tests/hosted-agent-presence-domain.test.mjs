@@ -603,11 +603,30 @@ test('hosted presence contract remains dormant with zero runtime import or side-
   assert.equal(/Math\.random|Date\.now/.test(source), false);
 
   const sourceRoot = new URL('../src/', import.meta.url);
+  const lifecycleEntry = 'domain/hostedAgentIdentityLifecycle.ts';
+  const lifecycleSource = await readFile(new URL(lifecycleEntry, sourceRoot), 'utf8');
+  const lifecycleAst = ts.createSourceFile(
+    lifecycleEntry, lifecycleSource, ts.ScriptTarget.ES2022, true, ts.ScriptKind.TS,
+  );
+  const lifecycleImports = lifecycleAst.statements
+    .filter((statement) => ts.isImportDeclaration(statement))
+    .map((statement) => statement.moduleSpecifier.text);
+  assert.deepEqual(lifecycleImports, ['./hostedAgentPresence']);
+  assert.equal(/\b(fetch|WebSocket|EventSource|setTimeout|setInterval)\s*\(/.test(lifecycleSource), false);
+  assert.equal(/\b(process(?:\.env)?|localStorage|sessionStorage|indexedDB|supabase|sqlite)\b/i.test(lifecycleSource), false);
+  assert.equal(/Math\.random|Date\.now/.test(lifecycleSource), false);
+
   const entries = await readdir(sourceRoot, { recursive: true });
   for (const entry of entries.filter((name) => /\.(?:ts|js)$/.test(name))) {
     if (entry === 'domain/hostedAgentPresence.ts') continue;
     const content = await readFile(new URL(entry, sourceRoot), 'utf8');
-    assert.equal(content.includes('hostedAgentPresence'), false, `unexpected runtime importer: ${entry}`);
+    if (content.includes('hostedAgentPresence')) {
+      assert.equal(entry, lifecycleEntry, `unexpected runtime importer: ${entry}`);
+    }
+    if (entry !== lifecycleEntry) {
+      assert.equal(content.includes('hostedAgentIdentityLifecycle'), false,
+        `unexpected lifecycle importer: ${entry}`);
+    }
   }
 });
 
