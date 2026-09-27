@@ -97,6 +97,17 @@ export class PrivateWorkRecordsStore {
           AND json_extract(event_json, '$.eventKind') = 'block'
         ORDER BY rowid DESC LIMIT 1
       `);
+      this.readLatestArchiveStatement = this.database.prepare(`
+        SELECT audit.event_json
+        FROM private_material_audit_events AS audit
+        JOIN private_work_records AS record
+          ON record.tenant_id = audit.tenant_id AND record.record_id = audit.record_id
+        WHERE audit.tenant_id = ? AND audit.record_id = ?
+          AND audit.prior_revision = record.revision - 1
+          AND audit.new_revision = record.revision
+          AND json_extract(audit.event_json, '$.eventKind') = 'archive'
+        ORDER BY audit.rowid DESC LIMIT 2
+      `);
       this.updateRecordStatement = this.database.prepare(`
         UPDATE private_work_records
         SET revision = ?, record_json = ?, recorded_at = ?
@@ -262,6 +273,11 @@ export class PrivateWorkRecordsStore {
   readLatestBlock(tenantId, recordId) {
     const row = this.readLatestBlockStatement.get(tenantId, recordId);
     return row ? JSON.parse(row.event_json) : null;
+  }
+
+  readLatestArchive(tenantId, recordId) {
+    const rows = this.readLatestArchiveStatement.all(tenantId, recordId);
+    return rows.length === 1 ? JSON.parse(rows[0].event_json) : null;
   }
 
   countRecords(tenantId) {
