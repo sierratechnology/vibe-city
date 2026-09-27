@@ -67,7 +67,9 @@ export class PrivateWorkRecordsStore {
       `);
       this.listStatement = this.database.prepare(`
         SELECT record_json FROM private_work_records
-        WHERE tenant_id = ? ORDER BY recorded_at DESC, record_id DESC LIMIT ?
+        WHERE tenant_id = ?
+          AND json_extract(record_json, '$.lifecycle') NOT IN ('archived', 'deleted')
+        ORDER BY recorded_at DESC, record_id DESC LIMIT ?
       `);
       this.recordCountStatement = this.database.prepare(
         'SELECT COUNT(*) AS count FROM private_work_records WHERE tenant_id = ?',
