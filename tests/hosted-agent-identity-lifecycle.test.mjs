@@ -136,6 +136,382 @@ function reviewedRetirementEvent(domain, overrides = {}) {
   );
 }
 
+function onboardingEvent(overrides = {}) {
+  return {
+    tenantId: IDS.tenant,
+    subjectId: IDS.subject,
+    identityId: 'stg-spiders',
+    displayName: 'Spiders',
+    profileName: 'spiders',
+    roleLabel: 'Chief Agent',
+    workplaceLabel: 'Chief Agent Office',
+    skills: ['project-coordination'],
+    permissions: [],
+    actionAuthorities: [],
+    initialRevision: 1,
+    occurredAt: '2026-09-27T09:59:59.999Z',
+    ...overrides,
+  };
+}
+
+function reviewedOnboardingEvent(domain, overrides = {}, mappingInput) {
+  const event = onboardingEvent(overrides);
+  if (['skills', 'permissions', 'actionAuthorities'].some((field) => Object.hasOwn(overrides, field))) {
+    return domain.createHostedIdentityOnboardingEvent(
+      event.tenantId,
+      event.subjectId,
+      event.identityId,
+      event.displayName,
+      event.profileName,
+      event.roleLabel,
+      event.workplaceLabel,
+      event.skills,
+      event.permissions,
+      event.actionAuthorities,
+      event.initialRevision,
+      event.occurredAt,
+    );
+  }
+  const mapping = mappingInput ?? domain.createReviewedHostedIdentityMapping(mappingFixture({
+    registryRevision: 1,
+  }));
+  return domain.createHostedIdentityOnboardingEvent(
+    mapping,
+    event.tenantId,
+    event.subjectId,
+    event.identityId,
+    event.displayName,
+    event.profileName,
+    event.roleLabel,
+    event.workplaceLabel,
+    event.initialRevision,
+    event.occurredAt,
+  );
+}
+
+test('exact reviewed identity onboarding produces minimal detached frozen historical continuity', async () => {
+  const domain = await loadDomain();
+  assert.equal(typeof domain.createHostedIdentityOnboardingHistory, 'function');
+  const mapping = domain.createReviewedHostedIdentityMapping(mappingFixture({
+    registryRevision: 1,
+  }));
+  const event = domain.createHostedIdentityOnboardingEvent(
+    mapping,
+    IDS.tenant,
+    IDS.subject,
+    'stg-spiders',
+    'Spiders',
+    'spiders',
+    'Chief Agent',
+    'Chief Agent Office',
+    1,
+    '2026-09-27T09:59:59.999Z',
+  );
+
+  const history = domain.createHostedIdentityOnboardingHistory(mapping, event);
+
+  assert.deepEqual(history, {
+    tenantId: IDS.tenant,
+    subjectId: IDS.subject,
+    identityId: 'stg-spiders',
+    profileName: 'spiders',
+    initialRevision: 1,
+    occurredAt: '2026-09-27T09:59:59.999Z',
+    synchronizedAt: '2026-09-27T10:00:00.000Z',
+    status: 'active',
+    reason: 'identity_onboarded',
+  });
+  assert.notEqual(history, event);
+  assert.equal(Object.isFrozen(history), true);
+  assert.equal(Object.isFrozen(event), true);
+  assert.equal(Object.isFrozen(event.skills), true);
+  assert.throws(() => { event.skills.push('tampered'); }, TypeError);
+  assert.throws(() => { history.status = 'retired'; }, TypeError);
+});
+
+test('identity onboarding history requires the exact reviewed mapping that created its event', async () => {
+  const domain = await loadDomain();
+  const mappingA = domain.createReviewedHostedIdentityMapping(mappingFixture({ registryRevision: 1 }));
+  const mappingB = domain.createReviewedHostedIdentityMapping(mappingFixture({ registryRevision: 1 }));
+  assert.notEqual(mappingA, mappingB);
+  const event = reviewedOnboardingEvent(domain, {}, mappingA);
+
+  assert.throws(
+    () => domain.createHostedIdentityOnboardingHistory(mappingB, event),
+    { message: 'Invalid hosted agent presence input' },
+  );
+});
+
+test('identity onboarding accepts only an active mapping at initial revision one', async () => {
+  const domain = await loadDomain();
+  for (const overrides of [
+    { status: 'revoked', registryRevision: 1 },
+    { status: 'retired', registryRevision: 1 },
+    { status: 'active', registryRevision: 2 },
+  ]) {
+    const mapping = domain.createReviewedHostedIdentityMapping(mappingFixture(overrides));
+    assert.throws(
+      () => reviewedOnboardingEvent(domain, {}, mapping),
+      { message: 'Invalid hosted agent presence input' },
+    );
+  }
+});
+
+test('identity onboarding requires one exact source event bound to every identity fact', async () => {
+  const domain = await loadDomain();
+  const mapping = domain.createReviewedHostedIdentityMapping(mappingFixture({ registryRevision: 1 }));
+  for (const disagreement of [
+    { tenantId: 'id_9999999999999999' },
+    { subjectId: 'id_9999999999999999' },
+    { identityId: 'other' },
+    { displayName: 'Other' },
+    { profileName: 'other' },
+    { roleLabel: 'Other' },
+    { workplaceLabel: 'Executive Office' },
+    { skills: ['other-skill'] },
+    { permissions: ['record.read'] },
+    { actionAuthorities: ['spend'] },
+    { initialRevision: 2 },
+  ]) {
+    assert.throws(
+      () => domain.createHostedIdentityOnboardingHistory(
+        mapping, reviewedOnboardingEvent(domain, disagreement),
+      ),
+      { message: 'Invalid hosted agent presence input' },
+    );
+  }
+
+  const eventMapping = domain.createReviewedHostedIdentityMapping(mappingFixture({
+    registryRevision: 1,
+    skills: ['other-skill'],
+  }));
+  const event = reviewedOnboardingEvent(domain, {}, eventMapping);
+  assert.throws(
+    () => domain.createHostedIdentityOnboardingHistory(mapping, event),
+    { message: 'Invalid hosted agent presence input' },
+  );
+});
+
+test('identity onboarding event cannot occur after initial registry synchronization', async () => {
+  const domain = await loadDomain();
+  const mapping = domain.createReviewedHostedIdentityMapping(mappingFixture({ registryRevision: 1 }));
+  assert.throws(
+    () => domain.createHostedIdentityOnboardingHistory(
+      mapping,
+      reviewedOnboardingEvent(domain, { occurredAt: '2026-09-27T10:00:00.001Z' }, mapping),
+    ),
+    { message: 'Invalid hosted agent presence input' },
+  );
+});
+
+test('identity onboarding event rejects malformed coercible and unsafe scalar facts', async () => {
+  const domain = await loadDomain();
+  let coercionCalls = 0;
+  const coercible = {
+    [Symbol.toPrimitive]() {
+      coercionCalls += 1;
+      return 1;
+    },
+  };
+  for (const overrides of [
+    { tenantId: '' },
+    { subjectId: new String(IDS.subject) },
+    { identityId: 'other' },
+    { displayName: 'Other' },
+    { profileName: 'Spiders' },
+    { roleLabel: 'Other' },
+    { workplaceLabel: 'Other' },
+    { initialRevision: -0 },
+    { initialRevision: '1' },
+    { initialRevision: coercible },
+    { initialRevision: Number.MAX_SAFE_INTEGER + 1 },
+    { occurredAt: 'not-a-timestamp' },
+  ]) {
+    assert.throws(
+      () => reviewedOnboardingEvent(domain, overrides),
+      { message: 'Invalid hosted agent presence input' },
+    );
+  }
+  assert.equal(coercionCalls, 0);
+});
+
+test('identity onboarding rejects legacy categorical arrays and detaches trusted mapping facts', async () => {
+  const domain = await loadDomain();
+  for (const overrides of [
+    { skills: 'project-coordination' },
+    { skills: ['project-coordination'] },
+    { skills: ['Project Coordination'] },
+    { skills: ['project-coordination', 'project-coordination'] },
+    { skills: Array.from({ length: 17 }, (_, index) => `skill-${index}`) },
+    { permissions: [] },
+    { permissions: ['record.read'] },
+    { actionAuthorities: [] },
+    { actionAuthorities: ['spend'] },
+  ]) {
+    assert.throws(
+      () => reviewedOnboardingEvent(domain, overrides),
+      { message: 'Invalid hosted agent presence input' },
+    );
+  }
+
+  const skills = ['project-coordination'];
+  const mapping = domain.createReviewedHostedIdentityMapping(mappingFixture({
+    registryRevision: 1,
+    skills,
+  }));
+  const event = reviewedOnboardingEvent(domain, {}, mapping);
+  skills[0] = 'tampered';
+  skills.push('another-skill');
+  assert.deepEqual(event.skills, ['project-coordination']);
+  assert.notEqual(event.skills, mapping.skills);
+  assert.notEqual(event.permissions, mapping.permissions);
+  assert.notEqual(event.actionAuthorities, mapping.actionAuthorities);
+  assert.equal(Object.isFrozen(event.skills), true);
+  assert.equal(Object.isFrozen(event.permissions), true);
+  assert.equal(Object.isFrozen(event.actionAuthorities), true);
+});
+
+test('identity onboarding rejects proxied categorical arrays without executing traps', async () => {
+  const domain = await loadDomain();
+  const mapping = domain.createReviewedHostedIdentityMapping(mappingFixture({ registryRevision: 1 }));
+  for (const [field, target] of [
+    ['skills', ['project-coordination']],
+    ['permissions', []],
+    ['actionAuthorities', []],
+  ]) {
+    let trapCalls = 0;
+    const proxy = new Proxy(target, {
+      get() { trapCalls += 1; return undefined; },
+      getOwnPropertyDescriptor() { trapCalls += 1; return undefined; },
+      getPrototypeOf() { trapCalls += 1; return Array.prototype; },
+      ownKeys() { trapCalls += 1; return []; },
+    });
+    let event;
+    assert.throws(
+      () => { event = reviewedOnboardingEvent(domain, { [field]: proxy }); },
+      { message: 'Invalid hosted agent presence input' },
+    );
+    assert.equal(event, undefined);
+    assert.throws(
+      () => domain.createHostedIdentityOnboardingHistory(mapping, event),
+      { message: 'Invalid hosted agent presence input' },
+    );
+    assert.equal(trapCalls, 0);
+  }
+});
+
+test('identity onboarding rejects accessor-backed categorical arrays without executing getters', async () => {
+  const domain = await loadDomain();
+  const mapping = domain.createReviewedHostedIdentityMapping(mappingFixture({ registryRevision: 1 }));
+  const getterCalls = [];
+  const rejectedEvents = [];
+  const rejectedHistories = [];
+  for (const [field, value] of [
+    ['skills', 'project-coordination'],
+    ['permissions', 'record.read'],
+    ['actionAuthorities', 'spend'],
+  ]) {
+    let calls = 0;
+    const accessorBacked = [];
+    Object.defineProperty(accessorBacked, '0', {
+      enumerable: true,
+      get() { calls += 1; return value; },
+    });
+    let event;
+    assert.throws(
+      () => { event = reviewedOnboardingEvent(domain, { [field]: accessorBacked }); },
+      { message: 'Invalid hosted agent presence input' },
+    );
+    rejectedEvents.push(event);
+    let history;
+    assert.throws(
+      () => { history = domain.createHostedIdentityOnboardingHistory(mapping, event); },
+      { message: 'Invalid hosted agent presence input' },
+    );
+    rejectedHistories.push(history);
+    getterCalls.push(calls);
+  }
+  assert.deepEqual(rejectedEvents, [undefined, undefined, undefined]);
+  assert.deepEqual(rejectedHistories, [undefined, undefined, undefined]);
+  assert.deepEqual(getterCalls, [0, 0, 0]);
+});
+
+test('identity onboarding rejects forged inherited unknown-key accessor and Proxy events', async () => {
+  const domain = await loadDomain();
+  const mapping = domain.createReviewedHostedIdentityMapping(mappingFixture({ registryRevision: 1 }));
+  const reviewed = reviewedOnboardingEvent(domain);
+  let hookCalls = 0;
+  const accessor = Object.defineProperty(onboardingEvent(), 'occurredAt', {
+    enumerable: true,
+    get() { hookCalls += 1; return '2026-09-27T09:59:59.999Z'; },
+  });
+  const proxy = new Proxy(reviewed, {
+    get() { hookCalls += 1; return undefined; },
+    ownKeys() { hookCalls += 1; return []; },
+    getPrototypeOf() { hookCalls += 1; return Object.prototype; },
+  });
+  for (const event of [
+    onboardingEvent(),
+    Object.assign(Object.create(reviewed), {}),
+    { ...reviewed, reason: 'free text' },
+    Object.assign({ ...reviewed }, { [Symbol('hidden')]: true }),
+    accessor,
+    proxy,
+  ]) {
+    assert.throws(
+      () => domain.createHostedIdentityOnboardingHistory(mapping, event),
+      { message: 'Invalid hosted agent presence input' },
+    );
+  }
+  assert.equal(hookCalls, 0);
+});
+
+test('identity onboarding rejects forged reviewed mappings without executing Proxy traps', async () => {
+  const domain = await loadDomain();
+  const mapping = domain.createReviewedHostedIdentityMapping(mappingFixture({ registryRevision: 1 }));
+  let trapCalls = 0;
+  const proxy = new Proxy(mapping, {
+    get() { trapCalls += 1; return undefined; },
+    ownKeys() { trapCalls += 1; return []; },
+    getPrototypeOf() { trapCalls += 1; return Object.prototype; },
+  });
+  for (const candidate of [
+    { ...mapping },
+    Object.assign(Object.create(mapping), {}),
+    proxy,
+  ]) {
+    assert.throws(
+      () => reviewedOnboardingEvent(domain, {}, candidate),
+      { message: 'Invalid hosted agent presence input' },
+    );
+  }
+  assert.equal(trapCalls, 0);
+});
+
+test('identity onboarding history grants no current operational state or authority', async () => {
+  const domain = await loadDomain();
+  const mapping = domain.createReviewedHostedIdentityMapping(mappingFixture({ registryRevision: 1 }));
+  const history = domain.createHostedIdentityOnboardingHistory(
+    mapping,
+    reviewedOnboardingEvent(domain, { occurredAt: mapping.synchronizedAt }, mapping),
+  );
+
+  assert.deepEqual(Object.keys(history).sort(), [
+    'identityId', 'initialRevision', 'occurredAt', 'profileName', 'reason',
+    'status', 'subjectId', 'synchronizedAt', 'tenantId',
+  ]);
+  for (const forbidden of [
+    'available', 'state', 'currentWork', 'work', 'working', 'meeting',
+    'researching', 'reviewing', 'blocked', 'completed', 'movement',
+    'roomOccupancy', 'session', 'sessionMembership', 'tenantMembership',
+    'recordAccess', 'roleLabel', 'workplaceLabel', 'skills', 'permissions',
+    'actionAuthorities', 'spending', 'externalCommunication',
+    'releaseAuthority', 'providerAccess', 'credentials', 'reactivation',
+  ]) {
+    assert.equal(Object.hasOwn(history, forbidden), false);
+  }
+});
+
 test('exact reviewed identity retirement produces minimal detached frozen historical continuity', async () => {
   const domain = await loadDomain();
   assert.equal(typeof domain.createHostedIdentityRetirementHistory, 'function');
