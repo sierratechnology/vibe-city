@@ -247,6 +247,45 @@ export function createWorkRecord(input: unknown): UnknownRecord {
   });
 }
 
+export function validateCreationAuditEvent(
+  auditValue: unknown,
+  recordValue: unknown,
+  contextValue: unknown,
+): UnknownRecord {
+  const context = requireObject(
+    contextValue,
+    'authorization context',
+  ) as Partial<TrustedAuthorizationContext>;
+  if (context[TRUSTED_AUTHORIZATION] !== true
+    || !TRUSTED_AUTHORIZATION_CONTEXTS.has(context)) {
+    throw new TypeError('trusted authorization context required');
+  }
+  const record = validateWorkRecord(recordValue);
+  const audit = requireMaterialAudit(auditValue);
+  const source = requireObject(record.source, 'record source');
+  if (requireId(audit.tenantId, 'audit tenantId') !== record.tenantId
+    || requireId(audit.recordId, 'audit recordId') !== record.recordId
+    || requireId(audit.actorSubjectId, 'audit actorSubjectId') !== context.actorSubjectId
+    || requireId(audit.authorizationId, 'audit authorizationId') !== context.authorizationId
+    || String(audit.policyRevision) !== context.policyRevision
+    || requireId(audit.sourceId, 'audit sourceId') !== source.sourceId
+    || audit.priorRevision !== 0 || audit.newRevision !== 1
+    || record.revision !== 1) {
+    throw new TypeError('creation audit provenance must match revision 0 to 1');
+  }
+  if (!Array.isArray(audit.changedFields)
+    || audit.changedFields.length !== 1 || audit.changedFields[0] !== 'recordId') {
+    throw new TypeError('creation audit changedFields must exactly describe record identity');
+  }
+  const occurredAt = requireCanonicalTimestamp(audit.occurredAt, 'audit occurredAt');
+  const recordedAt = requireCanonicalTimestamp(audit.recordedAt, 'audit recordedAt');
+  if (occurredAt > recordedAt || recordedAt < String(record.updatedAt)
+    || recordedAt < String(source.recordedAt)) {
+    throw new TypeError('creation audit chronology cannot predate durable record or source');
+  }
+  return structuredClone(audit);
+}
+
 export function createTrustedAuthorizationContext(input: unknown): TrustedAuthorizationContext {
   const facts = requireClosedObject(input, 'trusted authorization facts', [
     'authorizationId', 'actorSubjectId', 'authenticated', 'memberships', 'permissions',
@@ -281,6 +320,7 @@ export function createTrustedAuthorizationContext(input: unknown): TrustedAuthor
     });
   });
   const allowedPermissions = [
+    'record.create', 'record.read',
     'record.transition', 'record.sensitivity.change', 'record.archive', 'record.delete',
     'record.restore', 'record.correct', 'record.supersede',
   ];
