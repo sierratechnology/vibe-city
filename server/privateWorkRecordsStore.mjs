@@ -42,6 +42,19 @@ export class PrivateWorkRecordsStore {
           record_json TEXT NOT NULL,
           PRIMARY KEY (tenant_id, principal_id, authorization_id, policy_revision, request_id)
         ) STRICT;
+        CREATE TABLE IF NOT EXISTS private_mutation_requests (
+          tenant_id TEXT NOT NULL,
+          principal_id TEXT NOT NULL,
+          authorization_id TEXT NOT NULL,
+          policy_revision TEXT NOT NULL,
+          operation TEXT NOT NULL,
+          request_id TEXT NOT NULL,
+          request_semantics TEXT NOT NULL,
+          record_json TEXT NOT NULL,
+          PRIMARY KEY (
+            tenant_id, principal_id, authorization_id, policy_revision, operation, request_id
+          )
+        ) STRICT;
       `);
       if (databasePath !== ':memory:') {
         for (const path of [databasePath, `${databasePath}-wal`, `${databasePath}-shm`]) {
@@ -72,6 +85,15 @@ export class PrivateWorkRecordsStore {
           (tenant_id, audit_event_id, record_id, prior_revision, new_revision, event_json, recorded_at)
         VALUES (?, ?, ?, ?, ?, ?, ?)
       `);
+      this.readHistoryStatement = this.database.prepare(`
+        SELECT event_json FROM private_material_audit_events
+        WHERE tenant_id = ? AND record_id = ? ORDER BY rowid ASC LIMIT ?
+      `);
+      this.updateRecordStatement = this.database.prepare(`
+        UPDATE private_work_records
+        SET revision = ?, record_json = ?, recorded_at = ?
+        WHERE tenant_id = ? AND record_id = ? AND revision = ?
+      `);
       this.readCreateRequestStatement = this.database.prepare(`
         SELECT request_semantics, record_json FROM private_create_requests
         WHERE tenant_id = ? AND principal_id = ? AND authorization_id = ?
@@ -82,6 +104,17 @@ export class PrivateWorkRecordsStore {
           (tenant_id, principal_id, authorization_id, policy_revision, request_id,
            request_semantics, record_json)
         VALUES (?, ?, ?, ?, ?, ?, ?)
+      `);
+      this.readMutationRequestStatement = this.database.prepare(`
+        SELECT request_semantics, record_json FROM private_mutation_requests
+        WHERE tenant_id = ? AND principal_id = ? AND authorization_id = ?
+          AND policy_revision = ? AND operation = ? AND request_id = ?
+      `);
+      this.insertMutationRequestStatement = this.database.prepare(`
+        INSERT INTO private_mutation_requests
+          (tenant_id, principal_id, authorization_id, policy_revision, operation, request_id,
+           request_semantics, record_json)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       `);
     } catch (error) {
       try { this.database.close(); } catch { /* preserve initialization failure */ }
@@ -137,6 +170,58 @@ export class PrivateWorkRecordsStore {
     }
   }
 
+  mutate(record, auditEvent, expectedRevision, requestIdentity = null) {
+    try {
+      this.database.exec('BEGIN IMMEDIATE');
+      const requestParameters = requestIdentity === null ? null : [
+        requestIdentity.tenantId, requestIdentity.principalId,
+        requestIdentity.authorizationId, requestIdentity.policyRevision,
+        requestIdentity.operation, requestIdentity.requestId,
+      ];
+      if (requestParameters !== null) {
+        const existing = this.readMutationRequestStatement.get(...requestParameters);
+        if (existing) {
+          this.database.exec('COMMIT');
+          return existing.request_semantics === requestIdentity.requestSemantics
+            ? { ok: true, replayed: true, record: JSON.parse(existing.record_json) }
+            : { ok: false, code: 'idempotency_conflict' };
+        }
+      }
+      if (record.revision !== expectedRevision + 1
+        || auditEvent.priorRevision !== expectedRevision
+        || auditEvent.newRevision !== record.revision) {
+        this.database.exec('ROLLBACK');
+        return { ok: false, code: 'stale_revision' };
+      }
+      const updated = this.updateRecordStatement.run(
+        record.revision, JSON.stringify(record), record.updatedAt,
+        record.tenantId, record.recordId, expectedRevision,
+      );
+      if (Number(updated.changes) !== 1) {
+        this.database.exec('ROLLBACK');
+        return { ok: false, code: 'stale_revision' };
+      }
+      this.insertAuditStatement.run(
+        auditEvent.tenantId, auditEvent.auditId, auditEvent.recordId,
+        auditEvent.priorRevision, auditEvent.newRevision,
+        JSON.stringify(auditEvent), auditEvent.recordedAt,
+      );
+      if (requestParameters !== null) {
+        this.insertMutationRequestStatement.run(
+          ...requestParameters, requestIdentity.requestSemantics, JSON.stringify(record),
+        );
+      }
+      this.database.exec('COMMIT');
+      return { ok: true, replayed: false };
+    } catch (error) {
+      try { this.database.exec('ROLLBACK'); } catch { /* no active transaction */ }
+      if (Number.isInteger(error?.errcode) && (error.errcode & 0xff) === 19) {
+        return { ok: false, code: 'duplicate' };
+      }
+      throw error;
+    }
+  }
+
   read(tenantId, recordId) {
     const row = this.readStatement.get(tenantId, recordId);
     return row ? JSON.parse(row.record_json) : null;
@@ -144,6 +229,11 @@ export class PrivateWorkRecordsStore {
 
   list(tenantId, limit) {
     return this.listStatement.all(tenantId, limit).map((row) => JSON.parse(row.record_json));
+  }
+
+  readHistory(tenantId, recordId, limit) {
+    return this.readHistoryStatement.all(tenantId, recordId, limit)
+      .map((row) => JSON.parse(row.event_json));
   }
 
   countRecords(tenantId) {

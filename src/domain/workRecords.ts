@@ -320,7 +320,7 @@ export function createTrustedAuthorizationContext(input: unknown): TrustedAuthor
     });
   });
   const allowedPermissions = [
-    'record.create', 'record.read',
+    'record.create', 'record.read', 'record.rename', 'record.reassign', 'record.history.read',
     'record.transition', 'record.sensitivity.change', 'record.archive', 'record.delete',
     'record.restore', 'record.correct', 'record.supersede',
   ];
