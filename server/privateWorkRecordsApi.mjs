@@ -24,6 +24,16 @@ function isObject(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
+function hasExactKeys(value, keys) {
+  return isObject(value) && Object.keys(value).sort().join(',') === [...keys].sort().join(',');
+}
+
+function isCanonicalTimestamp(value) {
+  if (typeof value !== 'string') return false;
+  const timestamp = new Date(value);
+  return Number.isFinite(timestamp.getTime()) && timestamp.toISOString() === value;
+}
+
 function canonicalJson(value) {
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
   if (value !== null && typeof value === 'object') {
@@ -49,7 +59,7 @@ async function readJsonBody(request) {
 }
 
 function parseRoute(rawUrl) {
-  const match = /^\/api\/private\/tenants\/([^/]+)\/records(?:\/([^/]+)(?:\/(rename|reassignment|block|unblock|archive|tombstone|history))?)?$/.exec(rawUrl ?? '/');
+  const match = /^\/api\/private\/tenants\/([^/]+)\/records(?:\/([^/]+)(?:\/(rename|reassignment|block|unblock|archive|tombstone|restore|history))?)?$/.exec(rawUrl ?? '/');
   if (match === null) return null;
   return { tenantId: match[1], recordId: match[2] ?? null, action: match[3] ?? null };
 }
@@ -74,6 +84,105 @@ export function createPrivateWorkRecordsApiHandler({
       const trusted = domain.createTrustedAuthorizationContext(await resolveTrustedIdentity(request));
       const membership = trusted.memberships.find((candidate) => candidate.tenantId === route.tenantId);
       if (!trusted.authenticated || !membership || membership.status !== 'active') return deny(response);
+      if (request.method === 'POST' && route.recordId !== null && route.action === 'restore') {
+        if (!trusted.permissions.includes('record.restore')) return deny(response);
+        if (request.headers['content-type']?.split(';', 1)[0].trim().toLowerCase() !== 'application/json') {
+          return deny(response);
+        }
+        const body = await readJsonBody(request);
+        if (!isObject(body)
+          || Object.keys(body).sort().join(',') !== 'expectedRevision,occurredAt,reasonRef,requestId'
+          || !Number.isSafeInteger(body.expectedRevision)
+          || typeof body.requestId !== 'string' || !REQUEST_ID.test(body.requestId)
+          || typeof body.reasonRef !== 'string' || body.reasonRef.trim() !== body.reasonRef
+          || body.reasonRef.length < 1 || body.reasonRef.length > 240
+          || typeof body.occurredAt !== 'string') return deny(response);
+        const current = store.read(route.tenantId, route.recordId);
+        if (current === null) return deny(response);
+        domain.authorizeRecordAction(trusted, {
+          action: 'record.restore', requestedTenantId: route.tenantId,
+        }, current);
+        const requestIdentity = {
+          tenantId: route.tenantId, principalId: trusted.actorSubjectId,
+          authorizationId: trusted.authorizationId, policyRevision: trusted.policyRevision,
+          operation: 'restore', requestId: body.requestId,
+          requestSemantics: canonicalJson({
+            recordId: route.recordId, expectedRevision: body.expectedRevision,
+            reasonRef: body.reasonRef, occurredAt: body.occurredAt,
+          }),
+        };
+        const replay = store.replayMutation(requestIdentity);
+        if (replay !== null) {
+          return replay.ok
+            ? sendJson(response, 200, { record: replay.record })
+            : sendJson(response, 409, { error: 'conflict' });
+        }
+        if (body.expectedRevision !== current.revision || current.lifecycle !== 'archived') {
+          return sendJson(response, 409, { error: 'conflict' });
+        }
+        const archiveEvent = store.readLatestArchive(route.tenantId, route.recordId);
+        const restoredLifecycle = archiveEvent?.changedFields?.lifecycle?.prior;
+        if (!hasExactKeys(archiveEvent, [
+          'auditId', 'tenantId', 'recordId', 'eventKind', 'actorSubjectId',
+          'authorizationId', 'policyRevision', 'sourceId', 'reasonRef',
+          'priorRevision', 'newRevision', 'occurredAt', 'recordedAt', 'changedFields',
+        ])
+          || !hasExactKeys(archiveEvent.changedFields, ['lifecycle', 'archivedAt'])
+          || !hasExactKeys(archiveEvent.changedFields.lifecycle, ['prior', 'next'])
+          || !hasExactKeys(archiveEvent.changedFields.archivedAt, ['prior', 'next'])
+          || !['open', 'in_progress', 'completed'].includes(restoredLifecycle)
+          || archiveEvent.tenantId !== route.tenantId || archiveEvent.recordId !== route.recordId
+          || archiveEvent.eventKind !== 'archive'
+          || !REQUEST_ID.test(archiveEvent.auditId)
+          || !REQUEST_ID.test(archiveEvent.actorSubjectId)
+          || !REQUEST_ID.test(archiveEvent.authorizationId)
+          || !REQUEST_ID.test(archiveEvent.sourceId)
+          || archiveEvent.sourceId !== current.source.sourceId
+          || typeof archiveEvent.policyRevision !== 'string'
+          || archiveEvent.policyRevision.length < 1 || archiveEvent.policyRevision.length > 120
+          || typeof archiveEvent.reasonRef !== 'string'
+          || archiveEvent.reasonRef.trim() !== archiveEvent.reasonRef
+          || archiveEvent.reasonRef.length < 1 || archiveEvent.reasonRef.length > 240
+          || archiveEvent.priorRevision !== current.revision - 1
+          || archiveEvent.newRevision !== current.revision
+          || archiveEvent.changedFields.lifecycle.next !== 'archived'
+          || archiveEvent.changedFields.archivedAt.prior !== null
+          || archiveEvent.changedFields.archivedAt.next !== current.archivedAt
+          || !isCanonicalTimestamp(archiveEvent.occurredAt)
+          || archiveEvent.occurredAt !== current.archivedAt
+          || !isCanonicalTimestamp(archiveEvent.recordedAt)
+          || archiveEvent.occurredAt > archiveEvent.recordedAt
+          || archiveEvent.recordedAt > current.updatedAt) return deny(response);
+        const timestamp = now();
+        if (!Number.isFinite(timestamp)) return deny(response);
+        const recordedAt = new Date(timestamp).toISOString();
+        const occurred = new Date(body.occurredAt);
+        if (!Number.isFinite(occurred.getTime()) || occurred.toISOString() !== body.occurredAt
+          || body.occurredAt < current.archivedAt || body.occurredAt < current.updatedAt
+          || body.occurredAt > recordedAt || recordedAt < current.updatedAt
+          || recordedAt < current.source.recordedAt) return deny(response);
+        const record = domain.validateWorkRecord({
+          ...current,
+          lifecycle: restoredLifecycle, archivedAt: null,
+          stateChangedAt: body.occurredAt,
+          revision: current.revision + 1, updatedAt: recordedAt,
+        });
+        const audit = {
+          auditId: generateId('audit'), tenantId: route.tenantId, recordId: route.recordId,
+          eventKind: 'restore', actorSubjectId: trusted.actorSubjectId,
+          authorizationId: trusted.authorizationId, policyRevision: trusted.policyRevision,
+          sourceId: current.source.sourceId, reasonRef: body.reasonRef,
+          priorRevision: current.revision, newRevision: record.revision,
+          occurredAt: body.occurredAt, recordedAt,
+          changedFields: {
+            lifecycle: { prior: 'archived', next: restoredLifecycle },
+            archivedAt: { prior: current.archivedAt, next: null },
+          },
+        };
+        const result = store.mutate(record, audit, body.expectedRevision, requestIdentity);
+        if (!result.ok) return sendJson(response, 409, { error: 'conflict' });
+        return sendJson(response, 200, { record: result.replayed ? result.record : record });
+      }
       if (request.method === 'POST' && route.recordId !== null && route.action === 'tombstone') {
         if (!trusted.permissions.includes('record.delete')) return deny(response);
         if (request.headers['content-type']?.split(';', 1)[0].trim().toLowerCase() !== 'application/json') {
