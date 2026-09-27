@@ -18,6 +18,10 @@ const ACTIVITY_STATES = Object.freeze({
   researching: Object.freeze({ state: 'researching', reason: 'research_activity' }),
   meeting: Object.freeze({ state: 'meeting', reason: 'meeting_activity' }),
 } as const);
+const WORKPLACE_LABELS = Object.freeze({
+  'Chief Agent Office': true,
+  'Executive Office': true,
+} as const);
 const TRUSTED_MAPPINGS = new WeakSet<object>();
 const REQUEST_PROVENANCE = new WeakMap<object, object>();
 const OBSERVATION_PROVENANCE = new WeakMap<object, Readonly<{
@@ -76,6 +80,11 @@ function requireExactString<const Expected extends string>(
 ): Expected {
   if (value !== expected) fail();
   return expected;
+}
+
+function requireWorkplaceLabel(value: unknown): keyof typeof WORKPLACE_LABELS {
+  if (typeof value !== 'string' || !Object.hasOwn(WORKPLACE_LABELS, value)) fail();
+  return value as keyof typeof WORKPLACE_LABELS;
 }
 
 function requireOpaqueId(value: unknown): string {
@@ -144,7 +153,7 @@ export type ReviewedHostedIdentityMapping = Readonly<{
   synchronizedAt: string;
   status: 'active' | 'revoked' | 'retired';
   roleLabel: 'Chief Agent';
-  workplaceLabel: 'Chief Agent Office';
+  workplaceLabel: keyof typeof WORKPLACE_LABELS;
   skills: readonly string[];
   permissions: readonly never[];
   actionAuthorities: readonly never[];
@@ -170,7 +179,7 @@ export function createReviewedHostedIdentityMapping(input: unknown): ReviewedHos
       synchronizedAt: requireCanonicalTimestamp(object.synchronizedAt),
       status: object.status as ReviewedHostedIdentityMapping['status'],
       roleLabel: requireExactString(object.roleLabel, 'Chief Agent'),
-      workplaceLabel: requireExactString(object.workplaceLabel, 'Chief Agent Office'),
+      workplaceLabel: requireWorkplaceLabel(object.workplaceLabel),
       skills: requireSkills(object.skills),
       permissions: requireEmptyArray(object.permissions),
       actionAuthorities: requireEmptyArray(object.actionAuthorities),
@@ -180,6 +189,13 @@ export function createReviewedHostedIdentityMapping(input: unknown): ReviewedHos
   } catch {
     throw new TypeError(GENERIC_ERROR);
   }
+}
+
+export function requireReviewedHostedIdentityMapping(
+  value: unknown,
+): ReviewedHostedIdentityMapping {
+  if (value === null || typeof value !== 'object' || !TRUSTED_MAPPINGS.has(value)) fail();
+  return value as ReviewedHostedIdentityMapping;
 }
 
 export type HostedPresenceRequest = Readonly<{
@@ -194,9 +210,7 @@ export function createHostedPresenceRequest(
   input: unknown,
 ): HostedPresenceRequest {
   try {
-    if (mappingInput === null || typeof mappingInput !== 'object'
-      || !TRUSTED_MAPPINGS.has(mappingInput)) fail();
-    const mapping = mappingInput as ReviewedHostedIdentityMapping;
+    const mapping = requireReviewedHostedIdentityMapping(mappingInput);
     const object = requireClosedObject(input, [
       'boardScope', 'profileName', 'mappingRevision', 'evaluatedAt',
     ]);

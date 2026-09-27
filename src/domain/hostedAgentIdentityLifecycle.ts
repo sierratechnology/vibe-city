@@ -1,13 +1,12 @@
 import {
   createHostedPresenceRequest,
+  requireReviewedHostedIdentityMapping,
   type ReviewedHostedIdentityMapping,
 } from './hostedAgentPresence';
 
 const GENERIC_ERROR = 'Invalid hosted agent presence input';
-const EVENT_KEYS = Object.freeze([
-  'tenantId', 'subjectId', 'identityId', 'oldProfileName', 'newProfileName',
-  'priorRevision', 'nextRevision', 'occurredAt',
-]);
+const reviewedProfileRenameEvents = new WeakSet<object>();
+const reviewedWorkplaceReassignmentEvents = new WeakSet<object>();
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -23,13 +22,48 @@ export type HostedIdentityProfileRenameHistory = Readonly<{
   reason: 'profile_renamed';
 }>;
 
+export type ReviewedHostedIdentityProfileRenameEvent = Readonly<{
+  tenantId: string;
+  subjectId: string;
+  identityId: 'stg-spiders';
+  oldProfileName: string;
+  newProfileName: string;
+  priorRevision: number;
+  nextRevision: number;
+  occurredAt: string;
+}>;
+
+export type HostedIdentityWorkplaceReassignmentHistory = Readonly<{
+  tenantId: string;
+  subjectId: string;
+  identityId: 'stg-spiders';
+  profileName: string;
+  oldWorkplaceLabel: ReviewedHostedIdentityMapping['workplaceLabel'];
+  newWorkplaceLabel: ReviewedHostedIdentityMapping['workplaceLabel'];
+  priorRevision: number;
+  nextRevision: number;
+  occurredAt: string;
+  reason: 'workplace_reassigned';
+}>;
+
+export type ReviewedHostedIdentityWorkplaceReassignmentEvent = Readonly<{
+  tenantId: string;
+  subjectId: string;
+  identityId: 'stg-spiders';
+  profileName: string;
+  oldWorkplaceLabel: ReviewedHostedIdentityMapping['workplaceLabel'];
+  newWorkplaceLabel: ReviewedHostedIdentityMapping['workplaceLabel'];
+  priorRevision: number;
+  nextRevision: number;
+  occurredAt: string;
+}>;
+
 function fail(): never {
   throw new TypeError(GENERIC_ERROR);
 }
 
 function requireTrustedMapping(value: unknown): ReviewedHostedIdentityMapping {
-  if (value === null || typeof value !== 'object') fail();
-  const mapping = value as ReviewedHostedIdentityMapping;
+  const mapping = requireReviewedHostedIdentityMapping(value);
   createHostedPresenceRequest(mapping, {
     boardScope: 'default',
     profileName: mapping.profileName,
@@ -39,39 +73,9 @@ function requireTrustedMapping(value: unknown): ReviewedHostedIdentityMapping {
   return mapping;
 }
 
-function requireClosedEvent(value: unknown): UnknownRecord {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) fail();
-  const object = value as UnknownRecord;
-  const prototype = Object.getPrototypeOf(object);
-  if ((prototype !== Object.prototype && prototype !== null)
-    || Object.getPrototypeOf(object) !== prototype) fail();
-  const keys = Reflect.ownKeys(object);
-  const repeatedKeys = Reflect.ownKeys(object);
-  if (keys.length !== EVENT_KEYS.length || keys.length !== repeatedKeys.length
-    || keys.some((key, index) => key !== repeatedKeys[index])) fail();
-  const snapshot: UnknownRecord = {};
-  for (const key of keys) {
-    if (typeof key !== 'string' || !EVENT_KEYS.includes(key)) fail();
-    const descriptor = Object.getOwnPropertyDescriptor(object, key);
-    const repeated = Object.getOwnPropertyDescriptor(object, key);
-    if (!descriptor || !repeated
-      || !Object.prototype.hasOwnProperty.call(descriptor, 'value')
-      || !Object.prototype.hasOwnProperty.call(repeated, 'value')
-      || !Object.is(descriptor.value, repeated.value)
-      || descriptor.enumerable !== repeated.enumerable
-      || descriptor.configurable !== repeated.configurable
-      || descriptor.writable !== repeated.writable) fail();
-    Object.defineProperty(snapshot, key, {
-      value: descriptor.value, enumerable: true, configurable: false, writable: false,
-    });
-  }
-  if (EVENT_KEYS.some((key) => !Object.hasOwn(snapshot, key))) fail();
-  try {
-    structuredClone(value);
-  } catch {
-    fail();
-  }
-  return snapshot;
+function requireClosedEvent(value: unknown, reviewedEvents: WeakSet<object>): UnknownRecord {
+  if (value === null || typeof value !== 'object' || !reviewedEvents.has(value)) fail();
+  return value as UnknownRecord;
 }
 
 function sameStrings(left: readonly string[], right: readonly string[]): boolean {
@@ -85,6 +89,81 @@ function requireCanonicalTimestamp(value: unknown): string {
   return value;
 }
 
+function timestampEpoch(value: string): number {
+  return new Date(value).getTime();
+}
+
+export function createHostedIdentityProfileRenameEvent(
+  tenantId: unknown,
+  subjectId: unknown,
+  identityId: unknown,
+  oldProfileName: unknown,
+  newProfileName: unknown,
+  priorRevision: unknown,
+  nextRevision: unknown,
+  occurredAtInput: unknown,
+): ReviewedHostedIdentityProfileRenameEvent {
+  try {
+    if (typeof tenantId !== 'string' || typeof subjectId !== 'string'
+      || identityId !== 'stg-spiders' || typeof oldProfileName !== 'string'
+      || typeof newProfileName !== 'string'
+      || !Number.isSafeInteger(priorRevision) || !Number.isSafeInteger(nextRevision)
+      || (priorRevision as number) <= 0 || (nextRevision as number) <= 0) fail();
+    const occurredAt = requireCanonicalTimestamp(occurredAtInput);
+    const event = Object.freeze({
+      tenantId,
+      subjectId,
+      identityId,
+      oldProfileName,
+      newProfileName,
+      priorRevision: priorRevision as number,
+      nextRevision: nextRevision as number,
+      occurredAt,
+    });
+    reviewedProfileRenameEvents.add(event);
+    return event;
+  } catch {
+    throw new TypeError(GENERIC_ERROR);
+  }
+}
+
+export function createHostedIdentityWorkplaceReassignmentEvent(
+  tenantId: unknown,
+  subjectId: unknown,
+  identityId: unknown,
+  profileName: unknown,
+  oldWorkplaceLabel: unknown,
+  newWorkplaceLabel: unknown,
+  priorRevision: unknown,
+  nextRevision: unknown,
+  occurredAtInput: unknown,
+): ReviewedHostedIdentityWorkplaceReassignmentEvent {
+  try {
+    if (typeof tenantId !== 'string' || typeof subjectId !== 'string'
+      || identityId !== 'stg-spiders' || typeof profileName !== 'string'
+      || (oldWorkplaceLabel !== 'Chief Agent Office' && oldWorkplaceLabel !== 'Executive Office')
+      || (newWorkplaceLabel !== 'Chief Agent Office' && newWorkplaceLabel !== 'Executive Office')
+      || !Number.isSafeInteger(priorRevision) || !Number.isSafeInteger(nextRevision)
+      || (priorRevision as number) <= 0 || (nextRevision as number) <= 0) fail();
+    const occurredAt = requireCanonicalTimestamp(occurredAtInput);
+    const event = Object.freeze({
+      tenantId,
+      subjectId,
+      identityId,
+      profileName,
+      oldWorkplaceLabel,
+      newWorkplaceLabel,
+      priorRevision: priorRevision as number,
+      nextRevision: nextRevision as number,
+      occurredAt,
+    });
+    reviewedWorkplaceReassignmentEvents.add(event);
+    return event;
+  } catch {
+    throw new TypeError(GENERIC_ERROR);
+  }
+}
+
 export function createHostedIdentityProfileRenameHistory(
   beforeInput: unknown,
   afterInput: unknown,
@@ -93,11 +172,11 @@ export function createHostedIdentityProfileRenameHistory(
   try {
     const before = requireTrustedMapping(beforeInput);
     const after = requireTrustedMapping(afterInput);
-    const event = requireClosedEvent(eventInput);
+    const event = requireClosedEvent(eventInput, reviewedProfileRenameEvents);
     if (before.status !== 'active' || after.status !== 'active'
       || before.profileName === after.profileName
       || after.registryRevision !== before.registryRevision + 1
-      || after.synchronizedAt <= before.synchronizedAt
+      || timestampEpoch(after.synchronizedAt) <= timestampEpoch(before.synchronizedAt)
       || before.tenantId !== after.tenantId
       || before.subjectId !== after.subjectId
       || before.identityId !== after.identityId
@@ -115,8 +194,8 @@ export function createHostedIdentityProfileRenameHistory(
       || event.newProfileName !== after.profileName
       || event.priorRevision !== before.registryRevision
       || event.nextRevision !== after.registryRevision
-      || occurredAt < before.synchronizedAt
-      || occurredAt > after.synchronizedAt) fail();
+      || timestampEpoch(occurredAt) < timestampEpoch(before.synchronizedAt)
+      || timestampEpoch(occurredAt) > timestampEpoch(after.synchronizedAt)) fail();
     return Object.freeze({
       tenantId: before.tenantId,
       subjectId: before.subjectId,
@@ -127,6 +206,56 @@ export function createHostedIdentityProfileRenameHistory(
       nextRevision: after.registryRevision,
       occurredAt,
       reason: 'profile_renamed',
+    });
+  } catch {
+    throw new TypeError(GENERIC_ERROR);
+  }
+}
+
+export function createHostedIdentityWorkplaceReassignmentHistory(
+  beforeInput: unknown,
+  afterInput: unknown,
+  eventInput: unknown,
+): HostedIdentityWorkplaceReassignmentHistory {
+  try {
+    const before = requireTrustedMapping(beforeInput);
+    const after = requireTrustedMapping(afterInput);
+    const event = requireClosedEvent(eventInput, reviewedWorkplaceReassignmentEvents);
+    if (before.status !== 'active' || after.status !== 'active'
+      || before.workplaceLabel === after.workplaceLabel
+      || after.registryRevision !== before.registryRevision + 1
+      || timestampEpoch(after.synchronizedAt) <= timestampEpoch(before.synchronizedAt)
+      || before.tenantId !== after.tenantId
+      || before.subjectId !== after.subjectId
+      || before.identityId !== after.identityId
+      || before.displayName !== after.displayName
+      || before.profileName !== after.profileName
+      || before.roleLabel !== after.roleLabel
+      || !sameStrings(before.skills, after.skills)
+      || !sameStrings(before.permissions, after.permissions)
+      || !sameStrings(before.actionAuthorities, after.actionAuthorities)) fail();
+    const occurredAt = requireCanonicalTimestamp(event.occurredAt);
+    if (event.tenantId !== before.tenantId
+      || event.subjectId !== before.subjectId
+      || event.identityId !== before.identityId
+      || event.profileName !== before.profileName
+      || event.oldWorkplaceLabel !== before.workplaceLabel
+      || event.newWorkplaceLabel !== after.workplaceLabel
+      || event.priorRevision !== before.registryRevision
+      || event.nextRevision !== after.registryRevision
+      || timestampEpoch(occurredAt) < timestampEpoch(before.synchronizedAt)
+      || timestampEpoch(occurredAt) > timestampEpoch(after.synchronizedAt)) fail();
+    return Object.freeze({
+      tenantId: before.tenantId,
+      subjectId: before.subjectId,
+      identityId: before.identityId,
+      profileName: before.profileName,
+      oldWorkplaceLabel: before.workplaceLabel,
+      newWorkplaceLabel: after.workplaceLabel,
+      priorRevision: before.registryRevision,
+      nextRevision: after.registryRevision,
+      occurredAt,
+      reason: 'workplace_reassigned',
     });
   } catch {
     throw new TypeError(GENERIC_ERROR);
