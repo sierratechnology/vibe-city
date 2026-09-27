@@ -406,3 +406,168 @@ test('hosted presence contract remains dormant with zero runtime import or side-
     assert.equal(content.includes('hostedAgentPresence'), false, `unexpected runtime importer: ${entry}`);
   }
 });
+
+test('derived state accepts only an exact trusted mapping and its exact bound observation', async () => {
+  const domain = await loadDomain();
+  const mapping = domain.createReviewedHostedIdentityMapping(mappingFixture());
+  const request = domain.createHostedPresenceRequest(mapping, {
+    boardScope: 'default', profileName: 'spiders', mappingRevision: 7,
+    evaluatedAt: '2026-09-27T10:01:00.000Z',
+  });
+  const observation = domain.createHermesPresenceObservation(mapping, request, {
+    profileName: 'spiders', mappingRevision: 7,
+    observedAt: '2026-09-27T10:00:30.000Z', status: 'available',
+    reason: 'source_available', currentRun: null, decisiveEvent: null,
+  });
+  assert.equal(typeof domain.deriveHostedAgentPresenceState, 'function');
+  assert.doesNotThrow(() => domain.deriveHostedAgentPresenceState(mapping, observation));
+
+  const identicalMapping = domain.createReviewedHostedIdentityMapping(mappingFixture());
+  for (const [candidateMapping, candidateObservation] of [
+    [{ ...mapping }, observation],
+    [Object.create(mapping), observation],
+    [new Proxy(mapping, {}), observation],
+    [mapping, { ...observation }],
+    [mapping, Object.create(observation)],
+    [mapping, new Proxy(observation, {})],
+    [identicalMapping, observation],
+  ]) {
+    assert.throws(
+      () => domain.deriveHostedAgentPresenceState(candidateMapping, candidateObservation),
+      { message: 'Invalid hosted agent presence input' },
+    );
+  }
+});
+
+test('available observation with a validated current run derives working from its heartbeat', async () => {
+  const domain = await loadDomain();
+  const mapping = domain.createReviewedHostedIdentityMapping(mappingFixture());
+  const request = domain.createHostedPresenceRequest(mapping, {
+    boardScope: 'default', profileName: 'spiders', mappingRevision: 7,
+    evaluatedAt: '2026-09-27T10:01:00.000Z',
+  });
+  const currentRun = {
+    runId: 'id_3333333333333333', taskId: 'id_4444444444444444', status: 'running',
+    outcome: null, claimedAt: '2026-09-27T10:00:00.000Z',
+    spawnedAt: '2026-09-27T10:00:05.000Z', pid: 321, pidLive: true,
+    heartbeatAt: '2026-09-27T10:00:20.000Z',
+  };
+  const observation = domain.createHermesPresenceObservation(mapping, request, {
+    profileName: 'spiders', mappingRevision: 7,
+    observedAt: '2026-09-27T10:00:30.000Z', status: 'available',
+    reason: 'source_available', currentRun,
+    decisiveEvent: {
+      eventId: 'id_5555555555555555', runId: currentRun.runId,
+      kind: 'heartbeat', occurredAt: currentRun.heartbeatAt,
+    },
+  });
+
+  assert.deepEqual(domain.deriveHostedAgentPresenceState(mapping, observation), {
+    identityId: 'stg-spiders',
+    subjectId: IDS.subject,
+    profileName: 'spiders',
+    state: 'working',
+    reason: 'heartbeat',
+    observedAt: '2026-09-27T10:00:30.000Z',
+    taskId: currentRun.taskId,
+    runId: currentRun.runId,
+  });
+});
+
+test('available observation without a current run derives idle without run identifiers', async () => {
+  const domain = await loadDomain();
+  const mapping = domain.createReviewedHostedIdentityMapping(mappingFixture());
+  const request = domain.createHostedPresenceRequest(mapping, {
+    boardScope: 'default', profileName: 'spiders', mappingRevision: 7,
+    evaluatedAt: '2026-09-27T10:01:00.000Z',
+  });
+  const observation = domain.createHermesPresenceObservation(mapping, request, {
+    profileName: 'spiders', mappingRevision: 7,
+    observedAt: '2026-09-27T10:00:30.000Z', status: 'available',
+    reason: 'source_available', currentRun: null, decisiveEvent: null,
+  });
+
+  assert.deepEqual(domain.deriveHostedAgentPresenceState(mapping, observation), {
+    identityId: 'stg-spiders',
+    subjectId: IDS.subject,
+    profileName: 'spiders',
+    state: 'idle',
+    reason: 'source_available',
+    observedAt: '2026-09-27T10:00:30.000Z',
+  });
+});
+
+test('unavailable observation derives offline for active revoked and retired identities', async () => {
+  const domain = await loadDomain();
+  for (const mappingStatus of ['active', 'revoked', 'retired']) {
+    const mapping = domain.createReviewedHostedIdentityMapping(mappingFixture({ status: mappingStatus }));
+    const request = domain.createHostedPresenceRequest(mapping, {
+      boardScope: 'default', profileName: 'spiders', mappingRevision: 7,
+      evaluatedAt: '2026-09-27T10:01:00.000Z',
+    });
+    const observation = domain.createHermesPresenceObservation(mapping, request, {
+      profileName: 'spiders', mappingRevision: 7,
+      observedAt: '2026-09-27T10:00:30.000Z', status: 'unavailable',
+      reason: 'source_unavailable', currentRun: null, decisiveEvent: null,
+    });
+
+    assert.deepEqual(domain.deriveHostedAgentPresenceState(mapping, observation), {
+      identityId: 'stg-spiders',
+      subjectId: IDS.subject,
+      profileName: 'spiders',
+      state: 'offline',
+      reason: 'source_unavailable',
+      observedAt: '2026-09-27T10:00:30.000Z',
+    });
+  }
+});
+
+test('degraded observation derives not_derived without inventing a blocked state', async () => {
+  const domain = await loadDomain();
+  const mapping = domain.createReviewedHostedIdentityMapping(mappingFixture());
+  const request = domain.createHostedPresenceRequest(mapping, {
+    boardScope: 'default', profileName: 'spiders', mappingRevision: 7,
+    evaluatedAt: '2026-09-27T10:01:00.000Z',
+  });
+  const observation = domain.createHermesPresenceObservation(mapping, request, {
+    profileName: 'spiders', mappingRevision: 7,
+    observedAt: '2026-09-27T10:00:30.000Z', status: 'degraded',
+    reason: 'heartbeat_delayed', currentRun: null, decisiveEvent: null,
+  });
+
+  assert.deepEqual(domain.deriveHostedAgentPresenceState(mapping, observation), {
+    identityId: 'stg-spiders',
+    subjectId: IDS.subject,
+    profileName: 'spiders',
+    state: 'not_derived',
+    reason: 'heartbeat_delayed',
+    observedAt: '2026-09-27T10:00:30.000Z',
+  });
+});
+
+test('derived output is detached frozen minimal and carries no capability or authority facts', async () => {
+  const domain = await loadDomain();
+  const mapping = domain.createReviewedHostedIdentityMapping(mappingFixture());
+  const request = domain.createHostedPresenceRequest(mapping, {
+    boardScope: 'default', profileName: 'spiders', mappingRevision: 7,
+    evaluatedAt: '2026-09-27T10:01:00.000Z',
+  });
+  const observation = domain.createHermesPresenceObservation(mapping, request, {
+    profileName: 'spiders', mappingRevision: 7,
+    observedAt: '2026-09-27T10:00:30.000Z', status: 'available',
+    reason: 'source_available', currentRun: null, decisiveEvent: null,
+  });
+  const result = domain.deriveHostedAgentPresenceState(mapping, observation);
+
+  assert.equal(Object.isFrozen(result), true);
+  assert.deepEqual(Reflect.ownKeys(result), [
+    'identityId', 'subjectId', 'profileName', 'state', 'reason', 'observedAt',
+  ]);
+  assert.equal('taskId' in result, false);
+  assert.equal('runId' in result, false);
+  assert.equal('skills' in result, false);
+  assert.equal('permissions' in result, false);
+  assert.equal('actionAuthorities' in result, false);
+  assert.throws(() => { result.state = 'working'; }, TypeError);
+  assert.equal(result.state, 'idle');
+});
