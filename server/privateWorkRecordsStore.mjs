@@ -55,6 +55,15 @@ export class PrivateWorkRecordsStore {
             tenant_id, principal_id, authorization_id, policy_revision, operation, request_id
           )
         ) STRICT;
+        CREATE TABLE IF NOT EXISTS private_work_traces (
+          tenant_id TEXT NOT NULL,
+          record_id TEXT NOT NULL,
+          trace_json TEXT NOT NULL,
+          recorded_at TEXT NOT NULL,
+          PRIMARY KEY (tenant_id, record_id),
+          FOREIGN KEY (tenant_id, record_id)
+            REFERENCES private_work_records (tenant_id, record_id)
+        ) STRICT;
       `);
       if (databasePath !== ':memory:') {
         for (const path of [databasePath, `${databasePath}-wal`, `${databasePath}-shm`]) {
@@ -139,6 +148,21 @@ export class PrivateWorkRecordsStore {
         SELECT revision FROM private_work_records
         WHERE tenant_id = ? AND record_id = ?
       `);
+      this.readTraceStatement = this.database.prepare(`
+        SELECT trace_json FROM private_work_traces
+        WHERE tenant_id = ? AND record_id = ?
+      `);
+      this.insertTraceStatement = this.database.prepare(`
+        INSERT INTO private_work_traces (tenant_id, record_id, trace_json, recorded_at)
+        VALUES (?, ?, ?, ?)
+      `);
+      this.updateTraceStatement = this.database.prepare(`
+        UPDATE private_work_traces SET trace_json = ?, recorded_at = ?
+        WHERE tenant_id = ? AND record_id = ?
+      `);
+      this.traceCountStatement = this.database.prepare(
+        'SELECT COUNT(*) AS count FROM private_work_traces WHERE tenant_id = ?',
+      );
     } catch (error) {
       try { this.database.close(); } catch { /* preserve initialization failure */ }
       throw error;
@@ -291,9 +315,116 @@ export class PrivateWorkRecordsStore {
     }
   }
 
+  completeTrace(record, auditEvent, trace, expectedRevision, requestIdentity) {
+    try {
+      this.database.exec('BEGIN IMMEDIATE');
+      const requestParameters = [
+        requestIdentity.tenantId, requestIdentity.principalId,
+        requestIdentity.authorizationId, requestIdentity.policyRevision,
+        requestIdentity.operation, requestIdentity.requestId,
+      ];
+      const existing = this.readMutationRequestStatement.get(...requestParameters);
+      if (existing) {
+        this.database.exec('COMMIT');
+        return existing.request_semantics === requestIdentity.requestSemantics
+          ? { ok: true, replayed: true, record: JSON.parse(existing.record_json) }
+          : { ok: false, code: 'idempotency_conflict' };
+      }
+      if (record.revision !== expectedRevision + 1
+        || auditEvent.priorRevision !== expectedRevision
+        || auditEvent.newRevision !== record.revision) {
+        this.database.exec('ROLLBACK');
+        return { ok: false, code: 'stale_revision' };
+      }
+      const updated = this.updateRecordStatement.run(
+        record.revision, JSON.stringify(record), record.updatedAt,
+        record.tenantId, record.recordId, expectedRevision,
+      );
+      if (Number(updated.changes) !== 1) {
+        this.database.exec('ROLLBACK');
+        return { ok: false, code: 'stale_revision' };
+      }
+      this.insertAuditStatement.run(
+        auditEvent.tenantId, auditEvent.auditId, auditEvent.recordId,
+        auditEvent.priorRevision, auditEvent.newRevision,
+        JSON.stringify(auditEvent), auditEvent.recordedAt,
+      );
+      this.insertTraceStatement.run(
+        trace.tenantId, trace.recordId, JSON.stringify(trace), auditEvent.recordedAt,
+      );
+      this.insertMutationRequestStatement.run(
+        ...requestParameters, requestIdentity.requestSemantics, JSON.stringify(record),
+      );
+      this.database.exec('COMMIT');
+      return { ok: true, replayed: false, record };
+    } catch (error) {
+      try { this.database.exec('ROLLBACK'); } catch { /* no active transaction */ }
+      if (Number.isInteger(error?.errcode) && (error.errcode & 0xff) === 19) {
+        return { ok: false, code: 'duplicate' };
+      }
+      throw error;
+    }
+  }
+
+  mutateEvidence(record, auditEvent, trace, expectedRevision, requestIdentity) {
+    try {
+      this.database.exec('BEGIN IMMEDIATE');
+      const requestParameters = [
+        requestIdentity.tenantId, requestIdentity.principalId,
+        requestIdentity.authorizationId, requestIdentity.policyRevision,
+        requestIdentity.operation, requestIdentity.requestId,
+      ];
+      const existing = this.readMutationRequestStatement.get(...requestParameters);
+      if (existing) {
+        this.database.exec('COMMIT');
+        return existing.request_semantics === requestIdentity.requestSemantics
+          ? { ok: true, replayed: true, record: JSON.parse(existing.record_json) }
+          : { ok: false, code: 'idempotency_conflict' };
+      }
+      if (record.revision !== expectedRevision + 1
+        || auditEvent.priorRevision !== expectedRevision
+        || auditEvent.newRevision !== record.revision) {
+        this.database.exec('ROLLBACK');
+        return { ok: false, code: 'stale_revision' };
+      }
+      const recordUpdate = this.updateRecordStatement.run(
+        record.revision, JSON.stringify(record), record.updatedAt,
+        record.tenantId, record.recordId, expectedRevision,
+      );
+      const traceUpdate = this.updateTraceStatement.run(
+        JSON.stringify(trace), auditEvent.recordedAt, trace.tenantId, trace.recordId,
+      );
+      if (Number(recordUpdate.changes) !== 1 || Number(traceUpdate.changes) !== 1) {
+        this.database.exec('ROLLBACK');
+        return { ok: false, code: 'stale_revision' };
+      }
+      this.insertAuditStatement.run(
+        auditEvent.tenantId, auditEvent.auditId, auditEvent.recordId,
+        auditEvent.priorRevision, auditEvent.newRevision,
+        JSON.stringify(auditEvent), auditEvent.recordedAt,
+      );
+      this.insertMutationRequestStatement.run(
+        ...requestParameters, requestIdentity.requestSemantics, JSON.stringify(record),
+      );
+      this.database.exec('COMMIT');
+      return { ok: true, replayed: false, record };
+    } catch (error) {
+      try { this.database.exec('ROLLBACK'); } catch { /* no active transaction */ }
+      if (Number.isInteger(error?.errcode) && (error.errcode & 0xff) === 19) {
+        return { ok: false, code: 'duplicate' };
+      }
+      throw error;
+    }
+  }
+
   read(tenantId, recordId) {
     const row = this.readStatement.get(tenantId, recordId);
     return row ? JSON.parse(row.record_json) : null;
+  }
+
+  readTrace(tenantId, recordId) {
+    const row = this.readTraceStatement.get(tenantId, recordId);
+    return row ? JSON.parse(row.trace_json) : null;
   }
 
   replayMutation(requestIdentity) {
@@ -336,6 +467,10 @@ export class PrivateWorkRecordsStore {
 
   countAudits(tenantId) {
     return Number(this.auditCountStatement.get(tenantId).count);
+  }
+
+  countTraces(tenantId) {
+    return Number(this.traceCountStatement.get(tenantId).count);
   }
 
   close() {

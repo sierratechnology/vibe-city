@@ -60,6 +60,20 @@ function requireClosedObject(
   return object;
 }
 
+function requireTraceObject(
+  value: unknown,
+  label: string,
+  requiredKeys: readonly string[],
+  optionalKeys: readonly string[] = [],
+): UnknownRecord {
+  const object = requireClosedObject(value, label, [...requiredKeys, ...optionalKeys]);
+  const missingKey = requiredKeys.find((key) => !Object.hasOwn(object, key));
+  if (missingKey !== undefined) {
+    throw new TypeError(`${label} is missing own key ${missingKey}`);
+  }
+  return object;
+}
+
 function requireId(value: unknown, label: string): string {
   if (typeof value !== 'string' || !OPAQUE_ID.test(value)) {
     throw new TypeError(`${label} must be a stable opaque ID`);
@@ -108,6 +122,323 @@ function requireMaterialAudit(value: unknown): UnknownRecord {
     throw new TypeError('audit changedFields must contain canonical strings');
   }
   return audit;
+}
+
+const TRACE_SOURCE_KEYS = [
+  'tenantId', 'sourceId', 'sourceRecordId', 'sourceEventId', 'contractVersion',
+  'occurredAt', 'observedAt',
+] as const;
+const TRACE_EVIDENCE_KEYS = [
+  'tenantId', 'evidenceId', 'activityId', 'relation', 'locator', 'label', 'sensitivity', 'integrity',
+  'sourceOccurredAt', 'observedAt', 'recordedAt', 'availability',
+] as const;
+
+function validateTraceSource(value: unknown, tenantId: string, label: string): UnknownRecord {
+  const source = requireTraceObject(value, label, TRACE_SOURCE_KEYS);
+  if (requireId(source.tenantId, `${label} tenantId`) !== tenantId) {
+    throw new TypeError(`${label} tenant must match trace tenant`);
+  }
+  requireId(source.sourceId, `${label} sourceId`);
+  requireBoundedString(source.sourceRecordId, `${label} sourceRecordId`, 200);
+  if (source.sourceEventId !== null) {
+    requireBoundedString(source.sourceEventId, `${label} sourceEventId`, 200);
+  }
+  requireBoundedString(source.contractVersion, `${label} contractVersion`, 32);
+  const occurredAt = requireCanonicalTimestamp(source.occurredAt, `${label} occurredAt`);
+  const observedAt = requireCanonicalTimestamp(source.observedAt, `${label} observedAt`);
+  if (occurredAt > observedAt) throw new TypeError(`${label} chronology is invalid`);
+  return source;
+}
+
+function isApprovedTraceEvidenceLocator(value: unknown): value is string {
+  if (typeof value !== 'string' || value.length > 500) return false;
+  if (/^urn:stg:evidence:[a-z0-9][a-z0-9._:/-]{0,200}$/.test(value)) return true;
+  if (/^internal:[A-Za-z0-9._:/-]{1,491}$/.test(value)) return true;
+  try {
+    const url = new URL(value);
+    if (url.protocol !== 'https:' || url.hostname !== 'github.com' || url.port !== ''
+      || url.username !== '' || url.password !== '' || url.search !== '' || url.hash !== '') return false;
+    const parts = url.pathname.split('/').filter(Boolean);
+    if (parts.length !== 4
+      || parts.slice(0, 2).some((part) => !/^[A-Za-z0-9_.-]{1,100}$/.test(part))) return false;
+    if (parts[2] === 'commit') return /^[a-f0-9]{7,64}$/.test(parts[3]);
+    return (parts[2] === 'pull' || parts[2] === 'issues') && /^[1-9][0-9]{0,19}$/.test(parts[3]);
+  } catch {
+    return false;
+  }
+}
+
+function validateTraceEvidence(value: unknown, tenantId: string, index: number): UnknownRecord {
+  const label = `trace evidence ${index}`;
+  const evidence = requireTraceObject(
+    value, label, TRACE_EVIDENCE_KEYS.filter((key) => key !== 'integrity'), ['integrity'],
+  );
+  if (requireId(evidence.tenantId, `${label} tenantId`) !== tenantId) {
+    throw new TypeError(`${label} tenant must match trace tenant`);
+  }
+  requireId(evidence.evidenceId, `${label} evidenceId`);
+  requireId(evidence.activityId, `${label} activityId`);
+  if (!['supports', 'result', 'review', 'decision', 'source'].includes(evidence.relation as string)) {
+    throw new TypeError(`${label} relation is invalid`);
+  }
+  if (!isApprovedTraceEvidenceLocator(evidence.locator)) {
+    throw new TypeError(`${label} locator class is invalid`);
+  }
+  requireBoundedString(evidence.label, `${label} label`, 200);
+  if (!['tenant_private', 'restricted', 'public_approved'].includes(evidence.sensitivity as string)) {
+    throw new TypeError(`${label} sensitivity is invalid`);
+  }
+  if (!['available', 'stale', 'unavailable', 'withdrawn', 'deleted_tombstone']
+    .includes(evidence.availability as string)) {
+    throw new TypeError(`${label} availability is invalid`);
+  }
+  if (evidence.integrity !== null) {
+    const integrity = requireTraceObject(
+      evidence.integrity, `${label} integrity`, ['algorithm', 'digest'],
+    );
+    if (integrity.algorithm !== 'sha256' || typeof integrity.digest !== 'string'
+      || !/^[a-f0-9]{64}$/.test(integrity.digest)) {
+      throw new TypeError(`${label} integrity is invalid`);
+    }
+  }
+  const sourceOccurredAt = requireCanonicalTimestamp(
+    evidence.sourceOccurredAt, `${label} sourceOccurredAt`,
+  );
+  const observedAt = requireCanonicalTimestamp(evidence.observedAt, `${label} observedAt`);
+  const recordedAt = requireCanonicalTimestamp(evidence.recordedAt, `${label} recordedAt`);
+  if (sourceOccurredAt > observedAt || observedAt > recordedAt) {
+    throw new TypeError(`${label} chronology is invalid`);
+  }
+  return evidence;
+}
+
+export function validateTraceBundle(input: unknown):
+  { ok: true; value: UnknownRecord } | { ok: false; code: string } {
+  try {
+    const trace = requireTraceObject(input, 'trace', [
+      'tenantId', 'recordId', 'direction', 'authorization', 'assignment', 'activities',
+      'evidence', 'outcome',
+    ]);
+    const tenantId = requireId(trace.tenantId, 'trace tenantId');
+    const recordId = requireId(trace.recordId, 'trace recordId');
+    const direction = requireTraceObject(trace.direction, 'trace direction', [
+      'tenantId', 'directionId', 'directingSubject', 'source', 'occurredAt', 'sensitivity',
+    ]);
+    if (requireId(direction.tenantId, 'direction tenantId') !== tenantId) {
+      return { ok: false, code: 'invalid_direction' };
+    }
+    const directionId = requireId(direction.directionId, 'directionId');
+    const directingSubject = requireTraceObject(
+      direction.directingSubject, 'directingSubject', ['tenantId', 'subjectId'],
+    );
+    if (requireId(directingSubject.tenantId, 'directingSubject tenantId') !== tenantId) {
+      return { ok: false, code: 'invalid_direction' };
+    }
+    requireId(directingSubject.subjectId, 'directingSubject subjectId');
+    const directionSource = validateTraceSource(direction.source, tenantId, 'direction source');
+    const directionOccurredAt = requireCanonicalTimestamp(
+      direction.occurredAt, 'direction occurredAt',
+    );
+    if (!['tenant_private', 'restricted', 'public_approved'].includes(direction.sensitivity as string)) {
+      return { ok: false, code: 'invalid_direction' };
+    }
+
+    if (trace.authorization === null || trace.authorization === undefined) {
+      return { ok: false, code: 'missing_assignment_authorization' };
+    }
+    const authorization = requireTraceObject(trace.authorization, 'trace authorization', [
+      'tenantId', 'authorizationId', 'directionId', 'action', 'scope', 'authorizer',
+      'beneficiary', 'constraints', 'policyRevision', 'effectiveAt',
+    ]);
+    if (requireId(authorization.tenantId, 'trace authorization tenantId') !== tenantId
+      || authorization.action !== 'assign'
+      || requireId(authorization.scope, 'trace authorization scope') !== recordId
+      || requireId(authorization.directionId, 'trace authorization directionId') !== directionId) {
+      return { ok: false, code: 'invalid_assignment_authorization' };
+    }
+    const authorizationId = requireId(authorization.authorizationId, 'trace authorizationId');
+    for (const name of ['authorizer', 'beneficiary'] as const) {
+      const subject = requireTraceObject(authorization[name], name, ['tenantId', 'subjectId']);
+      if (requireId(subject.tenantId, `${name} tenantId`) !== tenantId) {
+        return { ok: false, code: 'invalid_assignment_authorization' };
+      }
+      requireId(subject.subjectId, `${name} subjectId`);
+    }
+    const constraints = requireBoundedArray(authorization.constraints, 'authorization constraints', 50);
+    if (constraints.some((constraint) => typeof constraint !== 'string'
+      || constraint.length < 1 || constraint.length > 200 || constraint.trim() !== constraint)) {
+      return { ok: false, code: 'invalid_assignment_authorization' };
+    }
+    if (!(Number.isSafeInteger(authorization.policyRevision)
+      && Number(authorization.policyRevision) >= 1)
+      && (typeof authorization.policyRevision !== 'string'
+        || authorization.policyRevision.length < 1
+        || authorization.policyRevision.length > 120
+        || authorization.policyRevision.trim() !== authorization.policyRevision)) {
+      return { ok: false, code: 'invalid_assignment_authorization' };
+    }
+    const authorizationEffectiveAt = requireCanonicalTimestamp(
+      authorization.effectiveAt, 'authorization effectiveAt',
+    );
+    if (authorizationEffectiveAt < directionOccurredAt) {
+      return { ok: false, code: 'invalid_assignment_authorization_chronology' };
+    }
+
+    const assignment = requireTraceObject(trace.assignment, 'trace assignment', [
+      'tenantId', 'recordId', 'authorizationId', 'owner', 'assignees', 'acceptedRevision',
+      'source', 'occurredAt',
+    ]);
+    if (requireId(assignment.tenantId, 'assignment tenantId') !== tenantId
+      || requireId(assignment.recordId, 'assignment recordId') !== recordId
+      || requireId(assignment.authorizationId, 'assignment authorizationId') !== authorizationId) {
+      return { ok: false, code: 'invalid_assignment' };
+    }
+    const owner = requireTraceObject(assignment.owner, 'assignment owner', ['tenantId', 'subjectId']);
+    if (requireId(owner.tenantId, 'assignment owner tenantId') !== tenantId) {
+      return { ok: false, code: 'invalid_assignment' };
+    }
+    requireId(owner.subjectId, 'assignment owner subjectId');
+    const assignees = requireBoundedArray(assignment.assignees, 'assignment assignees', 50);
+    if (assignees.length === 0) return { ok: false, code: 'invalid_assignment' };
+    const assigneeIds = new Set<string>();
+    for (const [index, candidate] of assignees.entries()) {
+      const assignee = requireTraceObject(
+        candidate, `assignment assignee ${index}`, ['tenantId', 'subjectId'],
+      );
+      if (requireId(assignee.tenantId, `assignment assignee ${index} tenantId`) !== tenantId) {
+        return { ok: false, code: 'invalid_assignment' };
+      }
+      const subjectId = requireId(assignee.subjectId, `assignment assignee ${index} subjectId`);
+      if (assigneeIds.has(subjectId)) return { ok: false, code: 'invalid_assignment' };
+      assigneeIds.add(subjectId);
+    }
+    const beneficiary = requireObject(authorization.beneficiary, 'authorization beneficiary');
+    if (!assigneeIds.has(String(beneficiary.subjectId))
+      || !Number.isSafeInteger(assignment.acceptedRevision)
+      || Number(assignment.acceptedRevision) < 1) return { ok: false, code: 'invalid_assignment' };
+    const assignmentSource = validateTraceSource(assignment.source, tenantId, 'assignment source');
+    const assignmentOccurredAt = requireCanonicalTimestamp(
+      assignment.occurredAt, 'assignment occurredAt',
+    );
+    if (assignmentSource.sourceId !== directionSource.sourceId
+      || assignmentOccurredAt < authorizationEffectiveAt) {
+      return { ok: false, code: 'invalid_assignment_link' };
+    }
+
+    const activities = requireBoundedArray(trace.activities, 'trace activities', 200);
+    if (activities.length === 0) return { ok: false, code: 'missing_activity' };
+    const activityIds = new Set<string>();
+    let latestActivityRecordedAt = assignmentOccurredAt;
+    for (const [index, candidate] of activities.entries()) {
+      const activity = requireTraceObject(candidate, `activity ${index}`, [
+        'tenantId', 'recordId', 'activityId', 'actor', 'source', 'eventKind',
+        'occurredAt', 'observedAt', 'recordedAt',
+      ]);
+      if (requireId(activity.tenantId, `activity ${index} tenantId`) !== tenantId
+        || requireId(activity.recordId, `activity ${index} recordId`) !== recordId) {
+        return { ok: false, code: 'invalid_activity' };
+      }
+      const activityId = requireId(activity.activityId, `activity ${index} activityId`);
+      if (activityIds.has(activityId)) return { ok: false, code: 'duplicate_activity' };
+      activityIds.add(activityId);
+      if (activity.actor === null || activity.actor === undefined) {
+        return { ok: false, code: 'invalid_activity_actor' };
+      }
+      const actor = requireTraceObject(
+        activity.actor, `activity ${index} actor`, ['tenantId', 'subjectId'],
+      );
+      if (requireId(actor.tenantId, `activity ${index} actor tenantId`) !== tenantId) {
+        return { ok: false, code: 'invalid_activity_actor' };
+      }
+      requireId(actor.subjectId, `activity ${index} actor subjectId`);
+      if (activity.source === null || activity.source === undefined) {
+        return { ok: false, code: 'invalid_activity_source' };
+      }
+      const activitySource = validateTraceSource(
+        activity.source, tenantId, `activity ${index} source`,
+      );
+      if (activitySource.sourceId !== directionSource.sourceId) {
+        return { ok: false, code: 'invalid_activity_source' };
+      }
+      if (!['work_started', 'work_performed', 'review_requested'].includes(activity.eventKind as string)) {
+        return { ok: false, code: 'invalid_activity_chronology' };
+      }
+      const occurredAt = requireCanonicalTimestamp(activity.occurredAt, `activity ${index} occurredAt`);
+      const observedAt = requireCanonicalTimestamp(activity.observedAt, `activity ${index} observedAt`);
+      const recordedAt = requireCanonicalTimestamp(activity.recordedAt, `activity ${index} recordedAt`);
+      if (occurredAt < authorizationEffectiveAt || occurredAt < assignmentOccurredAt
+        || occurredAt > observedAt || observedAt > recordedAt) {
+        return { ok: false, code: 'invalid_activity_chronology' };
+      }
+      if (recordedAt > latestActivityRecordedAt) latestActivityRecordedAt = recordedAt;
+    }
+
+    const evidenceValues = requireBoundedArray(trace.evidence, 'trace evidence', 50);
+    const evidenceIds = new Set<string>();
+    let latestEvidenceRecordedAt = assignmentOccurredAt;
+    for (const [index, candidate] of evidenceValues.entries()) {
+      const evidence = validateTraceEvidence(candidate, tenantId, index);
+      const evidenceId = String(evidence.evidenceId);
+      if (evidenceIds.has(evidenceId)) return { ok: false, code: 'duplicate_evidence' };
+      if (!activityIds.has(String(evidence.activityId))) {
+        return { ok: false, code: 'invalid_evidence_activity_link' };
+      }
+      const evidenceRecordedAt = String(evidence.recordedAt);
+      if (evidenceRecordedAt > latestEvidenceRecordedAt) latestEvidenceRecordedAt = evidenceRecordedAt;
+      evidenceIds.add(evidenceId);
+    }
+    if (trace.outcome === null || trace.outcome === undefined) {
+      return { ok: false, code: 'missing_outcome' };
+    }
+    const outcome = requireTraceObject(trace.outcome, 'trace outcome', [
+      'tenantId', 'recordId', 'outcomeId', 'acceptanceActor', 'acceptanceAuthorizationId',
+      'requiredEvidenceIds', 'acceptedAt',
+    ]);
+    if (requireId(outcome.tenantId, 'outcome tenantId') !== tenantId
+      || requireId(outcome.recordId, 'outcome recordId') !== recordId
+      || requireId(outcome.acceptanceAuthorizationId, 'outcome acceptanceAuthorizationId') !== authorizationId) {
+      return { ok: false, code: 'invalid_outcome' };
+    }
+    requireId(outcome.outcomeId, 'outcomeId');
+    const acceptanceActor = requireTraceObject(
+      outcome.acceptanceActor, 'outcome acceptanceActor', ['tenantId', 'subjectId'],
+    );
+    if (requireId(acceptanceActor.tenantId, 'outcome acceptanceActor tenantId') !== tenantId) {
+      return { ok: false, code: 'invalid_outcome' };
+    }
+    requireId(acceptanceActor.subjectId, 'outcome acceptanceActor subjectId');
+    const requiredEvidenceIds = requireBoundedArray(
+      outcome.requiredEvidenceIds, 'outcome requiredEvidenceIds', 50,
+    ).map((evidenceId, index) => requireId(evidenceId, `requiredEvidenceId ${index}`));
+    if (requiredEvidenceIds.length === 0) return { ok: false, code: 'missing_required_evidence' };
+    if (new Set(requiredEvidenceIds).size !== requiredEvidenceIds.length) {
+      return { ok: false, code: 'duplicate_required_evidence' };
+    }
+    const usableEvidence = new Set(evidenceValues.filter((candidate) => {
+      const evidence = requireObject(candidate, 'trace evidence');
+      return evidence.availability === 'available' || evidence.availability === 'stale';
+    }).map((candidate) => String(requireObject(candidate, 'trace evidence').evidenceId)));
+    if (requiredEvidenceIds.some((evidenceId) => !usableEvidence.has(evidenceId))) {
+      return { ok: false, code: 'missing_required_evidence' };
+    }
+    const acceptedAt = requireCanonicalTimestamp(outcome.acceptedAt, 'outcome acceptedAt');
+    if (acceptedAt < assignmentOccurredAt || acceptedAt < latestActivityRecordedAt
+      || acceptedAt < latestEvidenceRecordedAt) {
+      return { ok: false, code: 'invalid_outcome_chronology' };
+    }
+    return { ok: true, value: structuredClone(trace) };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '';
+    if (/activity.*actor/i.test(message)) return { ok: false, code: 'invalid_activity_actor' };
+    if (/activity.*source/i.test(message)) return { ok: false, code: 'invalid_activity_source' };
+    if (/activity/i.test(message)) return { ok: false, code: 'invalid_activity' };
+    if (/authorization/i.test(message)) return { ok: false, code: 'invalid_assignment_authorization' };
+    if (/assignment/i.test(message)) return { ok: false, code: 'invalid_assignment' };
+    if (/direction/i.test(message)) return { ok: false, code: 'invalid_direction' };
+    if (/evidence/i.test(message)) return { ok: false, code: 'invalid_trace_evidence' };
+    if (/outcome/i.test(message)) return { ok: false, code: 'invalid_outcome' };
+    return { ok: false, code: 'invalid_trace' };
+  }
 }
 
 export function validateWorkRecord(input: unknown): UnknownRecord {
@@ -241,8 +572,7 @@ export function validateWorkRecord(input: unknown): UnknownRecord {
       throw new TypeError('evidence tenant must match record tenant');
     }
     requireId(evidence.evidenceId, `evidence ${index} evidenceId`);
-    if (typeof evidence.locator !== 'string'
-      || !/^urn:stg:evidence:[a-z0-9][a-z0-9._:/-]{0,200}$/.test(evidence.locator)) {
+    if (!isApprovedTraceEvidenceLocator(evidence.locator)) {
       throw new TypeError('safe evidence locator required');
     }
     const evidenceRecordedAt = requireCanonicalTimestamp(
@@ -356,6 +686,8 @@ export function createTrustedAuthorizationContext(input: unknown): TrustedAuthor
     'record.block', 'record.unblock',
     'record.transition', 'record.sensitivity.change', 'record.archive', 'record.delete',
     'record.restore', 'record.correct', 'record.supersede',
+    'record.trace.write', 'record.trace.read', 'record.evidence.resolve',
+    'record.evidence.availability.update',
   ];
   const permissions = requireBoundedArray(facts.permissions, 'permissions', 20) as string[];
   if (permissions.some((permission) => !allowedPermissions.includes(permission))) {

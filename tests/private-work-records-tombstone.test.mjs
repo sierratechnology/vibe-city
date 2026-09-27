@@ -383,9 +383,11 @@ test('tombstoned state history references active-list exclusion and replay survi
     assert.deepEqual(await json(fetch(root, {
       headers: { authorization: 'Bearer operator' },
     })), { status: 200, body: { records: [], count: 0, cursor: null } });
+    const ordinaryRecord = structuredClone(accepted.body.record);
+    for (const evidence of ordinaryRecord.evidence) delete evidence.locator;
     assert.deepEqual(await json(fetch(`${root}/${RECORD}`, {
       headers: { authorization: 'Bearer operator' },
-    })), accepted);
+    })), { status: 200, body: { record: ordinaryRecord } });
     const history = await json(fetch(`${root}/${RECORD}/history`, {
       headers: { authorization: 'Bearer operator' },
     }));
