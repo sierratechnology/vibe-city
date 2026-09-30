@@ -130,6 +130,203 @@ test('exact accepted invitation and active temporary entry yield one minimal ses
   });
 });
 
+test('exact same-module session-start event is accepted by identity while a frozen structural copy is rejected', async () => {
+  const domain = await loadDomain('event-provenance-identity');
+  assert.equal(typeof domain.requirePrivateMeetingSessionStartEvent, 'function');
+  const accepted = createAcceptedAccess(domain);
+  const event = domain.createPrivateMeetingSessionStartEvent(
+    accepted.readinessDocument, accepted.issuanceEvent, accepted.acceptanceEvent,
+    accepted.policyObservation, startCommand(domain),
+  );
+  assert.equal(domain.requirePrivateMeetingSessionStartEvent(event), event);
+  const structuralCopy = Object.freeze(Object.assign(Object.create(null), event));
+  assert.throws(() => domain.requirePrivateMeetingSessionStartEvent(structuralCopy), {
+    name: 'TypeError', message: 'Invalid private meeting session start input',
+  });
+});
+
+test('session-start event provenance rejects a genuine event from another module instance', async () => {
+  const domain = await loadDomain('event-provenance-cross-module-a');
+  const otherDomain = await loadDomain('event-provenance-cross-module-b');
+  const accepted = createAcceptedAccess(domain);
+  const event = domain.createPrivateMeetingSessionStartEvent(
+    accepted.readinessDocument, accepted.issuanceEvent, accepted.acceptanceEvent,
+    accepted.policyObservation, startCommand(domain),
+  );
+  assert.throws(() => otherDomain.requirePrivateMeetingSessionStartEvent(event), {
+    name: 'TypeError', message: 'Invalid private meeting session start input',
+  });
+});
+
+test('session-start event provenance rejects an inherited child of a genuine event', async () => {
+  const domain = await loadDomain('event-provenance-inherited');
+  const accepted = createAcceptedAccess(domain);
+  const event = domain.createPrivateMeetingSessionStartEvent(
+    accepted.readinessDocument, accepted.issuanceEvent, accepted.acceptanceEvent,
+    accepted.policyObservation, startCommand(domain),
+  );
+  const inherited = Object.freeze(Object.create(event));
+  assert.throws(() => domain.requirePrivateMeetingSessionStartEvent(inherited), {
+    name: 'TypeError', message: 'Invalid private meeting session start input',
+  });
+});
+
+test('session-start event provenance rejects a JSON round trip of a genuine event', async () => {
+  const domain = await loadDomain('event-provenance-json-copy');
+  const accepted = createAcceptedAccess(domain);
+  const event = domain.createPrivateMeetingSessionStartEvent(
+    accepted.readinessDocument, accepted.issuanceEvent, accepted.acceptanceEvent,
+    accepted.policyObservation, startCommand(domain),
+  );
+  const jsonCopy = Object.freeze(JSON.parse(JSON.stringify(event)));
+  assert.throws(() => domain.requirePrivateMeetingSessionStartEvent(jsonCopy), {
+    name: 'TypeError', message: 'Invalid private meeting session start input',
+  });
+});
+
+test('session-start event provenance rejects a null-prototype copy of a genuine event', async () => {
+  const domain = await loadDomain('event-provenance-null-copy');
+  const accepted = createAcceptedAccess(domain);
+  const event = domain.createPrivateMeetingSessionStartEvent(
+    accepted.readinessDocument, accepted.issuanceEvent, accepted.acceptanceEvent,
+    accepted.policyObservation, startCommand(domain),
+  );
+  const nullPrototypeCopy = Object.freeze(Object.assign(Object.create(null), event));
+  assert.throws(() => domain.requirePrivateMeetingSessionStartEvent(nullPrototypeCopy), {
+    name: 'TypeError', message: 'Invalid private meeting session start input',
+  });
+});
+
+test('session-start event provenance rejects object array and function wrappers', async () => {
+  const domain = await loadDomain('event-provenance-wrappers');
+  const accepted = createAcceptedAccess(domain);
+  const event = domain.createPrivateMeetingSessionStartEvent(
+    accepted.readinessDocument, accepted.issuanceEvent, accepted.acceptanceEvent,
+    accepted.policyObservation, startCommand(domain),
+  );
+  for (const wrapper of [Object.freeze({ event }), Object.freeze([event]), () => event]) {
+    assert.throws(() => domain.requirePrivateMeetingSessionStartEvent(wrapper), {
+      name: 'TypeError', message: 'Invalid private meeting session start input',
+    });
+  }
+});
+
+test('session-start event provenance rejects hostile proxies accessors and coercible values with zero hooks', async () => {
+  const domain = await loadDomain('event-provenance-zero-hooks');
+  const accepted = createAcceptedAccess(domain);
+  const event = domain.createPrivateMeetingSessionStartEvent(
+    accepted.readinessDocument, accepted.issuanceEvent, accepted.acceptanceEvent,
+    accepted.policyObservation, startCommand(domain),
+  );
+  let hooks = 0;
+  const proxy = new Proxy(event, {
+    get() { hooks += 1; throw new Error('must not read'); },
+    getPrototypeOf() { hooks += 1; throw new Error('must not inspect'); },
+    ownKeys() { hooks += 1; throw new Error('must not enumerate'); },
+  });
+  const revoked = Proxy.revocable(event, {
+    get() { hooks += 1; throw new Error('must not read'); },
+  });
+  revoked.revoke();
+  const accessor = Object.create(null);
+  Object.defineProperty(accessor, 'event', {
+    get() { hooks += 1; throw new Error('must not read'); },
+  });
+  const coercible = {
+    valueOf() { hooks += 1; return event; },
+    toString() { hooks += 1; return '[event]'; },
+    [Symbol.toPrimitive]() { hooks += 1; return '[event]'; },
+  };
+  for (const value of [proxy, revoked.proxy, accessor, coercible, null, undefined, true, 1, 1n, 'event', Symbol('event')]) {
+    assert.throws(() => domain.requirePrivateMeetingSessionStartEvent(value), {
+      name: 'TypeError', message: 'Invalid private meeting session start input',
+    });
+  }
+  assert.equal(hooks, 0);
+});
+
+test('failed session-start construction does not register any supplied object as an event', async () => {
+  const domain = await loadDomain('event-provenance-failed-start');
+  const accepted = createAcceptedAccess(domain);
+  const command = startCommand(domain, { startedAt: '2000-01-01T00:03:00.000Z' });
+  assert.throws(() => domain.createPrivateMeetingSessionStartEvent(
+    accepted.readinessDocument, accepted.issuanceEvent, accepted.acceptanceEvent,
+    accepted.policyObservation, command,
+  ), { name: 'TypeError', message: 'Invalid private meeting session start input' });
+  for (const suppliedObject of [
+    accepted.issuanceEvent, accepted.acceptanceEvent, accepted.policyObservation, command,
+  ]) {
+    assert.throws(() => domain.requirePrivateMeetingSessionStartEvent(suppliedObject), {
+      name: 'TypeError', message: 'Invalid private meeting session start input',
+    });
+  }
+});
+
+test('successful session-start provenance preserves the exact genuine event unchanged', async () => {
+  const domain = await loadDomain('event-provenance-unchanged');
+  const accepted = createAcceptedAccess(domain);
+  const event = domain.createPrivateMeetingSessionStartEvent(
+    accepted.readinessDocument, accepted.issuanceEvent, accepted.acceptanceEvent,
+    accepted.policyObservation, startCommand(domain),
+  );
+  const before = Object.getOwnPropertyDescriptors(event);
+  const result = domain.requirePrivateMeetingSessionStartEvent(event);
+  assert.equal(result, event);
+  assert.deepEqual(Object.getOwnPropertyDescriptors(event), before);
+  assert.equal(Object.getPrototypeOf(event), null);
+  assert.equal(Object.isFrozen(event), true);
+});
+
+test('session-start ownership uses captured intrinsics after ambient WeakSet hooks change', async () => {
+  const domain = await loadDomain('event-provenance-captured-intrinsics');
+  const accepted = createAcceptedAccess(domain);
+  let hooks = 0;
+  const originalAdd = WeakSet.prototype.add;
+  const originalHas = WeakSet.prototype.has;
+  WeakSet.prototype.add = function (...args) { hooks += 1; return originalAdd.apply(this, args); };
+  WeakSet.prototype.has = function (...args) { hooks += 1; return originalHas.apply(this, args); };
+  try {
+    const event = domain.createPrivateMeetingSessionStartEvent(
+      accepted.readinessDocument, accepted.issuanceEvent, accepted.acceptanceEvent,
+      accepted.policyObservation, startCommand(domain),
+    );
+    assert.equal(domain.requirePrivateMeetingSessionStartEvent(event), event);
+  } finally {
+    WeakSet.prototype.add = originalAdd;
+    WeakSet.prototype.has = originalHas;
+  }
+  assert.equal(hooks, 0);
+});
+
+test('session-start ownership executes no hostile pre-import WeakSet method accessors', async () => {
+  let hooks = 0;
+  await loadDomain('event-provenance-pre-import-weak-set', async ({ dependencies, importSession }) => {
+    const accepted = createAcceptedAccess(dependencies);
+    const addDescriptor = Object.getOwnPropertyDescriptor(WeakSet.prototype, 'add');
+    const hasDescriptor = Object.getOwnPropertyDescriptor(WeakSet.prototype, 'has');
+    Object.defineProperty(WeakSet.prototype, 'add', {
+      configurable: true,
+      get() { hooks += 1; return addDescriptor.value; },
+    });
+    Object.defineProperty(WeakSet.prototype, 'has', {
+      configurable: true,
+      get() { hooks += 1; return hasDescriptor.value; },
+    });
+    try {
+      const domain = await importSession();
+      const event = domain.createPrivateMeetingSessionStartEvent(
+        accepted.readinessDocument, accepted.issuanceEvent, accepted.acceptanceEvent,
+        accepted.policyObservation, startCommand(domain),
+      );
+      assert.equal(domain.requirePrivateMeetingSessionStartEvent(event), event);
+    } finally {
+      Object.defineProperty(WeakSet.prototype, 'add', addDescriptor);
+      Object.defineProperty(WeakSet.prototype, 'has', hasDescriptor);
+    }
+  });
+  assert.equal(hooks, 0);
+});
+
 test('session start requires exact module-owned invitation and access provenance', async () => {
   const domain = await loadDomain('exact-provenance-a');
   const otherDomain = await loadDomain('exact-provenance-b');

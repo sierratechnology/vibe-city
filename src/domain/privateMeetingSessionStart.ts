@@ -100,6 +100,28 @@ class GenuineStartCommand extends StartCommandBase {
   }
 }
 
+class SessionStartEventBase {
+  constructor(value: object) {
+    return value as SessionStartEventBase;
+  }
+}
+
+class GenuineSessionStartEvent extends SessionStartEventBase {
+  #genuine = true;
+
+  constructor(event: PrivateMeetingSessionStartEvent) {
+    super(event);
+  }
+
+  static isGenuine(value: unknown): boolean {
+    try {
+      return (value as GenuineSessionStartEvent).#genuine;
+    } catch {
+      return false;
+    }
+  }
+}
+
 export function createPrivateMeetingSessionStartCommand(
   sessionIdInput: unknown,
   sourceEventIdInput: unknown,
@@ -124,6 +146,17 @@ export function createPrivateMeetingSessionStartCommand(
 function requireCommand(value: unknown): StartCommand {
   if (!GenuineStartCommand.isGenuine(value)) fail();
   return value as StartCommand;
+}
+
+export function requirePrivateMeetingSessionStartEvent(
+  value: unknown,
+): PrivateMeetingSessionStartEvent {
+  try {
+    if (!GenuineSessionStartEvent.isGenuine(value)) fail();
+    return value as PrivateMeetingSessionStartEvent;
+  } catch {
+    throw new TypeError(GENERIC_ERROR);
+  }
 }
 
 export function createPrivateMeetingSessionStartEvent(
@@ -159,7 +192,7 @@ export function createPrivateMeetingSessionStartEvent(
         if (identities[left] === identities[right]) fail();
       }
     }
-    return closed({
+    const event = closed({
       schemaVersion: 'private-meeting-session-start/1' as const,
       tenantId: access.tenantId,
       meetingId: access.meetingId,
@@ -173,6 +206,7 @@ export function createPrivateMeetingSessionStartEvent(
       participationState: 'joined' as const,
       reason: 'invited_temporary_access' as const,
     });
+    return new GenuineSessionStartEvent(event) as unknown as PrivateMeetingSessionStartEvent;
   } catch {
     throw new TypeError(GENERIC_ERROR);
   }
