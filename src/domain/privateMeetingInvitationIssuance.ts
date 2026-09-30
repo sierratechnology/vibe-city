@@ -88,8 +88,23 @@ const closedRecordHandler: ProxyHandler<object> = freezeObject(Object.assign(Obj
   },
 }));
 
-function closeRecord<T extends object>(value: T): T {
-  return freezeObject(new ProxyConstructor(value, closedRecordHandler as ProxyHandler<T>));
+export function hardenPrivateMeetingInvitationRecord<T extends object>(value: T): T {
+  const detached = freezePrivateMeetingInvitationObject({ ...value }) as T;
+  return freezePrivateMeetingInvitationObject(
+    new ProxyConstructor(detached, closedRecordHandler as ProxyHandler<T>),
+  );
+}
+
+export function freezePrivateMeetingInvitationObject<T extends object>(value: T): T {
+  return freezeObject(value);
+}
+
+export function freezePrivateMeetingInvitationArray<T extends object>(
+  value: T,
+  prototypeSource: object,
+): T {
+  setPrototypeOf(value, getPrototypeOf(prototypeSource));
+  return freezeObject(value);
 }
 
 function requireCanonicalTimestamp(value: unknown): string {
@@ -134,13 +149,12 @@ function copyMaterials(readiness: MeetingInvitationReadiness): readonly Readonly
   const materials: { materialReference: string; evidenceReference: string }[] = [];
   for (let index = 0; index < readiness.materials.length; index += 1) {
     const material = readiness.materials[index];
-    materials[materials.length] = closeRecord({
+    materials[materials.length] = hardenPrivateMeetingInvitationRecord({
       materialReference: material.materialReference,
       evidenceReference: material.evidenceReference,
     });
   }
-  setPrototypeOf(materials, getPrototypeOf(readiness.materials));
-  return freezeObject(materials);
+  return freezePrivateMeetingInvitationArray(materials, readiness.materials);
 }
 
 function sameMaterials(
@@ -201,7 +215,7 @@ export function issuePrivateMeetingInvitation(
       || event.validFrom !== readiness.validity.validFrom
       || event.expiresAt !== readiness.validity.expiresAt
       || event.revocationAuthorityReference !== readiness.revocation.revocationAuthorityReference) fail();
-    return closeRecord({
+    return hardenPrivateMeetingInvitationRecord({
       schemaVersion: 'private-meeting-invitation-issued-history/1',
       invitationReference: event.invitationReference,
       issuerSubjectReference: event.issuerSubjectReference,
@@ -243,7 +257,7 @@ export function createPrivateMeetingInvitationIssuanceEvent(
     if (parseTimestamp(issuedAt) < parseTimestamp(readiness.validity.preparedAt)
       || parseTimestamp(issuedAt) >= parseTimestamp(readiness.validity.validFrom)
       || parseTimestamp(issuedAt) >= parseTimestamp(readiness.validity.expiresAt)) fail();
-    const event = closeRecord({
+    const event = hardenPrivateMeetingInvitationRecord({
       schemaVersion: 'private-meeting-invitation-issuance/1' as const,
       readinessSchemaVersion: readiness.schemaVersion,
       invitationReference: readiness.invitationReference,
