@@ -15,7 +15,11 @@ const characterCodeAt = String.prototype.charCodeAt.call.bind(
 const isSafeInteger: (value: unknown) => boolean = Number.isSafeInteger;
 const isFiniteNumber: (value: unknown) => boolean = Number.isFinite;
 const isSameValue: (left: unknown, right: unknown) => boolean = Object.is;
+const trustedArrayPrototype = Array.prototype;
+const trustedObjectPrototype = Object.prototype;
+const arrayIteratorSymbol = Symbol.iterator;
 const freezeObject: typeof Object.freeze = Object.freeze;
+const createObject: typeof Object.create = Object.create;
 const getPrototypeOf: typeof Object.getPrototypeOf = Object.getPrototypeOf;
 const setPrototypeOf: typeof Object.setPrototypeOf = Object.setPrototypeOf;
 const getOwnPropertyDescriptor: typeof Object.getOwnPropertyDescriptor = Object.getOwnPropertyDescriptor;
@@ -105,6 +109,69 @@ export function freezePrivateMeetingInvitationArray<T extends object>(
 ): T {
   setPrototypeOf(value, getPrototypeOf(prototypeSource));
   return freezeObject(value);
+}
+
+function* iteratePrivateMeetingInvitationArray(this: readonly unknown[]) {
+  for (let index = 0; index < this.length; index += 1) yield this[index];
+}
+
+export function createPrivateMeetingInvitationSanitizedArrayPrototypeSource(): object {
+  const inertArrayConstructor = freezeObject(createObject(null));
+  const inertObjectConstructor = freezeObject(createObject(null));
+  let sanitizedObjectPrototype: object;
+  const sanitizedObjectPrototypeHandler: ProxyHandler<object> = freezeObject({
+    __proto__: null,
+    get(_target: object, key: string | symbol): unknown {
+      return key === 'constructor' ? inertObjectConstructor : undefined;
+    },
+    has(_target: object, key: string | symbol): boolean {
+      return key === 'constructor';
+    },
+    ownKeys(): string[] { return []; },
+    getOwnPropertyDescriptor(): undefined { return undefined; },
+    getPrototypeOf(): null { return null; },
+    set(): false { return false; },
+    defineProperty(): false { return false; },
+    deleteProperty(): false { return false; },
+    setPrototypeOf(): false { return false; },
+    preventExtensions(): false { return false; },
+  });
+  sanitizedObjectPrototype = new ProxyConstructor(
+    trustedObjectPrototype,
+    sanitizedObjectPrototypeHandler,
+  );
+  const sanitizedArrayPrototypeHandler: ProxyHandler<object> = freezeObject({
+    __proto__: null,
+    get(_target: object, key: string | symbol): unknown {
+      if (key === arrayIteratorSymbol) return iteratePrivateMeetingInvitationArray;
+      if (key === 'length') return 0;
+      if (key === 'constructor') return inertArrayConstructor;
+      return undefined;
+    },
+    has(_target: object, key: string | symbol): boolean {
+      return key === arrayIteratorSymbol || key === 'length' || key === 'constructor';
+    },
+    ownKeys(): string[] { return ['length']; },
+    getOwnPropertyDescriptor(
+      _target: object,
+      key: string | symbol,
+    ): PropertyDescriptor | undefined {
+      return key === 'length'
+        ? { configurable: false, enumerable: false, writable: false, value: 0 }
+        : undefined;
+    },
+    getPrototypeOf(): object { return sanitizedObjectPrototype; },
+    set(): false { return false; },
+    defineProperty(): false { return false; },
+    deleteProperty(): false { return false; },
+    setPrototypeOf(): false { return false; },
+    preventExtensions(): false { return false; },
+  });
+  const sanitizedArrayPrototype = new ProxyConstructor(
+    trustedArrayPrototype,
+    sanitizedArrayPrototypeHandler,
+  );
+  return freezeObject(createObject(sanitizedArrayPrototype));
 }
 
 function requireCanonicalTimestamp(value: unknown): string {
