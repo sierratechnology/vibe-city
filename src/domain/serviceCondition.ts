@@ -32,7 +32,8 @@ function requireInput(value: unknown): UnknownRecord {
     || keys.some((key) => typeof key !== 'string'
       || !(INPUT_KEYS as readonly string[]).includes(key))) fail();
   const snapshot = Object.create(null) as UnknownRecord;
-  for (const key of keys as string[]) {
+  for (let index = 0; index < keys.length; index += 1) {
+    const key = keys[index] as string;
     const descriptor = Object.getOwnPropertyDescriptor(object, key);
     const repeated = Object.getOwnPropertyDescriptor(object, key);
     if (!descriptor || !repeated
@@ -68,9 +69,14 @@ export function deriveServiceCondition(input: unknown) {
     const tenantId = requireId(object.tenantId);
     const serviceId = requireId(object.serviceId);
     const sourceObservationId = requireId(object.sourceObservationId);
-    if (new Set([tenantId, serviceId, sourceObservationId]).size !== 3) fail();
-    const [observedAt, observedInstant] = requireTimestamp(object.observedAt);
-    const [evaluatedAt, evaluatedInstant] = requireTimestamp(object.evaluatedAt);
+    if (tenantId === serviceId || tenantId === sourceObservationId
+      || serviceId === sourceObservationId) fail();
+    const observedTimestamp = requireTimestamp(object.observedAt);
+    const observedAt = observedTimestamp[0];
+    const observedInstant = observedTimestamp[1];
+    const evaluatedTimestamp = requireTimestamp(object.evaluatedAt);
+    const evaluatedAt = evaluatedTimestamp[0];
+    const evaluatedInstant = evaluatedTimestamp[1];
     if (observedInstant > evaluatedInstant
       || typeof object.sourceAvailability !== 'string'
       || !['available', 'degraded', 'unavailable'].includes(object.sourceAvailability)) fail();
@@ -127,14 +133,16 @@ export function deriveServiceCondition(input: unknown) {
       reasonCode = 'stale_observation';
     }
     const result = Object.create(null) as UnknownRecord;
-    for (const [key, value] of [
+    const resultEntries = [
       ['tenantId', tenantId], ['serviceId', serviceId],
       ['sourceObservationId', sourceObservationId], ['classification', classification],
       ['freshness', freshness], ['observedAt', observedAt], ['evaluatedAt', evaluatedAt],
       ['reasonCode', reasonCode],
-    ] as const) {
-      Object.defineProperty(result, key, {
-        value, enumerable: true, configurable: false, writable: false,
+    ] as const;
+    for (let index = 0; index < resultEntries.length; index += 1) {
+      const entry = resultEntries[index];
+      Object.defineProperty(result, entry[0], {
+        value: entry[1], enumerable: true, configurable: false, writable: false,
       });
     }
     return Object.freeze(result);
