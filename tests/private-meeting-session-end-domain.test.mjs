@@ -77,7 +77,9 @@ function readinessCandidate() {
   };
 }
 
-function createContext(domain) {
+function createContext(domain, overrides = {}) {
+  const sessionId = overrides.sessionId ?? IDS.session;
+  const startSourceEventId = overrides.startSourceEventId ?? IDS.startSource;
   const readinessDocument = JSON.stringify(readinessCandidate());
   const issuanceEvent = domain.createPrivateMeetingInvitationIssuanceEvent(
     readinessDocument, IDS.issuanceSource, IDS.issuanceAuthorization, 1, '2000-01-01T00:00:30.000Z',
@@ -91,7 +93,7 @@ function createContext(domain) {
     2, 'active', 'policy_current', '2000-01-01T00:01:30.000Z',
   );
   const startCommand = domain.createPrivateMeetingSessionStartCommand(
-    IDS.session, IDS.startSource, IDS.acceptanceAuthorization, '2000-01-01T00:01:30.000Z',
+    sessionId, startSourceEventId, IDS.acceptanceAuthorization, '2000-01-01T00:01:30.000Z',
   );
   const startEvent = domain.createPrivateMeetingSessionStartEvent(
     readinessDocument, issuanceEvent, acceptanceEvent, policyObservation, startCommand,
@@ -170,6 +172,109 @@ test('session-end verifier accepts only an exact event owned by this module inst
     });
   }
   assert.equal(hooks, 0);
+});
+
+test('session-end provenance verifier binds exact lineage and the retained start source', async () => {
+  const domain = await loadDomain('end-lineage-provenance');
+  const exactContext = createContext(domain);
+  const exactEvent = createEnd(domain, exactContext);
+  assert.equal(domain.requirePrivateMeetingSessionEndProvenance(
+    exactEvent,
+    exactContext.readinessDocument,
+    exactContext.issuanceEvent,
+    exactContext.acceptanceEvent,
+    exactContext.policyObservation,
+  ), IDS.startSource);
+
+  const differentStartContext = createContext(domain, {
+    sessionId: 'id_1000000000000013',
+    startSourceEventId: 'id_1000000000000014',
+  });
+  const differentStartEvent = createEnd(domain, differentStartContext, endCommand(domain, {
+    sourceEventId: 'id_1000000000000015',
+  }));
+  let hooks = 0;
+  const proxy = new Proxy(exactEvent, {
+    get() { hooks += 1; throw new Error('must not read'); },
+    ownKeys() { hooks += 1; throw new Error('must not enumerate'); },
+    getPrototypeOf() { hooks += 1; throw new Error('must not inspect'); },
+  });
+  const accessor = Object.create(null);
+  Object.defineProperty(accessor, 'sourceEventId', {
+    enumerable: true,
+    get() { hooks += 1; throw new Error('must not read'); },
+  });
+  const issuanceProxy = new Proxy(exactContext.issuanceEvent, {
+    get() { hooks += 1; throw new Error('must not read'); },
+  });
+  const attempts = [
+    () => domain.requirePrivateMeetingSessionEndProvenance(
+      exactEvent,
+      differentStartContext.readinessDocument,
+      differentStartContext.issuanceEvent,
+      differentStartContext.acceptanceEvent,
+      differentStartContext.policyObservation,
+    ),
+    () => domain.requirePrivateMeetingSessionEndProvenance(
+      differentStartEvent,
+      exactContext.readinessDocument,
+      exactContext.issuanceEvent,
+      exactContext.acceptanceEvent,
+      exactContext.policyObservation,
+    ),
+    ...[
+      Object.freeze(Object.assign(Object.create(null), exactEvent)),
+      Object.freeze(Object.create(exactEvent)),
+      proxy,
+      Object.freeze(accessor),
+    ].map((event) => () => domain.requirePrivateMeetingSessionEndProvenance(
+      event,
+      exactContext.readinessDocument,
+      exactContext.issuanceEvent,
+      exactContext.acceptanceEvent,
+      exactContext.policyObservation,
+    )),
+    () => domain.requirePrivateMeetingSessionEndProvenance(
+      exactEvent,
+      exactContext.readinessDocument,
+      issuanceProxy,
+      exactContext.acceptanceEvent,
+      exactContext.policyObservation,
+    ),
+  ];
+  for (const attempt of attempts) {
+    assert.throws(attempt, {
+      name: 'TypeError', message: 'Invalid private meeting session end input',
+    });
+  }
+  const getDescriptor = Object.getOwnPropertyDescriptor(WeakMap.prototype, 'get');
+  const setDescriptor = Object.getOwnPropertyDescriptor(WeakMap.prototype, 'set');
+  Object.defineProperty(WeakMap.prototype, 'get', {
+    configurable: true,
+    value() { hooks += 1; throw new Error('must not call ambient get'); },
+  });
+  Object.defineProperty(WeakMap.prototype, 'set', {
+    configurable: true,
+    value() { hooks += 1; throw new Error('must not call ambient set'); },
+  });
+  try {
+    assert.equal(domain.requirePrivateMeetingSessionEndProvenance(
+      exactEvent,
+      exactContext.readinessDocument,
+      exactContext.issuanceEvent,
+      exactContext.acceptanceEvent,
+      exactContext.policyObservation,
+    ), IDS.startSource);
+  } finally {
+    Object.defineProperty(WeakMap.prototype, 'get', getDescriptor);
+    Object.defineProperty(WeakMap.prototype, 'set', setDescriptor);
+  }
+  assert.equal(hooks, 0);
+  assert.deepEqual(Object.keys(exactEvent), [
+    'schemaVersion', 'tenantId', 'meetingId', 'sessionId', 'invitationId',
+    'subjectId', 'policyRevision', 'startedAt', 'endedAt', 'sourceEventId',
+    'lifecycleState', 'participationState', 'reason',
+  ]);
 });
 
 test('session end requires exact start provenance and rejects replay', async () => {
