@@ -3,10 +3,12 @@ import { types } from 'node:util';
 
 const OPAQUE_ID = /^id_[a-f0-9]{16,64}$/;
 const GENERIC_ERROR = 'Invalid service condition observation';
+const GENERIC_PROJECTION_ERROR = 'Invalid service condition projection';
 // Inclusive ages: live <= 1 minute, recent <= 5 minutes, historical <= 24 hours.
 const LIVE_MAX_AGE_MS = 60_000;
 const RECENT_MAX_AGE_MS = 5 * 60_000;
 const HISTORICAL_MAX_AGE_MS = 24 * 60 * 60_000;
+const MODULE_CONDITIONS = new WeakSet<object>();
 const INPUT_KEYS = [
   'tenantId', 'serviceId', 'sourceObservationId', 'observedAt', 'evaluatedAt',
   'sourceAvailability', 'lifecycle', 'required', 'configured', 'healthEvidence',
@@ -145,8 +147,30 @@ export function deriveServiceCondition(input: unknown) {
         value: entry[1], enumerable: true, configurable: false, writable: false,
       });
     }
+    MODULE_CONDITIONS.add(result);
     return Object.freeze(result);
   } catch {
     throw new TypeError(GENERIC_ERROR);
+  }
+}
+
+export function projectPrivateServiceCondition(condition: UnknownRecord, _expectedTenantId: unknown) {
+  try {
+    if (types.isProxy(condition) || !MODULE_CONDITIONS.has(condition)
+      || typeof _expectedTenantId !== 'string' || !OPAQUE_ID.test(_expectedTenantId)
+      || condition.tenantId !== _expectedTenantId) {
+      throw new TypeError(GENERIC_PROJECTION_ERROR);
+    }
+    const result = Object.create(null) as UnknownRecord;
+    for (const key of [
+      'serviceId', 'classification', 'freshness', 'observedAt', 'evaluatedAt', 'reasonCode',
+    ]) {
+      Object.defineProperty(result, key, {
+        value: condition[key], enumerable: true, configurable: false, writable: false,
+      });
+    }
+    return Object.freeze(result);
+  } catch {
+    throw new TypeError(GENERIC_PROJECTION_ERROR);
   }
 }

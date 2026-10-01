@@ -297,3 +297,152 @@ test('service condition boundary remains dormant and runtime-disconnected', asyn
   assert.doesNotMatch(source, /\b(route|server|provider|database|renderer|animation|occupancy|hermes|sqlite)\b/i);
   assert.doesNotMatch(main, /serviceCondition|deriveServiceCondition/);
 });
+
+test('module-owned condition produces the exact six-field private projection', async () => {
+  const domain = await loadDomain();
+  const condition = domain.deriveServiceCondition(observationFixture());
+
+  assert.equal(typeof domain.projectPrivateServiceCondition, 'function');
+  assert.deepEqual({ ...domain.projectPrivateServiceCondition(condition, IDS.tenant) }, {
+    serviceId: IDS.service,
+    classification: 'working',
+    freshness: 'live',
+    observedAt: '2026-09-30T12:00:00.000Z',
+    evaluatedAt: '2026-09-30T12:00:30.000Z',
+    reasonCode: 'source_healthy',
+  });
+});
+
+test('private projection requires the exact matching tenant', async () => {
+  const domain = await loadDomain();
+  const condition = domain.deriveServiceCondition(observationFixture());
+
+  assert.throws(
+    () => domain.projectPrivateServiceCondition(condition, 'id_9999999999999999'),
+    { name: 'TypeError', message: 'Invalid service condition projection' },
+  );
+});
+
+test('private projection rejects every non-owned equivalent without invoking hooks', async () => {
+  const domain = await loadDomain();
+  const condition = domain.deriveServiceCondition(observationFixture());
+  let hookCalls = 0;
+  const proxy = new Proxy(condition, {
+    get() {
+      hookCalls += 1;
+      return IDS.tenant;
+    },
+  });
+  const accessor = Object.defineProperty({}, 'tenantId', {
+    get() {
+      hookCalls += 1;
+      return IDS.tenant;
+    },
+  });
+  const wrapper = { condition };
+  const equivalent = Object.assign(Object.create(null), condition);
+
+  for (const candidate of [
+    { ...condition },
+    JSON.parse(JSON.stringify(condition)),
+    Object.create(condition),
+    proxy,
+    accessor,
+    wrapper,
+    equivalent,
+  ]) {
+    assert.throws(
+      () => domain.projectPrivateServiceCondition(candidate, IDS.tenant),
+      { name: 'TypeError', message: 'Invalid service condition projection' },
+    );
+  }
+  assert.equal(hookCalls, 0);
+});
+
+test('private projection preserves every classification and freshness value exactly', async () => {
+  const domain = await loadDomain();
+  const cases = [
+    [{}, 'working', 'live'],
+    [{ configured: false, healthEvidence: 'none' }, 'not_configured', 'live'],
+    [{ required: false, configured: false, healthEvidence: 'none' }, 'optional', 'live'],
+    [{ lifecycle: 'retired', required: false, configured: false,
+      healthEvidence: 'none' }, 'retired', 'live'],
+    [{ healthEvidence: 'none', blockReason: 'dependency_missing' }, 'blocked', 'live'],
+    [{ sourceAvailability: 'degraded', healthEvidence: 'impaired' },
+      'degraded', 'degraded'],
+    [{ sourceAvailability: 'unavailable', healthEvidence: 'failure' },
+      'broken', 'unavailable'],
+    [{ evaluatedAt: '2026-09-30T12:01:00.001Z' }, 'working', 'recent'],
+    [{ evaluatedAt: '2026-09-30T12:05:00.001Z' }, 'degraded', 'historical'],
+    [{ evaluatedAt: '2026-10-01T12:00:00.001Z' }, 'degraded', 'stale'],
+  ];
+
+  assert.deepEqual(cases.map(([overrides]) => {
+    const condition = domain.deriveServiceCondition(observationFixture(overrides));
+    const projection = domain.projectPrivateServiceCondition(condition, IDS.tenant);
+    return [projection.classification, projection.freshness];
+  }), cases.map(([, classification, freshness]) => [classification, freshness]));
+});
+
+test('private projection is detached recursively frozen null-prototype minimal data', async () => {
+  const domain = await loadDomain();
+  const condition = domain.deriveServiceCondition(observationFixture());
+  const projection = domain.projectPrivateServiceCondition(condition, IDS.tenant);
+
+  assert.notEqual(projection, condition);
+  assert.equal(Object.getPrototypeOf(projection), null);
+  assert.equal(Object.isFrozen(projection), true);
+  assert.deepEqual(Reflect.ownKeys(projection), [
+    'serviceId', 'classification', 'freshness', 'observedAt', 'evaluatedAt', 'reasonCode',
+  ]);
+  for (const value of Object.values(projection)) {
+    assert.equal(value === null || typeof value !== 'object' || Object.isFrozen(value), true);
+  }
+  for (const forbidden of [
+    'tenantId', 'sourceObservationId', 'rawSourceFacts', 'healthEvidence', 'blockDetail',
+    'credentials', 'provider', 'endpoint', 'url', 'capacity', 'customer', 'authority',
+    'occupancy', 'incidentScope', 'buildingFailure', 'productionVisibility',
+  ]) {
+    assert.equal(Object.hasOwn(projection, forbidden), false);
+  }
+});
+
+test('private projection rejects hostile expected tenant IDs with one generic error', async () => {
+  const domain = await loadDomain();
+  const condition = domain.deriveServiceCondition(observationFixture());
+  let hookCalls = 0;
+  const coercible = {
+    [Symbol.toPrimitive]() {
+      hookCalls += 1;
+      return IDS.tenant;
+    },
+    toString() {
+      hookCalls += 1;
+      return IDS.tenant;
+    },
+  };
+  const accessor = Object.defineProperty({}, 'value', {
+    get() {
+      hookCalls += 1;
+      return IDS.tenant;
+    },
+  });
+
+  for (const expectedTenantId of [
+    undefined,
+    null,
+    Symbol('tenant'),
+    new String(IDS.tenant),
+    coercible,
+    accessor,
+    'id_111111111111111',
+    'ID_1111111111111111',
+    `${IDS.tenant} `,
+  ]) {
+    assert.throws(
+      () => domain.projectPrivateServiceCondition(condition, expectedTenantId),
+      { name: 'TypeError', message: 'Invalid service condition projection' },
+    );
+  }
+  assert.equal(hookCalls, 0);
+});
