@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
+import { readFile, readdir } from 'node:fs/promises';
 import test from 'node:test';
 import ts from 'typescript';
 
 const moduleUrl = new URL('../src/domain/serviceCondition.ts', import.meta.url);
 
-async function loadDomain() {
+async function loadDomain(instance = '') {
   let source;
   try {
     source = await readFile(moduleUrl, 'utf8');
@@ -16,7 +16,8 @@ async function loadDomain() {
   const output = ts.transpileModule(source, {
     compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 },
   }).outputText;
-  return import(`data:text/javascript;base64,${Buffer.from(output).toString('base64')}`);
+  const instanceSuffix = instance ? `#${encodeURIComponent(instance)}` : '';
+  return import(`data:text/javascript;base64,${Buffer.from(output).toString('base64')}${instanceSuffix}`);
 }
 
 const IDS = Object.freeze({
@@ -445,4 +446,165 @@ test('private projection rejects hostile expected tenant IDs with one generic er
     );
   }
   assert.equal(hookCalls, 0);
+});
+
+test('module-owned private projection produces the exact working live presentation', async () => {
+  const domain = await loadDomain();
+  const condition = domain.deriveServiceCondition(observationFixture());
+  const projection = domain.projectPrivateServiceCondition(condition, IDS.tenant);
+
+  assert.equal(typeof domain.presentPrivateServiceCondition, 'function');
+  assert.deepEqual({ ...domain.presentPrivateServiceCondition(projection) }, {
+    serviceId: IDS.service,
+    classification: 'working',
+    classificationLabel: 'Working',
+    freshness: 'live',
+    freshnessLabel: 'Live',
+    observedAt: '2026-09-30T12:00:00.000Z',
+    evaluatedAt: '2026-09-30T12:00:30.000Z',
+    reasonCode: 'source_healthy',
+  });
+});
+
+test('presentation preserves and labels all seven classifications without collapse', async () => {
+  const domain = await loadDomain();
+  const cases = [
+    [{}, 'working', 'Working'],
+    [{ sourceAvailability: 'degraded', healthEvidence: 'impaired' },
+      'degraded', 'Degraded'],
+    [{ healthEvidence: 'none', blockReason: 'dependency_missing' },
+      'blocked', 'Blocked'],
+    [{ sourceAvailability: 'unavailable', healthEvidence: 'failure' },
+      'broken', 'Broken'],
+    [{ configured: false, healthEvidence: 'none' },
+      'not_configured', 'Not configured'],
+    [{ required: false, configured: false, healthEvidence: 'none' },
+      'optional', 'Optional'],
+    [{ lifecycle: 'retired', required: false, configured: false, healthEvidence: 'none' },
+      'retired', 'Retired'],
+  ];
+
+  assert.deepEqual(cases.map(([overrides]) => {
+    const condition = domain.deriveServiceCondition(observationFixture(overrides));
+    const projection = domain.projectPrivateServiceCondition(condition, IDS.tenant);
+    const presentation = domain.presentPrivateServiceCondition(projection);
+    return [presentation.classification, presentation.classificationLabel];
+  }), cases.map(([, classification, label]) => [classification, label]));
+});
+
+test('presentation preserves and labels all six freshness values without collapse', async () => {
+  const domain = await loadDomain();
+  const cases = [
+    [{}, 'live', 'Live'],
+    [{ evaluatedAt: '2026-09-30T12:01:00.001Z' }, 'recent', 'Recent'],
+    [{ evaluatedAt: '2026-09-30T12:05:00.001Z' }, 'historical', 'Historical'],
+    [{ evaluatedAt: '2026-10-01T12:00:00.001Z' }, 'stale', 'Stale'],
+    [{ sourceAvailability: 'degraded', healthEvidence: 'impaired' },
+      'degraded', 'Degraded'],
+    [{ sourceAvailability: 'unavailable', healthEvidence: 'failure' },
+      'unavailable', 'Unavailable'],
+  ];
+
+  assert.deepEqual(cases.map(([overrides]) => {
+    const condition = domain.deriveServiceCondition(observationFixture(overrides));
+    const projection = domain.projectPrivateServiceCondition(condition, IDS.tenant);
+    const presentation = domain.presentPrivateServiceCondition(projection);
+    return [presentation.freshness, presentation.freshnessLabel];
+  }), cases.map(([, freshness, label]) => [freshness, label]));
+});
+
+test('presentation rejects every non-owned projection without invoking attacker hooks', async () => {
+  const domain = await loadDomain();
+  const otherDomain = await loadDomain('presentation-cross-instance');
+  const condition = domain.deriveServiceCondition(observationFixture());
+  const projection = domain.projectPrivateServiceCondition(condition, IDS.tenant);
+  const otherCondition = otherDomain.deriveServiceCondition(observationFixture());
+  const otherProjection = otherDomain.projectPrivateServiceCondition(otherCondition, IDS.tenant);
+  let hookCalls = 0;
+  const proxy = new Proxy(projection, {
+    get() {
+      hookCalls += 1;
+      return IDS.service;
+    },
+  });
+  const accessor = Object.defineProperty({}, 'classification', {
+    get() {
+      hookCalls += 1;
+      return 'working';
+    },
+  });
+  const equivalent = Object.assign(Object.create(null), projection);
+
+  for (const candidate of [
+    { ...projection },
+    JSON.parse(JSON.stringify(projection)),
+    Object.create(projection),
+    { projection },
+    proxy,
+    accessor,
+    equivalent,
+    otherProjection,
+  ]) {
+    assert.throws(
+      () => domain.presentPrivateServiceCondition(candidate),
+      { name: 'TypeError', message: 'Invalid service condition presentation' },
+    );
+  }
+  assert.equal(hookCalls, 0);
+});
+
+test('presentation is detached frozen null-prototype minimal data with generic failures', async () => {
+  const domain = await loadDomain();
+  const condition = domain.deriveServiceCondition(observationFixture());
+  const projection = domain.projectPrivateServiceCondition(condition, IDS.tenant);
+  const presentation = domain.presentPrivateServiceCondition(projection);
+
+  assert.notEqual(presentation, projection);
+  assert.equal(Object.getPrototypeOf(presentation), null);
+  assert.equal(Object.isFrozen(presentation), true);
+  assert.deepEqual(Reflect.ownKeys(presentation), [
+    'serviceId', 'classification', 'classificationLabel', 'freshness', 'freshnessLabel',
+    'observedAt', 'evaluatedAt', 'reasonCode',
+  ]);
+  for (const value of Object.values(presentation)) {
+    assert.equal(value === null || typeof value !== 'object' || Object.isFrozen(value), true);
+  }
+  for (const forbidden of [
+    'tenantId', 'sourceObservationId', 'rawSourceFacts', 'healthEvidence', 'evidence',
+    'blockDetail', 'credentials', 'provider', 'providerIdentity', 'endpoint', 'url',
+    'capacity', 'customer', 'authority', 'action', 'control', 'html', 'color', 'sound',
+    'animation', 'freeText', 'occupancy', 'incidentScope', 'buildingFailure',
+    'productionVisibility',
+  ]) {
+    assert.equal(Object.hasOwn(presentation, forbidden), false);
+  }
+  for (const invalid of [undefined, null, true, 0, '', Symbol('projection'), {}]) {
+    assert.throws(
+      () => domain.presentPrivateServiceCondition(invalid),
+      { name: 'TypeError', message: 'Invalid service condition presentation' },
+    );
+  }
+});
+
+test('presentation stays dormant display-neutral and runtime-disconnected with one meaning', async () => {
+  const source = await readFile(moduleUrl, 'utf8');
+  const presentationSource = source.slice(source.indexOf(
+    'export function presentPrivateServiceCondition',
+  ));
+  assert.deepEqual(
+    [...source.matchAll(/\bfrom\s+['"]([^'"]+)['"]/gs)].map((match) => match[1]),
+    ['node:util'],
+  );
+  assert.doesNotMatch(presentationSource, /\b(fetch|XMLHttpRequest|WebSocket|setTimeout|setInterval|Date\.now|process|localStorage|sessionStorage|document|window|navigator|indexedDB)\b/);
+  assert.doesNotMatch(presentationSource, /\b(route|server|provider|database|storage|logging|renderer|animation|occupancy|world|kiosk|spatial|nonSpatial|html|color|sound|action|control)\b/i);
+
+  const srcRoot = new URL('../src/', import.meta.url);
+  const sourcePaths = (await readdir(srcRoot, { recursive: true }))
+    .filter((path) => path.endsWith('.ts') && path !== 'domain/serviceCondition.ts');
+  const runtimeSources = await Promise.all(sourcePaths.map(
+    (path) => readFile(new URL(path, srcRoot), 'utf8'),
+  ));
+  for (const runtimeSource of runtimeSources) {
+    assert.doesNotMatch(runtimeSource, /presentPrivateServiceCondition/);
+  }
 });
