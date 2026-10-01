@@ -4,11 +4,30 @@ import { types } from 'node:util';
 const OPAQUE_ID = /^id_[a-f0-9]{16,64}$/;
 const GENERIC_ERROR = 'Invalid service condition observation';
 const GENERIC_PROJECTION_ERROR = 'Invalid service condition projection';
+const GENERIC_PRESENTATION_ERROR = 'Invalid service condition presentation';
 // Inclusive ages: live <= 1 minute, recent <= 5 minutes, historical <= 24 hours.
 const LIVE_MAX_AGE_MS = 60_000;
 const RECENT_MAX_AGE_MS = 5 * 60_000;
 const HISTORICAL_MAX_AGE_MS = 24 * 60 * 60_000;
 const MODULE_CONDITIONS = new WeakSet<object>();
+const MODULE_PROJECTIONS = new WeakSet<object>();
+const CLASSIFICATION_LABELS: Readonly<Record<string, string>> = Object.freeze({
+  working: 'Working',
+  degraded: 'Degraded',
+  blocked: 'Blocked',
+  broken: 'Broken',
+  not_configured: 'Not configured',
+  optional: 'Optional',
+  retired: 'Retired',
+});
+const FRESHNESS_LABELS: Readonly<Record<string, string>> = Object.freeze({
+  live: 'Live',
+  recent: 'Recent',
+  historical: 'Historical',
+  stale: 'Stale',
+  degraded: 'Degraded',
+  unavailable: 'Unavailable',
+});
 const INPUT_KEYS = [
   'tenantId', 'serviceId', 'sourceObservationId', 'observedAt', 'evaluatedAt',
   'sourceAvailability', 'lifecycle', 'required', 'configured', 'healthEvidence',
@@ -169,8 +188,40 @@ export function projectPrivateServiceCondition(condition: UnknownRecord, _expect
         value: condition[key], enumerable: true, configurable: false, writable: false,
       });
     }
+    MODULE_PROJECTIONS.add(result);
     return Object.freeze(result);
   } catch {
     throw new TypeError(GENERIC_PROJECTION_ERROR);
+  }
+}
+
+export function presentPrivateServiceCondition(projection: UnknownRecord) {
+  try {
+    if (types.isProxy(projection) || !MODULE_PROJECTIONS.has(projection)) {
+      throw new TypeError(GENERIC_PRESENTATION_ERROR);
+    }
+    const classificationLabel = CLASSIFICATION_LABELS[projection.classification as string];
+    const freshnessLabel = FRESHNESS_LABELS[projection.freshness as string];
+    if (!classificationLabel || !freshnessLabel) throw new TypeError(GENERIC_PRESENTATION_ERROR);
+    const result = Object.create(null) as UnknownRecord;
+    const resultEntries = [
+      ['serviceId', projection.serviceId],
+      ['classification', projection.classification],
+      ['classificationLabel', classificationLabel],
+      ['freshness', projection.freshness],
+      ['freshnessLabel', freshnessLabel],
+      ['observedAt', projection.observedAt],
+      ['evaluatedAt', projection.evaluatedAt],
+      ['reasonCode', projection.reasonCode],
+    ] as const;
+    for (let index = 0; index < resultEntries.length; index += 1) {
+      const entry = resultEntries[index];
+      Object.defineProperty(result, entry[0], {
+        value: entry[1], enumerable: true, configurable: false, writable: false,
+      });
+    }
+    return Object.freeze(result);
+  } catch {
+    throw new TypeError(GENERIC_PRESENTATION_ERROR);
   }
 }
