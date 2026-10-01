@@ -109,6 +109,28 @@ class GenuineEndCommand extends EndCommandBase {
   }
 }
 
+class SessionEndEventBase {
+  constructor(value: object) {
+    return value as SessionEndEventBase;
+  }
+}
+
+class GenuineSessionEndEvent extends SessionEndEventBase {
+  #genuine = true;
+
+  constructor(event: PrivateMeetingSessionEndEvent) {
+    super(event);
+  }
+
+  static isGenuine(value: unknown): boolean {
+    try {
+      return (value as GenuineSessionEndEvent).#genuine;
+    } catch {
+      return false;
+    }
+  }
+}
+
 export function createPrivateMeetingSessionEndCommand(
   sourceEventIdInput: unknown,
   endAuthorityReferenceInput: unknown,
@@ -122,6 +144,17 @@ export function createPrivateMeetingSessionEndCommand(
     return new GenuineEndCommand({
       sourceEventId, endAuthorityReference, endedAt,
     }) as unknown as EndCommand;
+  } catch {
+    throw new TypeError(GENERIC_ERROR);
+  }
+}
+
+export function requirePrivateMeetingSessionEndEvent(
+  value: unknown,
+): PrivateMeetingSessionEndEvent {
+  try {
+    if (!GenuineSessionEndEvent.isGenuine(value)) fail();
+    return value as PrivateMeetingSessionEndEvent;
   } catch {
     throw new TypeError(GENERIC_ERROR);
   }
@@ -182,7 +215,7 @@ export function createPrivateMeetingSessionEndEvent(
       reason: 'invited_temporary_access_expired_or_ended' as const,
     });
     endedStarts = { event: startEvent, next: endedStarts };
-    return event;
+    return new GenuineSessionEndEvent(event) as unknown as PrivateMeetingSessionEndEvent;
   } catch {
     throw new TypeError(GENERIC_ERROR);
   }

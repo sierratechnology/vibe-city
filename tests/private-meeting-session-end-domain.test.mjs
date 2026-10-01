@@ -139,6 +139,39 @@ test('exact accepted session start yields one minimal session-end event', async 
   });
 });
 
+test('session-end verifier accepts only an exact event owned by this module instance', async () => {
+  const domain = await loadDomain('end-event-provenance');
+  const otherDomain = await loadDomain('end-event-provenance-other');
+  const event = createEnd(domain, createContext(domain));
+  const otherEvent = createEnd(otherDomain, createContext(otherDomain));
+  let hooks = 0;
+  const proxy = new Proxy(event, {
+    get() { hooks += 1; throw new Error('must not read'); },
+    ownKeys() { hooks += 1; throw new Error('must not enumerate'); },
+    getPrototypeOf() { hooks += 1; throw new Error('must not inspect'); },
+  });
+  const accessor = Object.create(null);
+  Object.defineProperty(accessor, 'schemaVersion', {
+    enumerable: true,
+    get() { hooks += 1; throw new Error('must not read'); },
+  });
+
+  assert.equal(domain.requirePrivateMeetingSessionEndEvent(event), event);
+  for (const invalidEvent of [
+    Object.freeze(Object.assign(Object.create(null), event)),
+    JSON.parse(JSON.stringify(event)),
+    Object.freeze(Object.create(event)),
+    proxy,
+    Object.freeze(accessor),
+    otherEvent,
+  ]) {
+    assert.throws(() => domain.requirePrivateMeetingSessionEndEvent(invalidEvent), {
+      name: 'TypeError', message: 'Invalid private meeting session end input',
+    });
+  }
+  assert.equal(hooks, 0);
+});
+
 test('session end requires exact start provenance and rejects replay', async () => {
   const domain = await loadDomain('start-provenance');
   const otherDomain = await loadDomain('start-provenance-other');
