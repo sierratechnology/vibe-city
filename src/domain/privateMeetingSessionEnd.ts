@@ -33,6 +33,14 @@ type EndedStartNode = Readonly<{
   next: EndedStartNode | null;
 }>;
 let endedStarts: EndedStartNode | null = null;
+type SessionEndProvenance = Readonly<{
+  readinessDocument: unknown;
+  issuanceEvent: unknown;
+  acceptanceEvent: unknown;
+  policyObservation: unknown;
+  startEvent: PrivateMeetingSessionStartEvent;
+  startSourceEventId: string;
+}>;
 
 function fail(): never { throw new TypeError(GENERIC_ERROR); }
 
@@ -117,9 +125,11 @@ class SessionEndEventBase {
 
 class GenuineSessionEndEvent extends SessionEndEventBase {
   #genuine = true;
+  #provenance: SessionEndProvenance;
 
-  constructor(event: PrivateMeetingSessionEndEvent) {
+  constructor(event: PrivateMeetingSessionEndEvent, provenance: SessionEndProvenance) {
     super(event);
+    this.#provenance = provenance;
   }
 
   static isGenuine(value: unknown): boolean {
@@ -127,6 +137,14 @@ class GenuineSessionEndEvent extends SessionEndEventBase {
       return (value as GenuineSessionEndEvent).#genuine;
     } catch {
       return false;
+    }
+  }
+
+  static provenance(value: unknown): SessionEndProvenance | undefined {
+    try {
+      return (value as GenuineSessionEndEvent).#provenance;
+    } catch {
+      return undefined;
     }
   }
 }
@@ -155,6 +173,29 @@ export function requirePrivateMeetingSessionEndEvent(
   try {
     if (!GenuineSessionEndEvent.isGenuine(value)) fail();
     return value as PrivateMeetingSessionEndEvent;
+  } catch {
+    throw new TypeError(GENERIC_ERROR);
+  }
+}
+
+export function requirePrivateMeetingSessionEndProvenance(
+  value: unknown,
+  readinessDocument: unknown,
+  issuanceEvent: unknown,
+  acceptanceEvent: unknown,
+  policyObservation: unknown,
+): string {
+  try {
+    const provenance = GenuineSessionEndEvent.provenance(value);
+    if (provenance === undefined
+      || provenance.readinessDocument !== readinessDocument
+      || provenance.issuanceEvent !== issuanceEvent
+      || provenance.acceptanceEvent !== acceptanceEvent
+      || provenance.policyObservation !== policyObservation) fail();
+    const startEvent = requirePrivateMeetingSessionStartEvent(provenance.startEvent);
+    if (startEvent !== provenance.startEvent
+      || provenance.startSourceEventId !== startEvent.sourceEventId) fail();
+    return provenance.startSourceEventId;
   } catch {
     throw new TypeError(GENERIC_ERROR);
   }
@@ -214,8 +255,18 @@ export function createPrivateMeetingSessionEndEvent(
       participationState: 'left' as const,
       reason: 'invited_temporary_access_expired_or_ended' as const,
     });
+    const provenance = closed({
+      readinessDocument,
+      issuanceEvent,
+      acceptanceEvent,
+      policyObservation,
+      startEvent,
+      startSourceEventId: startEvent.sourceEventId,
+    });
+    const genuineEvent = new GenuineSessionEndEvent(event, provenance) as unknown as
+      PrivateMeetingSessionEndEvent;
     endedStarts = { event: startEvent, next: endedStarts };
-    return new GenuineSessionEndEvent(event) as unknown as PrivateMeetingSessionEndEvent;
+    return genuineEvent;
   } catch {
     throw new TypeError(GENERIC_ERROR);
   }
