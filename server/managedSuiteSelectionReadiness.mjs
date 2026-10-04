@@ -13,6 +13,9 @@ const stringCharCodeAt = Function.call.bind(String.prototype.charCodeAt);
 const stringSlice = Function.call.bind(String.prototype.slice);
 const ObjectPrototype = Object.prototype;
 const TypeErrorIntrinsic = TypeError;
+const weakSetAdd = Function.call.bind(WeakSet.prototype.add);
+const weakSetHas = Function.call.bind(WeakSet.prototype.has);
+const authenticResults = new WeakSet();
 
 const GATE_NAMES = objectFreeze(['pricing', 'lease_terms', 'payment', 'refunds', 'tax', 'capacity']);
 const INPUT_KEYS = objectFreeze(['schemaVersion', 'tenantId', 'organizationId', 'evaluatedAt', 'gates']);
@@ -191,7 +194,7 @@ export function createManagedSuiteSelectionReadiness(input) {
     });
   }
   objectFreeze(gates);
-  return frozenRecord([
+  const result = frozenRecord([
     ['schemaVersion', definition.schemaVersion],
     ['tenantId', definition.tenantId],
     ['organizationId', definition.organizationId],
@@ -201,4 +204,15 @@ export function createManagedSuiteSelectionReadiness(input) {
     ['canCommit', false],
     ['gates', gates],
   ]);
+  weakSetAdd(authenticResults, result);
+  return result;
 }
+
+defineProperty(createManagedSuiteSelectionReadiness, 'isAuthenticResult', {
+  configurable: false,
+  enumerable: false,
+  value(value) {
+    return value !== null && typeof value === 'object' && weakSetHas(authenticResults, value);
+  },
+  writable: false,
+});

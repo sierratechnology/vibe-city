@@ -1,6 +1,7 @@
 import { isProxy } from 'node:util/types';
 
 const objectCreate = Object.create;
+const defineProperty = Object.defineProperty;
 const objectFreeze = Object.freeze;
 const getDescriptor = Object.getOwnPropertyDescriptor;
 const getPrototype = Object.getPrototypeOf;
@@ -9,6 +10,9 @@ const stringCharCodeAt = Function.call.bind(String.prototype.charCodeAt);
 const stringSlice = Function.call.bind(String.prototype.slice);
 const ObjectPrototype = Object.prototype;
 const TypeErrorIntrinsic = TypeError;
+const weakSetAdd = Function.call.bind(WeakSet.prototype.add);
+const weakSetHas = Function.call.bind(WeakSet.prototype.has);
+const authenticResults = new WeakSet();
 
 const INVALID_INPUT = 'Invalid managed customer identity input';
 const ACCOUNT_ID_PREFIX = 'account_';
@@ -122,11 +126,22 @@ export function createManagedCustomerIdentityDomain(input) {
     ['tenantId', `tenant_${stringSlice(organization.organizationId, 'organization_'.length)}`],
     ['organizationId', organization.organizationId],
   ]);
-  return frozenRecord([
+  const result = frozenRecord([
     ['schemaVersion', definition.schemaVersion],
     ['account', account],
     ['organization', organization],
     ['membership', membership],
     ['tenantBinding', tenantBinding],
   ]);
+  weakSetAdd(authenticResults, result);
+  return result;
 }
+
+defineProperty(createManagedCustomerIdentityDomain, 'isAuthenticResult', {
+  configurable: false,
+  enumerable: false,
+  value(value) {
+    return value !== null && typeof value === 'object' && weakSetHas(authenticResults, value);
+  },
+  writable: false,
+});
