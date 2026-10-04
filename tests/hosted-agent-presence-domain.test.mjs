@@ -1,9 +1,70 @@
 import assert from 'node:assert/strict';
-import { readFile, readdir } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { dirname, join, normalize } from 'node:path';
 import test from 'node:test';
 import ts from 'typescript';
 
 const moduleUrl = new URL('../src/domain/hostedAgentPresence.ts', import.meta.url);
+const MODULE_SOURCE_PATTERN = /\.(?:[cm]?ts|tsx|[cm]?js|jsx)$/;
+
+function moduleScriptKind(fileName) {
+  if (fileName.endsWith('.tsx')) return ts.ScriptKind.TSX;
+  if (fileName.endsWith('.jsx')) return ts.ScriptKind.JSX;
+  if (/\.(?:[cm]?ts)$/.test(fileName)) return ts.ScriptKind.TS;
+  return ts.ScriptKind.JS;
+}
+
+function resolvesToHostedPresence(importer, specifier) {
+  if (!specifier.startsWith('.')) return false;
+  const resolved = normalize(join(dirname(importer), specifier)).replace(/\.(?:ts|js)$/, '');
+  return resolved === normalize('domain/hostedAgentPresence');
+}
+
+function referencesHostedPresence(ast, importer) {
+  let found = false;
+  function visit(node) {
+    if (found) return;
+    let specifier;
+    if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) {
+      specifier = node.moduleSpecifier;
+    } else if (ts.isCallExpression(node)
+      && node.expression.kind === ts.SyntaxKind.ImportKeyword
+      && node.arguments.length === 1) {
+      [specifier] = node.arguments;
+    }
+    if (specifier !== undefined
+      && ts.isStringLiteralLike(specifier)
+      && resolvesToHostedPresence(importer, specifier.text)) {
+      found = true;
+      return;
+    }
+    ts.forEachChild(node, visit);
+  }
+  visit(ast);
+  return found;
+}
+
+async function collectHostedPresenceImporters(sourceRoot) {
+  const importers = [];
+  const entries = await readdir(sourceRoot, { recursive: true });
+  for (const entry of entries.filter((name) => MODULE_SOURCE_PATTERN.test(name))) {
+    if (entry === 'domain/hostedAgentPresence.ts') continue;
+    const content = await readFile(new URL(entry, sourceRoot), 'utf8');
+    const ast = ts.createSourceFile(
+      entry, content, ts.ScriptTarget.ES2022, true,
+      moduleScriptKind(entry),
+    );
+    const importsPresence = referencesHostedPresence(ast, entry);
+    if (importsPresence) importers.push(entry);
+  }
+  return importers;
+}
+
+async function assertHostedPresenceImporters(sourceRoot, expectedImporters) {
+  const importers = await collectHostedPresenceImporters(sourceRoot);
+  assert.deepEqual(importers.sort(), expectedImporters, 'unexpected hosted presence importer');
+}
 
 async function loadDomain() {
   let source;
@@ -617,16 +678,180 @@ test('hosted presence contract remains dormant with zero runtime import or side-
   assert.equal(/Math\.random|Date\.now/.test(lifecycleSource), false);
 
   const entries = await readdir(sourceRoot, { recursive: true });
-  for (const entry of entries.filter((name) => /\.(?:ts|js)$/.test(name))) {
+  for (const entry of entries.filter((name) => MODULE_SOURCE_PATTERN.test(name))) {
     if (entry === 'domain/hostedAgentPresence.ts') continue;
     const content = await readFile(new URL(entry, sourceRoot), 'utf8');
-    if (content.includes('hostedAgentPresence')) {
-      assert.equal(entry, lifecycleEntry, `unexpected runtime importer: ${entry}`);
-    }
     if (entry !== lifecycleEntry) {
       assert.equal(content.includes('hostedAgentIdentityLifecycle'), false,
         `unexpected lifecycle importer: ${entry}`);
     }
+  }
+  await assertHostedPresenceImporters(sourceRoot, [
+    'domain/agentCommonsParticipation.ts',
+    'domain/hostedAgentIdentityLifecycle.ts',
+    'domain/meetingReadiness.ts',
+  ]);
+});
+
+test('dormancy guard rejects an alternate-relative static runtime importer', async () => {
+  const fixtureRoot = await mkdtemp(join(tmpdir(), 'hosted-presence-static-import-'));
+  try {
+    const runtimeRoot = join(fixtureRoot, 'runtime');
+    await mkdir(runtimeRoot);
+    await writeFile(
+      join(runtimeRoot, 'hostilePresenceImporter.ts'),
+      "import '../domain/hostedAgentPresence';\n",
+    );
+    await assert.rejects(
+      () => assertHostedPresenceImporters(new URL(`file://${fixtureRoot}/`), []),
+      /unexpected hosted presence importer/,
+    );
+  } finally {
+    await rm(fixtureRoot, { recursive: true, force: true });
+  }
+});
+
+test('dormancy guard rejects a runtime .tsx importer', async () => {
+  const fixtureRoot = await mkdtemp(join(tmpdir(), 'hosted-presence-tsx-import-'));
+  try {
+    const runtimeRoot = join(fixtureRoot, 'runtime');
+    await mkdir(runtimeRoot);
+    await writeFile(
+      join(runtimeRoot, 'hostilePresenceImporter.tsx'),
+      "import '../domain/hostedAgentPresence';\n",
+    );
+    await assert.rejects(
+      () => assertHostedPresenceImporters(new URL(`file://${fixtureRoot}/`), []),
+      /unexpected hosted presence importer/,
+    );
+  } finally {
+    await rm(fixtureRoot, { recursive: true, force: true });
+  }
+});
+
+test('dormancy guard rejects a public .mts importer with explicit extension spelling', async () => {
+  const fixtureRoot = await mkdtemp(join(tmpdir(), 'hosted-presence-mts-import-'));
+  try {
+    const publicRoot = join(fixtureRoot, 'public');
+    await mkdir(publicRoot);
+    await writeFile(
+      join(publicRoot, 'presenceImporter.mts'),
+      "import '../domain/hostedAgentPresence.ts';\n",
+    );
+    await assert.rejects(
+      () => assertHostedPresenceImporters(new URL(`file://${fixtureRoot}/`), []),
+      /unexpected hosted presence importer/,
+    );
+  } finally {
+    await rm(fixtureRoot, { recursive: true, force: true });
+  }
+});
+
+test('dormancy guard rejects a runtime .cts export-from reference', async () => {
+  const fixtureRoot = await mkdtemp(join(tmpdir(), 'hosted-presence-cts-export-'));
+  try {
+    const runtimeRoot = join(fixtureRoot, 'runtime');
+    await mkdir(runtimeRoot);
+    await writeFile(
+      join(runtimeRoot, 'presenceExporter.cts'),
+      "export { createHostedPresenceRequest } from '../domain/hostedAgentPresence';\n",
+    );
+    await assert.rejects(
+      () => assertHostedPresenceImporters(new URL(`file://${fixtureRoot}/`), []),
+      /unexpected hosted presence importer/,
+    );
+  } finally {
+    await rm(fixtureRoot, { recursive: true, force: true });
+  }
+});
+
+test('dormancy guard rejects a public .jsx literal dynamic import', async () => {
+  const fixtureRoot = await mkdtemp(join(tmpdir(), 'hosted-presence-jsx-dynamic-'));
+  try {
+    const publicRoot = join(fixtureRoot, 'public');
+    await mkdir(publicRoot);
+    await writeFile(
+      join(publicRoot, 'presenceLoader.jsx'),
+      "const presence = import('../domain/hostedAgentPresence');\n",
+    );
+    await assert.rejects(
+      () => assertHostedPresenceImporters(new URL(`file://${fixtureRoot}/`), []),
+      /unexpected hosted presence importer/,
+    );
+  } finally {
+    await rm(fixtureRoot, { recursive: true, force: true });
+  }
+});
+
+test('dormancy guard rejects a runtime .mjs static importer', async () => {
+  const fixtureRoot = await mkdtemp(join(tmpdir(), 'hosted-presence-mjs-import-'));
+  try {
+    const runtimeRoot = join(fixtureRoot, 'runtime');
+    await mkdir(runtimeRoot);
+    await writeFile(
+      join(runtimeRoot, 'presenceImporter.mjs'),
+      "import '../domain/hostedAgentPresence';\n",
+    );
+    await assert.rejects(
+      () => assertHostedPresenceImporters(new URL(`file://${fixtureRoot}/`), []),
+      /unexpected hosted presence importer/,
+    );
+  } finally {
+    await rm(fixtureRoot, { recursive: true, force: true });
+  }
+});
+
+test('dormancy guard rejects a public .cjs literal dynamic import', async () => {
+  const fixtureRoot = await mkdtemp(join(tmpdir(), 'hosted-presence-cjs-dynamic-'));
+  try {
+    const publicRoot = join(fixtureRoot, 'public');
+    await mkdir(publicRoot);
+    await writeFile(
+      join(publicRoot, 'presenceLoader.cjs'),
+      "const presence = import('../domain/hostedAgentPresence');\n",
+    );
+    await assert.rejects(
+      () => assertHostedPresenceImporters(new URL(`file://${fixtureRoot}/`), []),
+      /unexpected hosted presence importer/,
+    );
+  } finally {
+    await rm(fixtureRoot, { recursive: true, force: true });
+  }
+});
+
+test('dormancy guard rejects an export-from runtime reference', async () => {
+  const fixtureRoot = await mkdtemp(join(tmpdir(), 'hosted-presence-export-from-'));
+  try {
+    const runtimeRoot = join(fixtureRoot, 'runtime');
+    await mkdir(runtimeRoot);
+    await writeFile(
+      join(runtimeRoot, 'hostilePresenceExporter.ts'),
+      "export { createHostedPresenceRequest } from '../domain/hostedAgentPresence';\n",
+    );
+    await assert.rejects(
+      () => assertHostedPresenceImporters(new URL(`file://${fixtureRoot}/`), []),
+      /unexpected hosted presence importer/,
+    );
+  } finally {
+    await rm(fixtureRoot, { recursive: true, force: true });
+  }
+});
+
+test('dormancy guard rejects a dynamic runtime import', async () => {
+  const fixtureRoot = await mkdtemp(join(tmpdir(), 'hosted-presence-dynamic-import-'));
+  try {
+    const runtimeRoot = join(fixtureRoot, 'runtime');
+    await mkdir(runtimeRoot);
+    await writeFile(
+      join(runtimeRoot, 'hostilePresenceLoader.ts'),
+      "const presence = import('../domain/hostedAgentPresence');\n",
+    );
+    await assert.rejects(
+      () => assertHostedPresenceImporters(new URL(`file://${fixtureRoot}/`), []),
+      /unexpected hosted presence importer/,
+    );
+  } finally {
+    await rm(fixtureRoot, { recursive: true, force: true });
   }
 });
 
