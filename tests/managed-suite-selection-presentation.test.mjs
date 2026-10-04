@@ -316,3 +316,27 @@ test('T8 the dormant module and projection expose no actions private facts or co
     for (const value of Object.values(gate)) assert.notEqual(typeof value, 'function');
   }
 });
+
+test('T9 only exact module-produced presentation instances carry private authenticity', async () => {
+  const domain = await loadPresentation();
+  const inputs = genuineInputs();
+  const presentation = domain.createManagedSuiteSelectionPresentation(
+    inputs.identity,
+    inputs.readiness,
+  );
+  const forgery = {
+    ...presentation,
+    gates: presentation.gates.map((gate) => ({ ...gate })),
+  };
+
+  assert.equal(
+    domain.createManagedSuiteSelectionPresentation.isAuthenticResult(presentation),
+    true,
+  );
+  assert.equal(
+    domain.createManagedSuiteSelectionPresentation.isAuthenticResult(forgery),
+    false,
+  );
+  assert.deepEqual(Object.keys(domain), ['createManagedSuiteSelectionPresentation']);
+  assert.deepEqual(Object.keys(domain.createManagedSuiteSelectionPresentation), []);
+});

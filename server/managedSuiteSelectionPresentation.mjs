@@ -5,6 +5,9 @@ const objectCreate = Object.create;
 const objectFreeze = Object.freeze;
 const defineProperty = Object.defineProperty;
 const TypeErrorIntrinsic = TypeError;
+const weakSetAdd = Function.call.bind(WeakSet.prototype.add);
+const weakSetHas = Function.call.bind(WeakSet.prototype.has);
+const authenticResults = new WeakSet();
 const isAuthenticIdentity = createManagedCustomerIdentityDomain.isAuthenticResult;
 const isAuthenticReadiness = createManagedSuiteSelectionReadiness.isAuthenticResult;
 const INVALID_INPUT = 'Invalid managed suite selection presentation input';
@@ -38,7 +41,7 @@ export function createManagedSuiteSelectionPresentation(identity, readiness) {
     });
   }
   objectFreeze(gates);
-  return frozenRecord([
+  const result = frozenRecord([
     ['schemaVersion', 'managed-suite-selection-presentation/1'],
     ['tenantId', identity.tenantBinding.tenantId],
     ['accountId', identity.account.accountId],
@@ -49,4 +52,15 @@ export function createManagedSuiteSelectionPresentation(identity, readiness) {
     ['canCommit', false],
     ['gates', gates],
   ]);
+  weakSetAdd(authenticResults, result);
+  return result;
 }
+
+defineProperty(createManagedSuiteSelectionPresentation, 'isAuthenticResult', {
+  configurable: false,
+  enumerable: false,
+  value(value) {
+    return value !== null && typeof value === 'object' && weakSetHas(authenticResults, value);
+  },
+  writable: false,
+});
