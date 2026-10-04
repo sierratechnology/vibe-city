@@ -15,6 +15,9 @@ const reflectOwnKeys = Reflect.ownKeys;
 const stringCharCodeAt = Function.call.bind(String.prototype.charCodeAt);
 const ObjectPrototype = Object.prototype;
 const TypeErrorIntrinsic = TypeError;
+const weakSetAdd = Function.call.bind(WeakSet.prototype.add);
+const weakSetHas = Function.call.bind(WeakSet.prototype.has);
+const authenticResults = new WeakSet();
 const isAuthenticIdentity = createManagedCustomerIdentityDomain.isAuthenticResult;
 const isAuthenticPresentation = createManagedSuiteSelectionPresentation.isAuthenticResult;
 const INVALID_INPUT = 'Invalid managed starter agent readiness input';
@@ -201,7 +204,7 @@ export function createManagedStarterAgentReadiness(identity, presentation, obser
     });
   }
   objectFreeze(gates);
-  return frozenRecord([
+  const result = frozenRecord([
     ['schemaVersion', 'managed-starter-agent-readiness/1'],
     ['tenantId', definition.tenantId],
     ['accountId', definition.accountId],
@@ -212,4 +215,15 @@ export function createManagedStarterAgentReadiness(identity, presentation, obser
     ['canActivate', false],
     ['gates', gates],
   ]);
+  weakSetAdd(authenticResults, result);
+  return result;
 }
+
+defineProperty(createManagedStarterAgentReadiness, 'isAuthenticResult', {
+  configurable: false,
+  enumerable: false,
+  value(value) {
+    return value !== null && typeof value === 'object' && weakSetHas(authenticResults, value);
+  },
+  writable: false,
+});

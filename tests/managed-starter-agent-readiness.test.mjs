@@ -561,3 +561,99 @@ test('T10 genuine predecessor presentation later than the observation is rejecte
     GENERIC_ERROR,
   );
 });
+
+test('T11 only exact module-owned readiness results are authentic without changing public shape', async () => {
+  const domain = await loadDomain();
+  const inputs = genuineInputs();
+  const genuine = domain.createManagedStarterAgentReadiness(
+    inputs.identity,
+    inputs.presentation,
+    observationFixture(),
+  );
+  const copyFrozen = (value) => {
+    if (Array.isArray(value)) return Object.freeze(value.map(copyFrozen));
+    if (value !== null && typeof value === 'object') {
+      const copy = Object.create(null);
+      for (const [key, entry] of Object.entries(value)) copy[key] = copyFrozen(entry);
+      return Object.freeze(copy);
+    }
+    return value;
+  };
+  const copied = copyFrozen(genuine);
+  const roundTripped = JSON.parse(JSON.stringify(genuine));
+  const foreignDomain = await import(`${MODULE_PATH}?foreign-authenticity`);
+  const foreign = foreignDomain.createManagedStarterAgentReadiness(
+    inputs.identity,
+    inputs.presentation,
+    observationFixture(),
+  );
+
+  assert.equal(domain.createManagedStarterAgentReadiness.isAuthenticResult(genuine), true);
+  for (const value of [copied, roundTripped, foreign, null, undefined, false, 0, '', Symbol('x')]) {
+    assert.equal(domain.createManagedStarterAgentReadiness.isAuthenticResult(value), false);
+  }
+  assert.deepEqual(copied, genuine);
+  assert.deepEqual(roundTripped, JSON.parse(JSON.stringify(genuine)));
+  assert.deepEqual(
+    Object.getOwnPropertyDescriptor(
+      domain.createManagedStarterAgentReadiness,
+      'isAuthenticResult',
+    ),
+    {
+      configurable: false,
+      enumerable: false,
+      value: domain.createManagedStarterAgentReadiness.isAuthenticResult,
+      writable: false,
+    },
+  );
+  assert.deepEqual(Object.keys(domain.createManagedStarterAgentReadiness), []);
+});
+
+test('T12 authenticity ignores replaced WeakSet ambients and rejects wrappers without hooks', async () => {
+  const domain = await loadDomain();
+  const inputs = genuineInputs();
+  const genuine = domain.createManagedStarterAgentReadiness(
+    inputs.identity,
+    inputs.presentation,
+    observationFixture(),
+  );
+  const copied = Object.freeze(Object.assign(Object.create(null), genuine));
+  const wrapper = Object.freeze(Object.create(genuine));
+  let hooks = 0;
+  const proxied = new Proxy(genuine, {
+    get() { hooks += 1; throw new Error('must not read'); },
+    getPrototypeOf() { hooks += 1; throw new Error('must not inspect'); },
+    ownKeys() { hooks += 1; throw new Error('must not enumerate'); },
+  });
+  const WeakSetIntrinsic = globalThis.WeakSet;
+  const originalAdd = WeakSetIntrinsic.prototype.add;
+  const originalHas = WeakSetIntrinsic.prototype.has;
+  let observed;
+  try {
+    globalThis.WeakSet = function HostileWeakSet() {
+      hooks += 1;
+      throw new Error('must not construct');
+    };
+    WeakSetIntrinsic.prototype.add = function hostileAdd(...args) {
+      hooks += 1;
+      return originalAdd.apply(this, args);
+    };
+    WeakSetIntrinsic.prototype.has = function hostileHas(...args) {
+      hooks += 1;
+      return originalHas.apply(this, args);
+    };
+    observed = [
+      domain.createManagedStarterAgentReadiness.isAuthenticResult(genuine),
+      domain.createManagedStarterAgentReadiness.isAuthenticResult(copied),
+      domain.createManagedStarterAgentReadiness.isAuthenticResult(proxied),
+      domain.createManagedStarterAgentReadiness.isAuthenticResult(wrapper),
+    ];
+  } finally {
+    globalThis.WeakSet = WeakSetIntrinsic;
+    WeakSetIntrinsic.prototype.add = originalAdd;
+    WeakSetIntrinsic.prototype.has = originalHas;
+  }
+
+  assert.deepEqual(observed, [true, false, false, false]);
+  assert.equal(hooks, 0);
+});
