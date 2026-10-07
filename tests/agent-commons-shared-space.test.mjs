@@ -11,7 +11,9 @@ const ACCOUNT_ID = 'account_0000000000000001';
 const ORGANIZATION_ID = 'organization_0000000000000002';
 const TENANT_ID = 'tenant_0000000000000002';
 const SPACE_ID = 'space_0000000000000003';
+const ACTIVITY_ID = 'activity_0000000000000004';
 const INVALID = { name: 'TypeError', message: 'Invalid Agent Commons shared-space definition input' };
+const INVALID_ACTIVITY = { name: 'TypeError', message: 'Invalid Agent Commons activity definition input' };
 
 async function loadDomain(tag) {
   let source;
@@ -64,6 +66,17 @@ function definitionInput(overrides = {}) {
     purpose: 'voluntary_social_creative_recreation',
     definedAt: '2026-10-05T12:00:00.000Z',
     recordedAt: '2026-10-05T12:00:00.000Z',
+    ...overrides,
+  };
+}
+
+function activityInput(overrides = {}) {
+  return {
+    schemaVersion: 'agent-commons-activity-definition/1',
+    activityId: ACTIVITY_ID,
+    activityKind: 'creative',
+    definedAt: '2026-10-05T12:01:00.000Z',
+    recordedAt: '2026-10-05T12:01:00.000Z',
     ...overrides,
   };
 }
@@ -271,19 +284,38 @@ test('T7 characterization: captured intrinsics survive hostile ambient replaceme
   assert.equal(denial.message, INVALID.message);
 });
 
-test('T8 characterization: definition is dormant private data without runtime or authority claims', async () => {
+test('T8 characterization: definitions remain dormant private data without runtime or authority claims', async () => {
   const domain = await loadDomain('t8');
-  assert.deepEqual(Object.keys(domain), ['createAgentCommonsSharedSpaceDefinition']);
-  const result = domain.createAgentCommonsSharedSpaceDefinition(
+  assert.deepEqual(Object.keys(domain), [
+    'createAgentCommonsActivityDefinition',
+    'createAgentCommonsSharedSpaceDefinition',
+  ]);
+  const space = domain.createAgentCommonsSharedSpaceDefinition(
     authenticIdentity(), definitionInput(),
   );
+  const input = activityInput();
+  const activity = domain.createAgentCommonsActivityDefinition(space, input);
   for (const forbidden of [
     'participant', 'identity', 'invitation', 'attendance', 'occupancyCount',
     'activityEvent', 'workState', 'permission', 'authority', 'quietHoursEnforced',
     'proposalApproved', 'provider', 'route', 'persistence', 'publicProjection',
     'pricing', 'credential', 'tenantLabel', 'customerClaim', 'hostedAgentClaim',
     'friendship', 'productivity', 'productionStatus',
-  ]) assert.equal(forbidden in result, false, `forbidden field: ${forbidden}`);
+  ]) {
+    assert.equal(forbidden in space, false, `forbidden shared-space field: ${forbidden}`);
+    assert.equal(forbidden in activity, false, `forbidden activity field: ${forbidden}`);
+  }
+  assert.notEqual(activity, input);
+  assert.equal(Object.getPrototypeOf(activity), null);
+  assert.equal(Object.isFrozen(activity), true);
+  for (const value of Object.values(activity)) {
+    if (value !== null && typeof value === 'object') assert.equal(Object.isFrozen(value), true);
+    assert.notEqual(typeof value, 'function');
+  }
+  input.activityId = 'activity_ffffffffffffffff';
+  input.recordedAt = '2026-10-06T12:01:00.000Z';
+  assert.equal(activity.activityId, ACTIVITY_ID);
+  assert.equal(activity.recordedAt, '2026-10-05T12:01:00.000Z');
 
   const source = await readFile(moduleUrl, 'utf8');
   const imports = Array.from(
@@ -311,4 +343,201 @@ test('T8 characterization: definition is dormant private data without runtime or
   assert.doesNotMatch(source, /\b(?:fetch|XMLHttpRequest|WebSocket|setTimeout|setInterval|process|document|window|localStorage|sessionStorage|console|eval)\b/);
   assert.doesNotMatch(source, /\bnew\s+Function\b/);
   assert.doesNotMatch(source, /(?:route|database|filesystem|storage|payment|price|balance|attendance|friendship|productivity)/i);
+});
+
+test('T9 authentic same-module space creates the exact dormant activity definition', async () => {
+  const domain = await loadDomain('t9');
+  const space = domain.createAgentCommonsSharedSpaceDefinition(
+    authenticIdentity(), definitionInput(),
+  );
+  assert.equal(typeof domain.createAgentCommonsActivityDefinition, 'function');
+  const result = domain.createAgentCommonsActivityDefinition(space, activityInput());
+  assert.equal(Object.getPrototypeOf(result), null);
+  assert.equal(Object.isFrozen(result), true);
+  assert.deepEqual(Object.keys(result), [
+    'schemaVersion', 'activityId', 'spaceId', 'tenantId', 'accountId', 'activityKind',
+    'participation', 'activationStatus', 'availability', 'accessBoundary', 'privacy',
+    'costPolicy', 'interruptionPolicy', 'definedAt', 'recordedAt',
+  ]);
+  assert.deepEqual({ ...result }, {
+    schemaVersion: 'agent-commons-activity-definition/1',
+    activityId: ACTIVITY_ID,
+    spaceId: SPACE_ID,
+    tenantId: TENANT_ID,
+    accountId: ACCOUNT_ID,
+    activityKind: 'creative',
+    participation: 'voluntary',
+    activationStatus: 'not_activated',
+    availability: 'unavailable',
+    accessBoundary: 'tenant_private',
+    privacy: 'tenant_private',
+    costPolicy: 'no_incremental_spend',
+    interruptionPolicy: 'return_to_assigned_state',
+    definedAt: '2026-10-05T12:01:00.000Z',
+    recordedAt: '2026-10-05T12:01:00.000Z',
+  });
+});
+
+test('T10 activity factory rejects wrong arity before hostile input processing', async () => {
+  const domain = await loadDomain('t10');
+  const factory = domain.createAgentCommonsActivityDefinition;
+  const space = domain.createAgentCommonsSharedSpaceDefinition(
+    authenticIdentity(), definitionInput(),
+  );
+  let hooks = 0;
+  const hostile = new Proxy(Object.create(null), {
+    get() { hooks += 1; throw new Error('must not read'); },
+    getPrototypeOf() { hooks += 1; throw new Error('must not inspect'); },
+    ownKeys() { hooks += 1; throw new Error('must not enumerate'); },
+  });
+  assert.equal(factory.length, 2);
+  assert.throws(() => factory(), INVALID_ACTIVITY);
+  assert.throws(() => factory(space), INVALID_ACTIVITY);
+  assert.throws(() => factory(space, activityInput(), hostile), INVALID_ACTIVITY);
+  assert.equal(hooks, 0);
+});
+
+test('T11 activity input accepts only the exact closed schema and bounded meanings', async () => {
+  const domain = await loadDomain('t11');
+  const factory = domain.createAgentCommonsActivityDefinition;
+  const space = domain.createAgentCommonsSharedSpaceDefinition(
+    authenticIdentity(), definitionInput(),
+  );
+  const nullPrototype = Object.assign(Object.create(null), activityInput());
+  assert.equal(factory(space, nullPrototype).activityId, ACTIVITY_ID);
+  for (const activityKind of ['social', 'creative', 'recreation']) {
+    assert.equal(factory(space, activityInput({ activityKind })).activityKind, activityKind);
+  }
+  for (const activityId of [
+    `activity_${'0'.repeat(16)}`, `activity_${'abcdef0123456789'.repeat(4)}`,
+  ]) assert.equal(factory(space, activityInput({ activityId })).activityId, activityId);
+
+  const extra = activityInput();
+  extra.participant = 'someone';
+  const missing = activityInput();
+  delete missing.activityKind;
+  const symbolic = activityInput();
+  symbolic[Symbol('authority')] = true;
+  const nonEnumerable = activityInput();
+  Object.defineProperty(nonEnumerable, 'activityKind', {
+    value: nonEnumerable.activityKind,
+    enumerable: false,
+  });
+  for (const candidate of [
+    extra, missing, symbolic, nonEnumerable, [], null,
+    activityInput({ schemaVersion: 'agent-commons-activity-definition/2' }),
+    activityInput({ activityId: `activity_${'0'.repeat(15)}` }),
+    activityInput({ activityId: `activity_${'0'.repeat(65)}` }),
+    activityInput({ activityId: 'activity_000000000000000G' }),
+    activityInput({ activityId: 'event_0000000000000001' }),
+    activityInput({ activityId: new String(ACTIVITY_ID) }),
+    activityInput({ activityKind: 'work' }),
+    activityInput({ activityKind: new String('creative') }),
+  ]) assert.throws(() => factory(space, candidate), INVALID_ACTIVITY);
+});
+
+test('T12 activity binding rejects copied, wrapped, proxied, and foreign spaces without hooks', async () => {
+  const domain = await loadDomain('t12');
+  const foreignDomain = await loadDomain('t12-foreign');
+  const factory = domain.createAgentCommonsActivityDefinition;
+  const space = domain.createAgentCommonsSharedSpaceDefinition(
+    authenticIdentity(), definitionInput(),
+  );
+  const foreignSpace = foreignDomain.createAgentCommonsSharedSpaceDefinition(
+    authenticIdentity(), definitionInput(),
+  );
+  let hooks = 0;
+  const proxy = new Proxy(space, {
+    get() { hooks += 1; throw new Error('must not read'); },
+    getPrototypeOf() { hooks += 1; throw new Error('must not inspect'); },
+    ownKeys() { hooks += 1; throw new Error('must not enumerate'); },
+  });
+  for (const candidate of [
+    { ...space },
+    JSON.parse(JSON.stringify(space)),
+    Object.create(space),
+    Object.freeze({ value: space }),
+    proxy,
+    foreignSpace,
+  ]) assert.throws(() => factory(candidate, activityInput()), INVALID_ACTIVITY);
+  assert.equal(hooks, 0);
+});
+
+test('T13 hostile activity records and coercible scalars fail closed without hooks', async () => {
+  const domain = await loadDomain('t13');
+  const factory = domain.createAgentCommonsActivityDefinition;
+  const space = domain.createAgentCommonsSharedSpaceDefinition(
+    authenticIdentity(), definitionInput(),
+  );
+  let hooks = 0;
+  const accessor = activityInput();
+  Object.defineProperty(accessor, 'activityId', {
+    enumerable: true,
+    get() { hooks += 1; accessor.recordedAt = '2099-01-01T00:00:00.000Z'; return ACTIVITY_ID; },
+  });
+  const proxy = new Proxy(activityInput(), {
+    get() { hooks += 1; throw new Error('must not read'); },
+    getPrototypeOf() { hooks += 1; throw new Error('must not inspect'); },
+    ownKeys() { hooks += 1; throw new Error('must not enumerate'); },
+  });
+  const inherited = Object.assign(Object.create({ authority: 'approved' }), activityInput());
+  const coercible = Object.freeze({
+    toString() { hooks += 1; return 'creative'; },
+    valueOf() { hooks += 1; return 0; },
+  });
+  for (const candidate of [
+    accessor,
+    proxy,
+    inherited,
+    activityInput({ schemaVersion: coercible }),
+    activityInput({ activityId: coercible }),
+    activityInput({ activityKind: coercible }),
+    activityInput({ definedAt: coercible }),
+    activityInput({ recordedAt: coercible }),
+  ]) assert.throws(() => factory(space, candidate), INVALID_ACTIVITY);
+  assert.equal(hooks, 0);
+});
+
+test('T14 activity canonical UTC chronology requires recordedAt at or after definedAt', async () => {
+  const domain = await loadDomain('t14');
+  const factory = domain.createAgentCommonsActivityDefinition;
+  const space = domain.createAgentCommonsSharedSpaceDefinition(
+    authenticIdentity(), definitionInput(),
+  );
+  const later = factory(space, activityInput({
+    definedAt: '2024-02-29T23:59:59.999Z',
+    recordedAt: '2024-03-01T00:00:00.000Z',
+  }));
+  assert.deepEqual([later.definedAt, later.recordedAt], [
+    '2024-02-29T23:59:59.999Z', '2024-03-01T00:00:00.000Z',
+  ]);
+  for (const overrides of [
+    { definedAt: '2026-10-05T12:01:00Z' },
+    { definedAt: '2026-02-29T12:01:00.000Z' },
+    { definedAt: '2026-13-01T12:01:00.000Z' },
+    { definedAt: '2026-10-05t12:01:00.000Z' },
+    { recordedAt: '2026-10-05T12:00:59.999Z' },
+    { recordedAt: null },
+  ]) assert.throws(() => factory(space, activityInput(overrides)), INVALID_ACTIVITY);
+});
+
+test('T15 captured provenance intrinsics survive hostile ambient replacement', async () => {
+  const domain = await loadDomain('t15');
+  const identity = authenticIdentity();
+  const nativeAdd = WeakSet.prototype.add;
+  const nativeHas = WeakSet.prototype.has;
+  let hooks = 0;
+  const hostile = () => { hooks += 1; throw new Error('ambient hook ran'); };
+  let result;
+  try {
+    WeakSet.prototype.add = hostile;
+    WeakSet.prototype.has = hostile;
+    const space = domain.createAgentCommonsSharedSpaceDefinition(identity, definitionInput());
+    result = domain.createAgentCommonsActivityDefinition(space, activityInput());
+  } finally {
+    WeakSet.prototype.add = nativeAdd;
+    WeakSet.prototype.has = nativeHas;
+  }
+  assert.equal(hooks, 0);
+  assert.equal(result.activityId, ACTIVITY_ID);
 });
