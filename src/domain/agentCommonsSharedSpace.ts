@@ -17,12 +17,23 @@ const stringCharCodeAt = Function.call.bind(String.prototype.charCodeAt) as (
 const stringSlice = Function.call.bind(String.prototype.slice) as (
   value: string, start: number, end?: number,
 ) => string;
+const weakSetAdd = Function.call.bind(WeakSet.prototype.add) as (
+  set: WeakSet<object>, value: object,
+) => WeakSet<object>;
+const weakSetHas = Function.call.bind(WeakSet.prototype.has) as (
+  set: WeakSet<object>, value: object,
+) => boolean;
+const authenticSharedSpaces = new WeakSet<object>();
 const isAuthenticIdentity = createManagedCustomerIdentityDomain.isAuthenticResult;
 const TypeErrorIntrinsic = TypeError;
 const INVALID_INPUT = 'Invalid Agent Commons shared-space definition input';
+const INVALID_ACTIVITY_INPUT = 'Invalid Agent Commons activity definition input';
 const ObjectPrototype = Object.prototype;
 const INPUT_KEYS = objectFreeze([
   'schemaVersion', 'spaceId', 'displayName', 'purpose', 'definedAt', 'recordedAt',
+]);
+const ACTIVITY_INPUT_KEYS = objectFreeze([
+  'schemaVersion', 'activityId', 'activityKind', 'definedAt', 'recordedAt',
 ]);
 
 type ManagedIdentity = Readonly<{
@@ -35,6 +46,14 @@ type SharedSpaceInput = Readonly<{
   spaceId: string;
   displayName: 'Agent Commons';
   purpose: 'voluntary_social_creative_recreation';
+  definedAt: string;
+  recordedAt: string;
+}>;
+
+type ActivityInput = Readonly<{
+  schemaVersion: 'agent-commons-activity-definition/1';
+  activityId: string;
+  activityKind: 'social' | 'creative' | 'recreation';
   definedAt: string;
   recordedAt: string;
 }>;
@@ -55,27 +74,53 @@ export type AgentCommonsSharedSpaceDefinition = Readonly<{
   recordedAt: string;
 }>;
 
+export type AgentCommonsActivityDefinition = Readonly<{
+  schemaVersion: 'agent-commons-activity-definition/1';
+  activityId: string;
+  spaceId: string;
+  tenantId: string;
+  accountId: string;
+  activityKind: 'social' | 'creative' | 'recreation';
+  participation: 'voluntary';
+  activationStatus: 'not_activated';
+  availability: 'unavailable';
+  accessBoundary: 'tenant_private';
+  privacy: 'tenant_private';
+  costPolicy: 'no_incremental_spend';
+  interruptionPolicy: 'return_to_assigned_state';
+  definedAt: string;
+  recordedAt: string;
+}>;
+
 function invalid(): never {
   throw new TypeErrorIntrinsic(INVALID_INPUT);
 }
 
-function record(value: unknown): Record<string, unknown> {
-  if (value === null || typeof value !== 'object' || isProxy(value)) invalid();
+function invalidActivity(): never {
+  throw new TypeErrorIntrinsic(INVALID_ACTIVITY_INPUT);
+}
+
+function record(
+  value: unknown,
+  expectedKeys: readonly string[] = INPUT_KEYS,
+  reject: () => never = invalid,
+): Record<string, unknown> {
+  if (value === null || typeof value !== 'object' || isProxy(value)) reject();
   const prototype = getPrototype(value);
-  if (prototype !== ObjectPrototype && prototype !== null) invalid();
+  if (prototype !== ObjectPrototype && prototype !== null) reject();
   const keys = reflectOwnKeys(value);
-  if (keys.length !== INPUT_KEYS.length) invalid();
+  if (keys.length !== expectedKeys.length) reject();
   const copy = objectCreate(null) as Record<string, unknown>;
-  for (let expectedIndex = 0; expectedIndex < INPUT_KEYS.length; expectedIndex += 1) {
-    const expectedKey = INPUT_KEYS[expectedIndex];
+  for (let expectedIndex = 0; expectedIndex < expectedKeys.length; expectedIndex += 1) {
+    const expectedKey = expectedKeys[expectedIndex];
     let found = false;
     for (let keyIndex = 0; keyIndex < keys.length; keyIndex += 1) {
-      if (typeof keys[keyIndex] !== 'string') invalid();
+      if (typeof keys[keyIndex] !== 'string') reject();
       if (keys[keyIndex] === expectedKey) found = true;
     }
-    if (!found) invalid();
+    if (!found) reject();
     const descriptor = getDescriptor(value, expectedKey);
-    if (!descriptor || !hasOwn(descriptor, 'value') || descriptor.enumerable !== true) invalid();
+    if (!descriptor || !hasOwn(descriptor, 'value') || descriptor.enumerable !== true) reject();
     copy[expectedKey] = descriptor.value;
   }
   return copy;
@@ -85,6 +130,16 @@ function validSpaceId(value: unknown): value is string {
   if (typeof value !== 'string' || value.length < 22 || value.length > 70
       || stringSlice(value, 0, 6) !== 'space_') return false;
   for (let index = 6; index < value.length; index += 1) {
+    const code = stringCharCodeAt(value, index);
+    if (!(code >= 0x30 && code <= 0x39) && !(code >= 0x61 && code <= 0x66)) return false;
+  }
+  return true;
+}
+
+function validActivityId(value: unknown): value is string {
+  if (typeof value !== 'string' || value.length < 25 || value.length > 73
+      || stringSlice(value, 0, 9) !== 'activity_') return false;
+  for (let index = 9; index < value.length; index += 1) {
     const code = stringCharCodeAt(value, index);
     if (!(code >= 0x30 && code <= 0x39) && !(code >= 0x61 && code <= 0x66)) return false;
   }
@@ -151,5 +206,43 @@ export function createAgentCommonsSharedSpaceDefinition(
   result.privacy = 'tenant_private';
   result.definedAt = definition.definedAt;
   result.recordedAt = definition.recordedAt;
-  return objectFreeze(result) as AgentCommonsSharedSpaceDefinition;
+  const frozenResult = objectFreeze(result) as AgentCommonsSharedSpaceDefinition;
+  weakSetAdd(authenticSharedSpaces, frozenResult);
+  return frozenResult;
+}
+
+export function createAgentCommonsActivityDefinition(
+  space: unknown,
+  input: unknown,
+): AgentCommonsActivityDefinition {
+  if (arguments.length !== 2) invalidActivity();
+  if (space === null || typeof space !== 'object'
+      || !weakSetHas(authenticSharedSpaces, space)) invalidActivity();
+  const authenticSpace = space as AgentCommonsSharedSpaceDefinition;
+  const definition = record(input, ACTIVITY_INPUT_KEYS, invalidActivity) as ActivityInput;
+  if (definition.schemaVersion !== 'agent-commons-activity-definition/1'
+      || !validActivityId(definition.activityId)
+      || definition.activityKind !== 'social'
+        && definition.activityKind !== 'creative'
+        && definition.activityKind !== 'recreation'
+      || !validTimestamp(definition.definedAt)
+      || !validTimestamp(definition.recordedAt)
+      || definition.recordedAt < definition.definedAt) invalidActivity();
+  const result = objectCreate(null) as Record<string, unknown>;
+  result.schemaVersion = definition.schemaVersion;
+  result.activityId = definition.activityId;
+  result.spaceId = authenticSpace.spaceId;
+  result.tenantId = authenticSpace.tenantId;
+  result.accountId = authenticSpace.accountId;
+  result.activityKind = definition.activityKind;
+  result.participation = 'voluntary';
+  result.activationStatus = 'not_activated';
+  result.availability = 'unavailable';
+  result.accessBoundary = 'tenant_private';
+  result.privacy = 'tenant_private';
+  result.costPolicy = 'no_incremental_spend';
+  result.interruptionPolicy = 'return_to_assigned_state';
+  result.definedAt = definition.definedAt;
+  result.recordedAt = definition.recordedAt;
+  return objectFreeze(result) as AgentCommonsActivityDefinition;
 }
