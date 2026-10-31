@@ -1,0 +1,1282 @@
+import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
+import { readFile } from "node:fs/promises";
+import test from "node:test";
+import ts from "typescript";
+
+const MODULE_URL = new URL("../src/navigation/privateTenantNavigationRequestController.ts", import.meta.url);
+const DECISION_URL = new URL("../src/navigation/privateTenantNavigationDecision.ts", import.meta.url);
+let loadSequence = 0;
+async function loadController() {
+  const [source, decisionSource] = await Promise.all([
+    readFile(MODULE_URL, "utf8").catch((error) => error?.code === "ENOENT" ? "" : Promise.reject(error)),
+    readFile(DECISION_URL, "utf8")
+  ]);
+  const options = { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } };
+  const decisionJavaScript = ts.transpileModule(decisionSource, options).outputText;
+  const decisionDataUrl = `data:text/javascript;base64,${Buffer.from(decisionJavaScript).toString("base64")}`;
+  const javascript = ts.transpileModule(source, options).outputText
+    .replace('"./privateTenantNavigationDecision"', `"${decisionDataUrl}"`);
+  loadSequence += 1;
+  return import(`data:text/javascript;base64,${Buffer.from(javascript).toString("base64")}#controller-${loadSequence}`);
+}
+async function loadDecision() {
+  const source = await readFile(DECISION_URL, "utf8");
+  const javascript = ts.transpileModule(source, {
+    compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 }
+  }).outputText;
+  return import(`data:text/javascript;base64,${Buffer.from(javascript).toString("base64")}#direct-decision`);
+}
+
+const SELECTED_ID = process.env.M7T4B_SELECTED_ID || "";
+const REGISTRATION_MANIFEST = process.env.M7T4B_REGISTRATION_MANIFEST === "1";
+const PRIMARY_PROBE_ID = process.env.M7T4B_PRIMARY_PROBE_ID || "";
+const TOP_LEVEL_REGISTRATIONS = [];
+const selectedTest = (id, title, implementation) => {
+  TOP_LEVEL_REGISTRATIONS.push(Object.freeze({ id, title, implementation }));
+};
+const PRIMARY_PROBES = [
+  ["C001", "export is exactly one fresh hardened request controller", "factory_topology"],
+  ["C002", "canonical door/public asynchronous completion settles through Tracer 4A after owned cleanup", "parity_door_public"],
+  ["C003", "synchronous completion is deferred until transport returns and cleanup finishes", "synchronous_completion_deferral"],
+  ["C004", "callback then start throw overrides provisional completion", "callback_then_start_throw_override"],
+  ["C005", "acquisition and release returns never assimilate hostile thenables", "hostile_thenable_non_assimilation"],
+  ["C006", "one pending request makes every concurrent call generically busy without observation", "single_flight_busy"],
+  ["C007", "timeout is first terminal and contains late completion", "timeout_terminal"],
+  ["C008", "pre-cancel settles before timer or transport acquisition", "pre_cancel_terminal"],
+  ["C009", "active cancellation is first terminal and contains late work", "active_cancel_terminal"],
+  ["C010", "duplicate completions decode settle and clean exactly once", "duplicate_completion_inert"],
+  ["C011", "post-response clock failure is contained", "clock_failure_containment"],
+  ["C012", "subscription acquisition throw is contained", "subscribe_throw_containment"],
+  ["C013", "initial cancellation check throw is contained", "cancellation_check_throw_containment"],
+  ["C014", "timeout acquisition throw is contained", "schedule_throw_containment"],
+  ["C015", "transport acquisition throw is contained", "start_throw_containment"],
+  ["C016", "transport release throw downgrades and cleanup continues", "cancel_transport_throw_containment"],
+  ["C017", "timeout release throw downgrades and cleanup continues", "cancel_timeout_throw_containment"],
+  ["C018", "cancellation release throw downgrades without rejection", "unsubscribe_throw_containment"],
+  ["C019", "captured intrinsics resist post-import replacement", "captured_intrinsic_resistance"],
+  ["C020", "cleanup reentrancy remains busy and reactions see idle", "cleanup_reentrancy_busy"],
+  ["C021", "completion before timeout keeps completion", "completion_before_timeout"],
+  ["C022", "timeout before completion keeps timeout", "timeout_before_completion"],
+  ["C023", "completion before cancellation keeps completion", "completion_before_cancel"],
+  ["C024", "cancellation before completion keeps cancellation", "cancel_before_completion"],
+  ["C025", "timeout before cancellation keeps timeout", "timeout_before_cancel"],
+  ["C026", "cancellation before timeout keeps cancellation", "cancel_before_timeout"],
+  ["C027", "door channel preserves tenant access through the complete asynchronous lifecycle", "parity_door_tenant"],
+  ["C028", "door channel preserves invited access through the complete asynchronous lifecycle", "parity_door_invited"],
+  ["C029", "door channel preserves private access through the complete asynchronous lifecycle", "parity_door_private"],
+  ["C030", "door channel preserves restricted access through the complete asynchronous lifecycle", "parity_door_restricted"],
+  ["C031", "elevator channel preserves public access through the complete asynchronous lifecycle", "parity_elevator_public"],
+  ["C032", "elevator channel preserves tenant access through the complete asynchronous lifecycle", "parity_elevator_tenant"],
+  ["C033", "elevator channel preserves invited access through the complete asynchronous lifecycle", "parity_elevator_invited"],
+  ["C034", "elevator channel preserves private access through the complete asynchronous lifecycle", "parity_elevator_private"],
+  ["C035", "elevator channel preserves restricted access through the complete asynchronous lifecycle", "parity_elevator_restricted"],
+  ["C036", "direct channel preserves public access through the complete asynchronous lifecycle", "parity_direct_public"],
+  ["C037", "direct channel preserves tenant access through the complete asynchronous lifecycle", "parity_direct_tenant"],
+  ["C038", "direct channel preserves invited access through the complete asynchronous lifecycle", "parity_direct_invited"],
+  ["C039", "direct channel preserves private access through the complete asynchronous lifecycle", "parity_direct_private"],
+  ["C040", "direct channel preserves restricted access through the complete asynchronous lifecycle", "parity_direct_restricted"],
+  ["C041", "alternative channel preserves public access through the complete asynchronous lifecycle", "parity_alternative_public"],
+  ["C042", "alternative channel preserves tenant access through the complete asynchronous lifecycle", "parity_alternative_tenant"],
+  ["C043", "alternative channel preserves invited access through the complete asynchronous lifecycle", "parity_alternative_invited"],
+  ["C044", "alternative channel preserves private access through the complete asynchronous lifecycle", "parity_alternative_private"],
+  ["C045", "alternative channel preserves restricted access through the complete asynchronous lifecycle", "parity_alternative_restricted"],
+  ["C046", "malformed transport wrappers converge through unchanged Tracer 4A delegation", "malformed_wrapper_delegation"]
+].map(([id, title, primary]) => Object.freeze({ id, title, primary }));
+const exactUnavailable = (value) => {
+  assert.deepEqual(Reflect.ownKeys(value), ["status"]);
+  assert.equal(value.status, "unavailable");
+  assert.equal(Object.getPrototypeOf(value), null);
+  assert.equal(Object.isFrozen(value), true);
+};
+const exactAvailable = (value, accessState) => {
+  assert.deepEqual(Reflect.ownKeys(value), ["status", "accessState"]);
+  assert.equal(value.status, "available");
+  assert.equal(value.accessState, accessState);
+  assert.equal(Object.getPrototypeOf(value), null);
+  assert.equal(Object.isFrozen(value), true);
+};
+const id = (value) => `id_${value.repeat(16)}`;
+const BASE_EXPECTATION = {
+  schemaVersion: "1.0", channel: "door", buildingId: id("1"), floorId: id("2"),
+  elevatorStopId: id("3"), destinationId: id("4")
+};
+const BASE_AUTHORITY = {
+  subjectId: id("5"), tenantId: id("6"), authorizationReference: id("7"), policyRevision: 7, active: true
+};
+const TRUSTED_MS = Date.parse("2000-01-01T00:30:00.000Z");
+const decisionFor = (channel = "door", accessState = "public") => ({
+  schemaVersion: "1.0", allowed: true, code: "allowed", ...BASE_EXPECTATION, channel,
+  destinationKind: "suite", accessState, subjectId: BASE_AUTHORITY.subjectId,
+  tenantId: accessState === "public" ? null : BASE_AUTHORITY.tenantId,
+  authorizationReference: BASE_AUTHORITY.authorizationReference, policyRevision: 7,
+  evaluatedAt: "2000-01-01T00:30:00.000Z",
+  validUntil: accessState === "invited" ? "2000-01-01T00:30:01.000Z" : null
+});
+const responseFor = (channel = "door", accessState = "public") => {
+  const bodyText = JSON.stringify({ decision: decisionFor(channel, accessState) });
+  return { status: 200, contentType: "application/json; charset=utf-8", contentLength: Buffer.byteLength(bodyText), bodyText };
+};
+const responseForDecision = (decision) => {
+  const bodyText = JSON.stringify({ decision });
+  return { status: 200, contentType: "application/json; charset=utf-8", contentLength: Buffer.byteLength(bodyText), bodyText };
+};
+function createFixture(overrides = {}) {
+  const calls = [];
+  const owned = { transport: new Set(), timeout: new Set(), cancellation: new Set() };
+  const state = { complete: null, timeout: null, cancel: null, starts: 0, clocks: 0 };
+  const dependencies = {
+    startTransport(snapshot, complete, token) {
+      calls.push("startTransport"); state.starts += 1; state.snapshot = snapshot; state.complete = complete;
+      state.token = token; owned.transport.add(token); return undefined;
+    },
+    cancelTransport(token) { calls.push("cancelTransport"); owned.transport.delete(token); },
+    scheduleTimeout(token, timeoutMs, timeout) {
+      calls.push("scheduleTimeout"); state.timeoutMs = timeoutMs; state.timeout = timeout; owned.timeout.add(token);
+    },
+    cancelTimeout(token) { calls.push("cancelTimeout"); owned.timeout.delete(token); },
+    subscribeCancellation(cancellation, token, cancel) {
+      calls.push("subscribeCancellation"); state.cancellation = cancellation; state.cancel = cancel; owned.cancellation.add(token);
+    },
+    unsubscribeCancellation(token) { calls.push("unsubscribeCancellation"); owned.cancellation.delete(token); },
+    isCancellationRequested() { calls.push("isCancellationRequested"); return false; },
+    readPostResponseTime() { calls.push("readPostResponseTime"); state.clocks += 1; return TRUSTED_MS; },
+    timeoutMs: 1000,
+    ...overrides
+  };
+  const controller = controllerModule.createPrivateTenantNavigationRequestController(dependencies);
+  return { calls, owned, state, dependencies, controller };
+}
+const ownedCount = (owned) => owned.transport.size + owned.timeout.size + owned.cancellation.size;
+const controllerModule = REGISTRATION_MANIFEST ? null : await loadController();
+const decisionModule = REGISTRATION_MANIFEST ? null : await loadDecision();
+
+selectedTest("C001", "export is exactly one fresh hardened request controller", () => {
+  if (typeof controllerModule.createPrivateTenantNavigationRequestController !== "function") {
+    throw new Error("M7T4B_MISSING_C001_FACTORY_TOPOLOGY");
+  }
+  return (async () => {
+  assert.deepEqual(Object.keys(controllerModule), ["createPrivateTenantNavigationRequestController"]);
+  const first = controllerModule.createPrivateTenantNavigationRequestController();
+  const second = controllerModule.createPrivateTenantNavigationRequestController();
+  assert.deepEqual(Reflect.ownKeys(first), ["request"]);
+  assert.equal(Object.getPrototypeOf(first), null);
+  assert.equal(Object.isFrozen(first), true);
+  assert.equal(typeof first.request, "function");
+  assert.equal(Object.isFrozen(first.request), true);
+  assert.notEqual(first, second);
+  assert.notEqual(first.request, second.request);
+  const firstResult = await first.request();
+  const secondResult = await first.request();
+  exactUnavailable(firstResult);
+  exactUnavailable(secondResult);
+  assert.notEqual(firstResult, secondResult);
+  })();
+});
+
+selectedTest("V001", "malformed dependency envelopes remain inert", async () => {
+  const create = controllerModule.createPrivateTenantNavigationRequestController;
+  const trap = () => { throw new Error("request argument observed"); };
+  const expectation = new Proxy({}, { get: trap, getPrototypeOf: trap, ownKeys: trap, getOwnPropertyDescriptor: trap });
+  class CustomDependencies {}
+  const malformed = [undefined, null, false, true, "x", 1, 1n, Symbol("dependencies"),
+    () => {}, [], new Number(1), new String("x"), new CustomDependencies(), Object.create({ custom: true }),
+    new Proxy({}, { getPrototypeOf: trap, ownKeys: trap, getOwnPropertyDescriptor: trap, get: trap })];
+  const results = [];
+  for (const dependencies of malformed) results.push(await create(dependencies).request(expectation, expectation, expectation));
+  results.forEach(exactUnavailable);
+  assert.equal(new Set(results).size, results.length);
+});
+
+selectedTest("V002", "malformed expectation and authority never acquire resources", async () => {
+  let calls = 0;
+  const observed = () => { calls += 1; throw new Error("resource acquired"); };
+  const dependencies = {
+    startTransport: observed, cancelTransport: observed, scheduleTimeout: observed, cancelTimeout: observed,
+    subscribeCancellation: observed, unsubscribeCancellation: observed, isCancellationRequested: observed,
+    readPostResponseTime: observed, timeoutMs: 1
+  };
+  const trap = () => { throw new Error("malformed record observed"); };
+  const hostile = new Proxy({}, { get: trap, getPrototypeOf: trap, ownKeys: trap, getOwnPropertyDescriptor: trap });
+  const controller = controllerModule.createPrivateTenantNavigationRequestController(dependencies);
+  for (const [expectation, authority] of [[hostile, {}], [{}, hostile], [null, {}], [{}, null], [[], {}], [{}, []]]) {
+    exactUnavailable(await controller.request(expectation, authority, hostile));
+  }
+  assert.equal(calls, 0);
+});
+
+selectedTest("V003", "import construction and inert requests use no ambient effects", async () => {
+  const names = ["fetch", "XMLHttpRequest", "WebSocket", "EventSource", "localStorage", "sessionStorage",
+    "indexedDB", "document", "setTimeout", "setInterval", "addEventListener", "AbortController",
+    "provider", "tenantProvider", "privateTenantProvider"];
+  const before = new Map(names.map((name) => [name, Object.getOwnPropertyDescriptor(globalThis, name)]));
+  const consoleBefore = new Map(["log", "info", "warn", "error"].map((name) => [name, Object.getOwnPropertyDescriptor(console, name)]));
+  let calls = 0;
+  const forbidden = () => { calls += 1; throw new Error("ambient effect"); };
+  let result;
+  try {
+    for (const name of names) Object.defineProperty(globalThis, name, { value: forbidden, writable: true, configurable: true });
+    for (const name of consoleBefore.keys()) Object.defineProperty(console, name, { value: forbidden, writable: true, configurable: true });
+    result = await controllerModule.createPrivateTenantNavigationRequestController().request();
+  } finally {
+    for (const [name, descriptor] of before) descriptor ? Object.defineProperty(globalThis, name, descriptor) : delete globalThis[name];
+    for (const [name, descriptor] of consoleBefore) Object.defineProperty(console, name, descriptor);
+  }
+  exactUnavailable(result);
+  assert.equal(calls, 0);
+});
+
+selectedTest("C002", "canonical door/public asynchronous completion settles through Tracer 4A after owned cleanup", () => {
+  const fixture = createFixture();
+  const expectation = structuredClone(BASE_EXPECTATION);
+  const authority = structuredClone(BASE_AUTHORITY);
+  const pending = fixture.controller.request(expectation, authority);
+  if (typeof fixture.state.complete !== "function") {
+    throw new Error("M7T4B_MISSING_C002_DOOR_PUBLIC_ASYNC_LIFECYCLE");
+  }
+  assert.notEqual(fixture.state.snapshot, expectation);
+  assert.deepEqual({ ...fixture.state.snapshot }, expectation);
+  assert.equal(Object.getPrototypeOf(fixture.state.snapshot), null);
+  assert.equal(Object.isFrozen(fixture.state.snapshot), true);
+  assert.equal(Object.getPrototypeOf(fixture.state.token), null);
+  assert.equal(Object.isFrozen(fixture.state.token), true);
+  expectation.channel = "direct";
+  authority.active = false;
+  fixture.state.complete(responseFor());
+  return pending.then(async (result) => {
+    exactAvailable(result, "public");
+    assert.deepEqual(fixture.calls, ["scheduleTimeout", "startTransport", "readPostResponseTime", "cancelTransport", "cancelTimeout"]);
+    assert.equal(fixture.state.clocks, 1);
+    assert.equal(ownedCount(fixture.owned), 0);
+    fixture.state.complete(null);
+    fixture.state.timeout();
+    assert.equal(fixture.state.clocks, 1);
+    assert.equal(ownedCount(fixture.owned), 0);
+    const recovered = fixture.controller.request(structuredClone(BASE_EXPECTATION), structuredClone(BASE_AUTHORITY));
+    assert.equal(fixture.state.starts, 2);
+    fixture.state.complete(responseFor());
+    exactAvailable(await recovered, "public");
+  });
+});
+
+selectedTest("C046", "malformed transport wrappers converge through unchanged Tracer 4A delegation", () => {
+  const probe = createFixture();
+  const probePending = probe.controller.request(structuredClone(BASE_EXPECTATION), structuredClone(BASE_AUTHORITY));
+  probe.state.complete(undefined);
+  if (probe.state.clocks !== 1) {
+    throw new Error("M7T4B_MISSING_C046_MALFORMED_WRAPPER_DELEGATION");
+  }
+  return (async () => {
+    exactUnavailable(await probePending);
+    class CustomResponse {}
+    const canonical = responseFor();
+    const malformed = [undefined, null, false, true, "x", 1, 1n, Symbol("response"), () => {}, [],
+      new Number(1), new String("x"), new CustomResponse(), Object.create({ custom: true })];
+    for (const key of Object.keys(canonical)) {
+      const value = { ...canonical }; delete value[key]; malformed.push(value);
+    }
+    const withSymbol = { ...canonical }; withSymbol[Symbol("extra")] = true;
+    const withHidden = { ...canonical }; Object.defineProperty(withHidden, "extra", { value: true });
+    const { status, ...rest } = canonical;
+    const accessor = { ...canonical }; Object.defineProperty(accessor, "status", { enumerable: true, get() { throw new Error("accessor"); } });
+    malformed.push({ ...canonical, extra: true }, withSymbol, withHidden, { ...rest, status }, accessor,
+      Object.assign(Object.create({ custom: true }), canonical),
+      ...[{ status: 199 }, { status: "200" }, { contentType: "application/json" }, { contentType: 1 },
+        { contentLength: null }, { contentLength: 1.5 }, { contentLength: -1 }, { contentLength: -0 },
+        { contentLength: canonical.contentLength + 1 }, { contentLength: 1 }, { contentLength: 2049 },
+        { bodyText: null }, { bodyText: {} }].map((change) => ({ ...canonical, ...change })));
+    const framed = (bodyText) => ({ ...canonical, contentLength: Buffer.byteLength(bodyText), bodyText });
+    malformed.push(framed("{"), framed("[]"), framed("null"), framed('{"decision":null}'),
+      framed('{"decision":{},"decision":{}}'), framed(`{"decision":{"nested":{"too":{"deep":1}}}}`),
+      framed(" ".repeat(2049)), framed("{}"), framed('{"extra":1}'));
+    const missingDecision = Object.keys(decisionFor()).map((key) => {
+      const decision = decisionFor(); delete decision[key]; return responseForDecision(decision);
+    });
+    malformed.push(...missingDecision,
+      responseForDecision({ ...decisionFor(), extra: true }),
+      responseForDecision({ ...decisionFor(), allowed: false }),
+      responseForDecision({ ...decisionFor(), channel: "air" }),
+      responseForDecision({ ...decisionFor(), destinationId: id("f") }),
+      responseForDecision({ ...decisionFor(), accessState: "open" }));
+    const results = [];
+    for (const value of malformed) {
+      const fixture = createFixture();
+      const pending = fixture.controller.request(structuredClone(BASE_EXPECTATION), structuredClone(BASE_AUTHORITY));
+      const original = value;
+      fixture.state.complete(original);
+      const result = await pending;
+      exactUnavailable(result);
+      results.push(result);
+      assert.equal(fixture.state.clocks, 1);
+      assert.deepEqual(fixture.calls, ["scheduleTimeout", "startTransport", "readPostResponseTime", "cancelTransport", "cancelTimeout"]);
+      fixture.state.complete(responseFor()); fixture.state.timeout();
+      assert.equal(fixture.state.clocks, 1);
+      assert.equal(ownedCount(fixture.owned), 0);
+      const recovery = fixture.controller.request(structuredClone(BASE_EXPECTATION), structuredClone(BASE_AUTHORITY));
+      fixture.state.complete(responseFor()); exactAvailable(await recovery, "public");
+    }
+    assert.equal(new Set(results).size, results.length);
+    const transcript = [];
+    const observedProxy = (label) => new Proxy(responseFor(), {
+      getPrototypeOf(target) { transcript.push(`${label}:getPrototypeOf`); return Reflect.getPrototypeOf(target); },
+      ownKeys(target) { transcript.push(`${label}:ownKeys`); return Reflect.ownKeys(target); },
+      getOwnPropertyDescriptor(target, key) { transcript.push(`${label}:descriptor:${String(key)}`); return Reflect.getOwnPropertyDescriptor(target, key); },
+      get(target, key, receiver) { transcript.push(`${label}:get:${String(key)}`); return Reflect.get(target, key, receiver); }
+    });
+    const direct = decisionModule.createPrivateTenantNavigationDecisionDecoder(structuredClone(BASE_EXPECTATION), structuredClone(BASE_AUTHORITY));
+    exactUnavailable(direct.decode(observedProxy("direct"), TRUSTED_MS));
+    const directTranscript = transcript.splice(0).map((entry) => entry.replace("direct", "same"));
+    const fixture = createFixture();
+    const pending = fixture.controller.request(structuredClone(BASE_EXPECTATION), structuredClone(BASE_AUTHORITY));
+    fixture.state.complete(observedProxy("controller"));
+    exactUnavailable(await pending);
+    assert.deepEqual(transcript.map((entry) => entry.replace("controller", "same")), directTranscript);
+  })();
+});
+
+async function parityLifecycle(channel, accessState) {
+  const fixture = createFixture();
+  const expectation = { ...BASE_EXPECTATION, channel };
+  const pending = fixture.controller.request(expectation, structuredClone(BASE_AUTHORITY));
+  fixture.state.complete(responseFor(channel, accessState));
+  const result = await pending;
+  exactAvailable(result, accessState);
+  assert.deepEqual(fixture.calls, ["scheduleTimeout", "startTransport", "readPostResponseTime", "cancelTransport", "cancelTimeout"]);
+  assert.equal(fixture.state.clocks, 1);
+  assert.equal(ownedCount(fixture.owned), 0);
+  fixture.state.complete(responseFor(channel, accessState));
+  fixture.state.timeout();
+  assert.equal(fixture.state.clocks, 1);
+  assert.equal(ownedCount(fixture.owned), 0);
+  const recovered = fixture.controller.request({ ...BASE_EXPECTATION, channel }, structuredClone(BASE_AUTHORITY));
+  assert.equal(fixture.state.starts, 2);
+  fixture.state.complete(responseFor(channel, accessState));
+  exactAvailable(await recovered, accessState);
+  assert.equal(ownedCount(fixture.owned), 0);
+}
+
+selectedTest("C027", "door channel preserves tenant access through the complete asynchronous lifecycle", async () => {
+  await parityLifecycle("door", "tenant");
+});
+
+selectedTest("C028", "door channel preserves invited access through the complete asynchronous lifecycle", async () => {
+  await parityLifecycle("door", "invited");
+});
+
+selectedTest("C029", "door channel preserves private access through the complete asynchronous lifecycle", async () => {
+  await parityLifecycle("door", "private");
+});
+
+selectedTest("C030", "door channel preserves restricted access through the complete asynchronous lifecycle", async () => {
+  await parityLifecycle("door", "restricted");
+});
+
+selectedTest("C031", "elevator channel preserves public access through the complete asynchronous lifecycle", async () => {
+  await parityLifecycle("elevator", "public");
+});
+
+selectedTest("C032", "elevator channel preserves tenant access through the complete asynchronous lifecycle", async () => {
+  await parityLifecycle("elevator", "tenant");
+});
+
+selectedTest("C033", "elevator channel preserves invited access through the complete asynchronous lifecycle", async () => {
+  await parityLifecycle("elevator", "invited");
+});
+
+selectedTest("C034", "elevator channel preserves private access through the complete asynchronous lifecycle", async () => {
+  await parityLifecycle("elevator", "private");
+});
+
+selectedTest("C035", "elevator channel preserves restricted access through the complete asynchronous lifecycle", async () => {
+  await parityLifecycle("elevator", "restricted");
+});
+
+selectedTest("C036", "direct channel preserves public access through the complete asynchronous lifecycle", async () => {
+  await parityLifecycle("direct", "public");
+});
+
+selectedTest("C037", "direct channel preserves tenant access through the complete asynchronous lifecycle", async () => {
+  await parityLifecycle("direct", "tenant");
+});
+
+selectedTest("C038", "direct channel preserves invited access through the complete asynchronous lifecycle", async () => {
+  await parityLifecycle("direct", "invited");
+});
+
+selectedTest("C039", "direct channel preserves private access through the complete asynchronous lifecycle", async () => {
+  await parityLifecycle("direct", "private");
+});
+
+selectedTest("C040", "direct channel preserves restricted access through the complete asynchronous lifecycle", async () => {
+  await parityLifecycle("direct", "restricted");
+});
+
+selectedTest("C041", "alternative channel preserves public access through the complete asynchronous lifecycle", async () => {
+  await parityLifecycle("alternative", "public");
+});
+
+selectedTest("C042", "alternative channel preserves tenant access through the complete asynchronous lifecycle", async () => {
+  await parityLifecycle("alternative", "tenant");
+});
+
+selectedTest("C043", "alternative channel preserves invited access through the complete asynchronous lifecycle", async () => {
+  await parityLifecycle("alternative", "invited");
+});
+
+selectedTest("C044", "alternative channel preserves private access through the complete asynchronous lifecycle", async () => {
+  await parityLifecycle("alternative", "private");
+});
+
+selectedTest("C045", "alternative channel preserves restricted access through the complete asynchronous lifecycle", async () => {
+  await parityLifecycle("alternative", "restricted");
+});
+
+selectedTest("C010", "duplicate completions decode settle and clean exactly once", async () => {
+  const fixture = createFixture();
+  const pending = fixture.controller.request(structuredClone(BASE_EXPECTATION), structuredClone(BASE_AUTHORITY));
+  let reactions = 0;
+  const observed = pending.then((result) => {
+    reactions += 1;
+    return result;
+  });
+  fixture.state.complete(responseFor());
+  fixture.state.complete(responseFor("door", "tenant"));
+  fixture.state.complete(null);
+  fixture.state.timeout();
+  exactAvailable(await observed, "public");
+  assert.equal(reactions, 1);
+  assert.equal(fixture.state.clocks, 1);
+  assert.deepEqual(fixture.calls, ["scheduleTimeout", "startTransport", "readPostResponseTime", "cancelTransport", "cancelTimeout"]);
+  assert.equal(ownedCount(fixture.owned), 0);
+  fixture.state.complete(responseFor("door", "private"));
+  fixture.state.timeout();
+  await Promise.resolve();
+  assert.equal(reactions, 1);
+  assert.equal(fixture.state.clocks, 1);
+  assert.equal(ownedCount(fixture.owned), 0);
+  const recovered = fixture.controller.request(structuredClone(BASE_EXPECTATION), structuredClone(BASE_AUTHORITY));
+  assert.equal(fixture.state.starts, 2);
+  fixture.state.complete(responseFor());
+  exactAvailable(await recovered, "public");
+  assert.equal(ownedCount(fixture.owned), 0);
+});
+
+selectedTest("C003", "synchronous completion is deferred until transport returns and cleanup finishes", async () => {
+  let decoderEffects = 0;
+  let fulfillmentReactions = 0;
+  let duringStart;
+  const fixture = createFixture({
+    readPostResponseTime() {
+      fixture.calls.push("readPostResponseTime");
+      fixture.state.clocks += 1;
+      decoderEffects += 1;
+      return TRUSTED_MS;
+    },
+    startTransport(snapshot, complete, token) {
+      fixture.calls.push("startTransport");
+      fixture.state.starts += 1;
+      fixture.state.snapshot = snapshot;
+      fixture.state.complete = complete;
+      fixture.state.token = token;
+      fixture.owned.transport.add(token);
+      complete(responseFor());
+      duringStart = {
+        calls: [...fixture.calls],
+        clocks: fixture.state.clocks,
+        decoderEffects,
+        fulfillmentReactions,
+        owned: ownedCount(fixture.owned)
+      };
+    }
+  });
+  const pending = fixture.controller.request(structuredClone(BASE_EXPECTATION), structuredClone(BASE_AUTHORITY));
+  const observed = pending.then((result) => {
+    fulfillmentReactions += 1;
+    return result;
+  });
+  const deferredDuringStart = duringStart?.clocks === 0 && duringStart.decoderEffects === 0 &&
+    duringStart.fulfillmentReactions === 0 && duringStart.owned === 2 &&
+    JSON.stringify(duringStart.calls) === JSON.stringify(["scheduleTimeout", "startTransport"]);
+  if (!deferredDuringStart) {
+    throw new Error("M7T4B_MISSING_C003_SYNC_COMPLETION_DEFERRAL");
+  }
+  exactAvailable(await observed, "public");
+  assert.equal(fulfillmentReactions, 1);
+  assert.equal(fixture.state.clocks, 1);
+  assert.equal(decoderEffects, 1);
+  assert.deepEqual(fixture.calls, ["scheduleTimeout", "startTransport", "readPostResponseTime", "cancelTransport", "cancelTimeout"]);
+  assert.equal(ownedCount(fixture.owned), 0);
+  fixture.state.complete(responseFor("door", "tenant"));
+  fixture.state.timeout();
+  await Promise.resolve();
+  assert.equal(fulfillmentReactions, 1);
+  assert.equal(fixture.state.clocks, 1);
+  assert.equal(ownedCount(fixture.owned), 0);
+  const recovered = fixture.controller.request(structuredClone(BASE_EXPECTATION), structuredClone(BASE_AUTHORITY));
+  assert.equal(fixture.state.starts, 2);
+  exactAvailable(await recovered, "public");
+  assert.equal(ownedCount(fixture.owned), 0);
+});
+
+selectedTest("C004", "callback then start throw overrides provisional completion", async () => {
+  const fulfillment = [];
+  const rejection = [];
+  const secret = "start-throw-detail-must-not-leak";
+  const fixture = createFixture({
+    startTransport(snapshot, complete, token) {
+      fixture.calls.push("startTransport");
+      fixture.state.starts += 1;
+      fixture.state.snapshot = snapshot;
+      fixture.state.complete = complete;
+      fixture.state.token = token;
+      fixture.owned.transport.add(token);
+      complete(responseFor());
+      if (fixture.state.starts === 1) throw new Error(secret);
+    }
+  });
+  const pending = fixture.controller.request(structuredClone(BASE_EXPECTATION), structuredClone(BASE_AUTHORITY));
+  const observed = pending.then(
+    (result) => { fulfillment.push(result); return result; },
+    (error) => { rejection.push(error); return error; }
+  );
+  const result = await observed;
+  const overridePresent = fulfillment.length === 1 && rejection.length === 0 &&
+    fixture.state.clocks === 0 && ownedCount(fixture.owned) === 0 &&
+    JSON.stringify(fixture.calls) === JSON.stringify([
+      "scheduleTimeout", "startTransport", "cancelTransport", "cancelTimeout"
+    ]);
+  if (!overridePresent) {
+    throw new Error("M7T4B_MISSING_C004_CALLBACK_THEN_START_THROW");
+  }
+  exactUnavailable(result);
+  assert.notEqual(result, responseFor());
+  assert.equal(JSON.stringify(result).includes(secret), false);
+  fixture.state.complete(responseFor("door", "tenant"));
+  fixture.state.timeout();
+  await Promise.resolve();
+  assert.equal(fulfillment.length, 1);
+  assert.equal(rejection.length, 0);
+  assert.equal(fixture.state.clocks, 0);
+  assert.deepEqual(fixture.calls, ["scheduleTimeout", "startTransport", "cancelTransport", "cancelTimeout"]);
+  assert.equal(ownedCount(fixture.owned), 0);
+  const recovered = fixture.controller.request(structuredClone(BASE_EXPECTATION), structuredClone(BASE_AUTHORITY));
+  assert.equal(fixture.state.starts, 2);
+  exactAvailable(await recovered, "public");
+  assert.equal(fixture.state.clocks, 1);
+  assert.equal(ownedCount(fixture.owned), 0);
+});
+
+selectedTest("C005", "acquisition and release returns never assimilate hostile thenables", async () => {
+  const returned = [];
+  const thenGets = [];
+  const thenCalls = [];
+  const rejection = [];
+  const unhandled = [];
+  const labels = ["subscribeCancellation", "scheduleTimeout", "startTransport",
+    "cancelTransport", "cancelTimeout", "unsubscribeCancellation"];
+  const secret = "hostile-thenable-detail-must-not-leak";
+  const onUnhandled = (reason) => { unhandled.push(reason); };
+  const hostileReturn = (label) => {
+    returned.push(label);
+    return Object.defineProperty(Object.create(null), "then", {
+      get() {
+        thenGets.push(label);
+        return (_resolve, reject) => {
+          thenCalls.push(label);
+          reject(new Error(secret));
+        };
+      }
+    });
+  };
+  const fixture = createFixture({
+    subscribeCancellation(cancellation, token, cancel) {
+      fixture.calls.push("subscribeCancellation");
+      fixture.state.cancellation = cancellation;
+      fixture.state.cancel = cancel;
+      fixture.owned.cancellation.add(token);
+      return hostileReturn("subscribeCancellation");
+    },
+    scheduleTimeout(token, timeoutMs, timeout) {
+      fixture.calls.push("scheduleTimeout");
+      fixture.state.timeoutMs = timeoutMs;
+      fixture.state.timeout = timeout;
+      fixture.owned.timeout.add(token);
+      return hostileReturn("scheduleTimeout");
+    },
+    startTransport(snapshot, complete, token) {
+      fixture.calls.push("startTransport");
+      fixture.state.starts += 1;
+      fixture.state.snapshot = snapshot;
+      fixture.state.complete = complete;
+      fixture.state.token = token;
+      fixture.owned.transport.add(token);
+      complete(responseFor());
+      return hostileReturn("startTransport");
+    },
+    cancelTransport(token) {
+      fixture.calls.push("cancelTransport");
+      fixture.owned.transport.delete(token);
+      return hostileReturn("cancelTransport");
+    },
+    cancelTimeout(token) {
+      fixture.calls.push("cancelTimeout");
+      fixture.owned.timeout.delete(token);
+      return hostileReturn("cancelTimeout");
+    },
+    unsubscribeCancellation(token) {
+      fixture.calls.push("unsubscribeCancellation");
+      fixture.owned.cancellation.delete(token);
+      return hostileReturn("unsubscribeCancellation");
+    }
+  });
+  process.on("unhandledRejection", onUnhandled);
+  try {
+    const cancellation = Object.freeze(Object.create(null));
+    const pending = fixture.controller.request(
+      structuredClone(BASE_EXPECTATION), structuredClone(BASE_AUTHORITY), cancellation
+    );
+    const observed = pending.then(
+      (result) => result,
+      (error) => { rejection.push(error); return error; }
+    );
+    const initialNonAssimilation = labels.every((label) => returned.filter((value) => value === label).length === 1) &&
+      thenGets.length === 0 && thenCalls.length === 0 && unhandled.length === 0;
+    if (!initialNonAssimilation) {
+      throw new Error("M7T4B_MISSING_C005_HOSTILE_THENABLE_NON_ASSIMILATION");
+    }
+    const result = await observed;
+    const firstCalls = [...fixture.calls];
+    fixture.state.complete(responseFor("door", "tenant"));
+    fixture.state.timeout();
+    fixture.state.cancel?.();
+    await Promise.resolve();
+    const afterLateCalls = [...fixture.calls];
+    const recovered = fixture.controller.request(
+      structuredClone(BASE_EXPECTATION), structuredClone(BASE_AUTHORITY), cancellation
+    );
+    const recoveredResult = await recovered;
+    await Promise.resolve();
+    const nonAssimilationPresent = labels.every((label) => returned.filter((value) => value === label).length === 2) &&
+      thenGets.length === 0 && thenCalls.length === 0 && unhandled.length === 0;
+    if (!nonAssimilationPresent) {
+      throw new Error("M7T4B_MISSING_C005_HOSTILE_THENABLE_NON_ASSIMILATION");
+    }
+    exactAvailable(result, "public");
+    exactAvailable(recoveredResult, "public");
+    assert.notEqual(result, recoveredResult);
+    assert.equal(rejection.length, 0);
+    assert.equal(JSON.stringify(result).includes(secret), false);
+    assert.equal(JSON.stringify(recoveredResult).includes(secret), false);
+    assert.deepEqual(firstCalls, ["subscribeCancellation", "isCancellationRequested", "scheduleTimeout", "startTransport",
+      "readPostResponseTime", "cancelTransport", "cancelTimeout", "unsubscribeCancellation"]);
+    assert.deepEqual(afterLateCalls, firstCalls);
+    assert.deepEqual(fixture.calls, [...firstCalls, ...firstCalls]);
+    assert.equal(fixture.state.clocks, 2);
+    assert.equal(ownedCount(fixture.owned), 0);
+  } finally {
+    process.off("unhandledRejection", onUnhandled);
+  }
+});
+
+selectedTest("C006", "one pending request makes every concurrent call generically busy without observation", async () => {
+  const observations = [];
+  const rejections = [];
+  const fixture = createFixture();
+  const expectation = structuredClone(BASE_EXPECTATION);
+  const authority = structuredClone(BASE_AUTHORITY);
+  const cancellation = Object.freeze(Object.create(null));
+  const pending = fixture.controller.request(expectation, authority, cancellation);
+  const completeOriginal = fixture.state.complete;
+  const timeoutOriginal = fixture.state.timeout;
+  const cancelOriginal = fixture.state.cancel;
+  const baselineCalls = [...fixture.calls];
+  const baselineOwned = ownedCount(fixture.owned);
+  const observed = (label, value) => new Proxy(value, {
+    getPrototypeOf(target) { observations.push(`${label}:getPrototypeOf`); return Reflect.getPrototypeOf(target); },
+    ownKeys(target) { observations.push(`${label}:ownKeys`); return Reflect.ownKeys(target); },
+    getOwnPropertyDescriptor(target, key) {
+      observations.push(`${label}:descriptor:${String(key)}`);
+      return Reflect.getOwnPropertyDescriptor(target, key);
+    },
+    get(target, key, receiver) {
+      observations.push(`${label}:get:${String(key)}`);
+      return Reflect.get(target, key, receiver);
+    }
+  });
+  const trap = (label) => new Proxy({}, {
+    getPrototypeOf() { observations.push(`${label}:getPrototypeOf`); throw new Error(label); },
+    ownKeys() { observations.push(`${label}:ownKeys`); throw new Error(label); },
+    getOwnPropertyDescriptor() { observations.push(`${label}:descriptor`); throw new Error(label); },
+    get() { observations.push(`${label}:get`); throw new Error(label); }
+  });
+  const concurrent = [
+    fixture.controller.request(),
+    fixture.controller.request(trap("hostile-expectation"), trap("hostile-authority"), trap("hostile-cancellation")),
+    fixture.controller.request(
+      observed("valid-expectation", structuredClone(BASE_EXPECTATION)),
+      observed("valid-authority", structuredClone(BASE_AUTHORITY)),
+      trap("valid-cancellation")
+    ),
+    fixture.controller.request(structuredClone(BASE_EXPECTATION), structuredClone(BASE_AUTHORITY), cancellation)
+  ];
+  const busyGatePresent = observations.length === 0 &&
+    JSON.stringify(fixture.calls) === JSON.stringify(baselineCalls) &&
+    ownedCount(fixture.owned) === baselineOwned &&
+    fixture.state.complete === completeOriginal && fixture.state.timeout === timeoutOriginal &&
+    fixture.state.cancel === cancelOriginal;
+  if (!busyGatePresent) {
+    throw new Error("M7T4B_MISSING_C006_SINGLE_FLIGHT_BUSY");
+  }
+  const busyResults = await Promise.all(concurrent.map((result) => result.then(
+    (value) => value,
+    (error) => { rejections.push(error); return error; }
+  )));
+  assert.equal(rejections.length, 0);
+  busyResults.forEach(exactUnavailable);
+  assert.equal(new Set(busyResults).size, busyResults.length);
+  assert.equal(observations.length, 0);
+  assert.deepEqual(fixture.calls, baselineCalls);
+  assert.equal(ownedCount(fixture.owned), baselineOwned);
+  completeOriginal(responseFor());
+  exactAvailable(await pending, "public");
+  assert.deepEqual(fixture.calls, [...baselineCalls,
+    "readPostResponseTime", "cancelTransport", "cancelTimeout", "unsubscribeCancellation"]);
+  assert.equal(fixture.state.clocks, 1);
+  assert.equal(ownedCount(fixture.owned), 0);
+  completeOriginal(responseFor("door", "tenant"));
+  timeoutOriginal();
+  cancelOriginal();
+  await Promise.resolve();
+  assert.equal(fixture.state.clocks, 1);
+  assert.equal(ownedCount(fixture.owned), 0);
+  assert.deepEqual(expectation, BASE_EXPECTATION);
+  assert.deepEqual(authority, BASE_AUTHORITY);
+  const recovered = fixture.controller.request(structuredClone(BASE_EXPECTATION), structuredClone(BASE_AUTHORITY));
+  assert.equal(fixture.state.starts, 2);
+  fixture.state.complete(responseFor());
+  exactAvailable(await recovered, "public");
+  assert.equal(ownedCount(fixture.owned), 0);
+});
+
+selectedTest("C007", "timeout is first terminal and contains late completion", async () => {
+  const rejections = [];
+  const fixture = createFixture();
+  const cancellation = Object.freeze(Object.create(null));
+  const pending = fixture.controller.request(
+    structuredClone(BASE_EXPECTATION), structuredClone(BASE_AUTHORITY), cancellation
+  );
+  const completeOriginal = fixture.state.complete;
+  const timeoutOriginal = fixture.state.timeout;
+  const cancelOriginal = fixture.state.cancel;
+  timeoutOriginal();
+  const timeoutTerminalPresent = fixture.state.clocks === 0 && ownedCount(fixture.owned) === 0 &&
+    JSON.stringify(fixture.calls) === JSON.stringify([
+      "subscribeCancellation", "isCancellationRequested", "scheduleTimeout", "startTransport",
+      "cancelTransport", "cancelTimeout", "unsubscribeCancellation"
+    ]);
+  if (!timeoutTerminalPresent) {
+    throw new Error("M7T4B_MISSING_C007_TIMEOUT_TERMINAL");
+  }
+  const result = await pending.then(
+    (value) => value,
+    (error) => { rejections.push(error); return error; }
+  );
+  exactUnavailable(result);
+  assert.equal(rejections.length, 0);
+  assert.equal(ownedCount(fixture.owned), 0);
+  const callsAfterTimeout = [...fixture.calls];
+  completeOriginal(responseFor("door", "private"));
+  timeoutOriginal();
+  cancelOriginal();
+  await Promise.resolve();
+  assert.deepEqual(fixture.calls, callsAfterTimeout);
+  assert.equal(fixture.state.clocks, 0);
+  assert.equal(ownedCount(fixture.owned), 0);
+  const recovered = fixture.controller.request(structuredClone(BASE_EXPECTATION), structuredClone(BASE_AUTHORITY));
+  assert.equal(fixture.state.starts, 2);
+  fixture.state.complete(responseFor());
+  const recoveredResult = await recovered;
+  exactAvailable(recoveredResult, "public");
+  assert.notEqual(result, recoveredResult);
+  assert.equal(ownedCount(fixture.owned), 0);
+});
+
+selectedTest("C008", "pre-cancel settles before timer or transport acquisition", async () => {
+  const rejections = [];
+  const cancellation = Object.freeze(Object.create(null));
+  const fixture = createFixture({
+    isCancellationRequested(value) {
+      fixture.calls.push("isCancellationRequested");
+      assert.equal(value, cancellation);
+      return true;
+    }
+  });
+  const pending = fixture.controller.request(
+    structuredClone(BASE_EXPECTATION), structuredClone(BASE_AUTHORITY), cancellation
+  );
+  const cancelOriginal = fixture.state.cancel;
+  const preCancelTerminalPresent = fixture.state.starts === 0 && fixture.state.clocks === 0 &&
+    fixture.state.complete === null && fixture.state.timeout === null && ownedCount(fixture.owned) === 0 &&
+    JSON.stringify(fixture.calls) === JSON.stringify([
+      "subscribeCancellation", "isCancellationRequested", "unsubscribeCancellation"
+    ]);
+  if (!preCancelTerminalPresent) {
+    throw new Error("M7T4B_MISSING_C008_PRE_CANCEL_TERMINAL");
+  }
+  const result = await pending.then(
+    (value) => value,
+    (error) => { rejections.push(error); return error; }
+  );
+  exactUnavailable(result);
+  assert.equal(rejections.length, 0);
+  assert.equal(ownedCount(fixture.owned), 0);
+  const callsAfterCancel = [...fixture.calls];
+  cancelOriginal();
+  await Promise.resolve();
+  assert.deepEqual(fixture.calls, callsAfterCancel);
+  assert.equal(fixture.state.clocks, 0);
+  assert.equal(ownedCount(fixture.owned), 0);
+  const recovered = fixture.controller.request(structuredClone(BASE_EXPECTATION), structuredClone(BASE_AUTHORITY));
+  assert.equal(fixture.state.starts, 1);
+  fixture.state.complete(responseFor());
+  const recoveredResult = await recovered;
+  exactAvailable(recoveredResult, "public");
+  assert.notEqual(result, recoveredResult);
+  assert.equal(ownedCount(fixture.owned), 0);
+});
+
+const activeCancellationTerminal = async () => {
+  const rejections = [];
+  const cancellation = Object.freeze(Object.create(null));
+  const fixture = createFixture();
+  const pending = fixture.controller.request(
+    structuredClone(BASE_EXPECTATION), structuredClone(BASE_AUTHORITY), cancellation
+  );
+  const completeOriginal = fixture.state.complete;
+  const timeoutOriginal = fixture.state.timeout;
+  const cancelOriginal = fixture.state.cancel;
+  cancelOriginal();
+  const activeCancelTerminalPresent = fixture.state.clocks === 0 && ownedCount(fixture.owned) === 0 &&
+    JSON.stringify(fixture.calls) === JSON.stringify([
+      "subscribeCancellation", "isCancellationRequested", "scheduleTimeout", "startTransport",
+      "cancelTransport", "cancelTimeout", "unsubscribeCancellation"
+    ]);
+  if (!activeCancelTerminalPresent) {
+    throw new Error("M7T4B_MISSING_C009_ACTIVE_CANCEL_TERMINAL");
+  }
+  const callsAfterCancel = [...fixture.calls];
+  completeOriginal(responseFor("door", "private"));
+  timeoutOriginal();
+  cancelOriginal();
+  const result = await pending.then(
+    (value) => value,
+    (error) => { rejections.push(error); return error; }
+  );
+  exactUnavailable(result);
+  assert.equal(rejections.length, 0);
+  assert.deepEqual(fixture.calls, callsAfterCancel);
+  assert.equal(fixture.state.clocks, 0);
+  assert.equal(ownedCount(fixture.owned), 0);
+  const recovered = fixture.controller.request(structuredClone(BASE_EXPECTATION), structuredClone(BASE_AUTHORITY));
+  assert.equal(fixture.state.starts, 2);
+  fixture.state.complete(responseFor());
+  const recoveredResult = await recovered;
+  exactAvailable(recoveredResult, "public");
+  assert.notEqual(result, recoveredResult);
+  assert.equal(ownedCount(fixture.owned), 0);
+};
+
+selectedTest("C009", "active cancellation is first terminal and contains late work", activeCancellationTerminal);
+
+selectedTest("C021", "completion before timeout keeps completion", async () => {
+  const rejections = [];
+  const fixture = createFixture();
+  const pending = fixture.controller.request(
+    structuredClone(BASE_EXPECTATION), structuredClone(BASE_AUTHORITY)
+  );
+  const completeOriginal = fixture.state.complete;
+  const timeoutOriginal = fixture.state.timeout;
+  let recovered;
+  const observed = pending.then(
+    (result) => {
+      exactAvailable(result, "public");
+      assert.equal(ownedCount(fixture.owned), 0);
+      recovered = fixture.controller.request(
+        structuredClone(BASE_EXPECTATION), structuredClone(BASE_AUTHORITY)
+      );
+      assert.equal(fixture.state.starts, 2);
+      return result;
+    },
+    (error) => { rejections.push(error); return error; }
+  );
+  completeOriginal(responseFor());
+  const callsAfterCompletion = [...fixture.calls];
+  assert.deepEqual(callsAfterCompletion, [
+    "scheduleTimeout", "startTransport", "readPostResponseTime", "cancelTransport", "cancelTimeout"
+  ]);
+  assert.equal(fixture.state.clocks, 1);
+  assert.equal(ownedCount(fixture.owned), 0);
+  timeoutOriginal();
+  completeOriginal(responseFor("door", "private"));
+  assert.deepEqual(fixture.calls, callsAfterCompletion);
+  assert.equal(fixture.state.clocks, 1);
+  assert.equal(ownedCount(fixture.owned), 0);
+  const result = await observed;
+  exactAvailable(result, "public");
+  assert.equal(rejections.length, 0);
+  assert.deepEqual(fixture.calls, [...callsAfterCompletion, "scheduleTimeout", "startTransport"]);
+  fixture.state.complete(responseFor());
+  const recoveredResult = await recovered;
+  exactAvailable(recoveredResult, "public");
+  assert.notEqual(result, recoveredResult);
+  assert.deepEqual(fixture.calls, [...callsAfterCompletion,
+    "scheduleTimeout", "startTransport", "readPostResponseTime", "cancelTransport", "cancelTimeout"]);
+  assert.equal(fixture.state.clocks, 2);
+  assert.equal(ownedCount(fixture.owned), 0);
+});
+
+selectedTest("C022", "timeout before completion keeps timeout", async () => {
+  const rejections = [];
+  let fulfillments = 0;
+  const fixture = createFixture();
+  const pending = fixture.controller.request(
+    structuredClone(BASE_EXPECTATION), structuredClone(BASE_AUTHORITY)
+  );
+  const completeOriginal = fixture.state.complete;
+  const timeoutOriginal = fixture.state.timeout;
+  let recovered;
+  const observed = pending.then(
+    (result) => {
+      fulfillments += 1;
+      exactUnavailable(result);
+      assert.equal(ownedCount(fixture.owned), 0);
+      recovered = fixture.controller.request(
+        structuredClone(BASE_EXPECTATION), structuredClone(BASE_AUTHORITY)
+      );
+      assert.equal(fixture.state.starts, 2);
+      return result;
+    },
+    (error) => { rejections.push(error); return error; }
+  );
+  timeoutOriginal();
+  const callsAfterTimeout = [...fixture.calls];
+  assert.deepEqual(callsAfterTimeout, [
+    "scheduleTimeout", "startTransport", "cancelTransport", "cancelTimeout"
+  ]);
+  assert.equal(fixture.state.clocks, 0);
+  assert.equal(ownedCount(fixture.owned), 0);
+  completeOriginal(responseFor("door", "private"));
+  timeoutOriginal();
+  assert.deepEqual(fixture.calls, callsAfterTimeout);
+  assert.equal(fixture.state.clocks, 0);
+  assert.equal(ownedCount(fixture.owned), 0);
+  const result = await observed;
+  exactUnavailable(result);
+  assert.equal(fulfillments, 1);
+  assert.equal(rejections.length, 0);
+  assert.deepEqual(fixture.calls, [...callsAfterTimeout, "scheduleTimeout", "startTransport"]);
+  fixture.state.complete(responseFor());
+  const recoveredResult = await recovered;
+  exactAvailable(recoveredResult, "public");
+  assert.notEqual(result, recoveredResult);
+  assert.deepEqual(fixture.calls, [...callsAfterTimeout,
+    "scheduleTimeout", "startTransport", "readPostResponseTime", "cancelTransport", "cancelTimeout"]);
+  assert.equal(fixture.state.clocks, 1);
+  assert.equal(ownedCount(fixture.owned), 0);
+});
+
+selectedTest("C024", "cancellation before completion keeps cancellation", async () => {
+  const rejections = [];
+  let fulfillments = 0;
+  const cancellation = Object.freeze(Object.create(null));
+  const fixture = createFixture();
+  const pending = fixture.controller.request(
+    structuredClone(BASE_EXPECTATION), structuredClone(BASE_AUTHORITY), cancellation
+  );
+  const completeOriginal = fixture.state.complete;
+  const cancelOriginal = fixture.state.cancel;
+  let recovered;
+  const observed = pending.then(
+    (result) => {
+      fulfillments += 1;
+      exactUnavailable(result);
+      assert.equal(ownedCount(fixture.owned), 0);
+      recovered = fixture.controller.request(
+        structuredClone(BASE_EXPECTATION), structuredClone(BASE_AUTHORITY)
+      );
+      assert.equal(fixture.state.starts, 2);
+      return result;
+    },
+    (error) => { rejections.push(error); return error; }
+  );
+  cancelOriginal();
+  const callsAfterCancellation = [...fixture.calls];
+  assert.deepEqual(callsAfterCancellation, [
+    "subscribeCancellation", "isCancellationRequested", "scheduleTimeout", "startTransport",
+    "cancelTransport", "cancelTimeout", "unsubscribeCancellation"
+  ]);
+  assert.equal(fixture.state.clocks, 0);
+  assert.equal(ownedCount(fixture.owned), 0);
+  completeOriginal(responseFor("door", "private"));
+  cancelOriginal();
+  assert.deepEqual(fixture.calls, callsAfterCancellation);
+  assert.equal(fixture.state.clocks, 0);
+  assert.equal(ownedCount(fixture.owned), 0);
+  const result = await observed;
+  exactUnavailable(result);
+  assert.equal(fulfillments, 1);
+  assert.equal(rejections.length, 0);
+  assert.deepEqual(fixture.calls, [...callsAfterCancellation, "scheduleTimeout", "startTransport"]);
+  fixture.state.complete(responseFor());
+  const recoveredResult = await recovered;
+  exactAvailable(recoveredResult, "public");
+  assert.notEqual(result, recoveredResult);
+  assert.deepEqual(fixture.calls, [...callsAfterCancellation,
+    "scheduleTimeout", "startTransport", "readPostResponseTime", "cancelTransport", "cancelTimeout"]);
+  assert.equal(fixture.state.clocks, 1);
+  assert.equal(ownedCount(fixture.owned), 0);
+});
+
+selectedTest("C026", "cancellation before timeout keeps cancellation", async () => {
+  const rejections = [];
+  let fulfillments = 0;
+  const cancellation = Object.freeze(Object.create(null));
+  const fixture = createFixture();
+  const pending = fixture.controller.request(
+    structuredClone(BASE_EXPECTATION), structuredClone(BASE_AUTHORITY), cancellation
+  );
+  const timeoutOriginal = fixture.state.timeout;
+  const cancelOriginal = fixture.state.cancel;
+  let recovered;
+  const observed = pending.then(
+    (result) => {
+      fulfillments += 1;
+      exactUnavailable(result);
+      assert.equal(ownedCount(fixture.owned), 0);
+      recovered = fixture.controller.request(
+        structuredClone(BASE_EXPECTATION), structuredClone(BASE_AUTHORITY)
+      );
+      assert.equal(fixture.state.starts, 2);
+      return result;
+    },
+    (error) => { rejections.push(error); return error; }
+  );
+  cancelOriginal();
+  const callsAfterCancellation = [...fixture.calls];
+  assert.deepEqual(callsAfterCancellation, [
+    "subscribeCancellation", "isCancellationRequested", "scheduleTimeout", "startTransport",
+    "cancelTransport", "cancelTimeout", "unsubscribeCancellation"
+  ]);
+  assert.equal(fixture.state.clocks, 0);
+  assert.equal(ownedCount(fixture.owned), 0);
+  timeoutOriginal();
+  cancelOriginal();
+  assert.deepEqual(fixture.calls, callsAfterCancellation);
+  assert.equal(fixture.state.clocks, 0);
+  assert.equal(ownedCount(fixture.owned), 0);
+  const result = await observed;
+  exactUnavailable(result);
+  assert.equal(fulfillments, 1);
+  assert.equal(rejections.length, 0);
+  assert.deepEqual(fixture.calls, [...callsAfterCancellation, "scheduleTimeout", "startTransport"]);
+  fixture.state.complete(responseFor());
+  const recoveredResult = await recovered;
+  exactAvailable(recoveredResult, "public");
+  assert.notEqual(result, recoveredResult);
+  assert.deepEqual(fixture.calls, [...callsAfterCancellation,
+    "scheduleTimeout", "startTransport", "readPostResponseTime", "cancelTransport", "cancelTimeout"]);
+  assert.equal(fixture.state.clocks, 1);
+  assert.equal(ownedCount(fixture.owned), 0);
+});
+
+selectedTest("C023", "completion before cancellation keeps completion", async () => {
+  const rejections = [];
+  let fulfillments = 0;
+  const cancellation = Object.freeze(Object.create(null));
+  let firstComplete;
+  let firstCancel;
+  let fixture;
+  fixture = createFixture({
+    startTransport(snapshot, complete, token) {
+      fixture.calls.push("startTransport");
+      fixture.state.starts += 1;
+      fixture.state.snapshot = snapshot;
+      fixture.state.complete = complete;
+      fixture.state.token = token;
+      fixture.owned.transport.add(token);
+      if (fixture.state.starts === 1) {
+        firstComplete = complete;
+        firstCancel = fixture.state.cancel;
+        complete(responseFor());
+        firstCancel();
+      }
+    }
+  });
+  const pending = fixture.controller.request(
+    structuredClone(BASE_EXPECTATION), structuredClone(BASE_AUTHORITY), cancellation
+  );
+  if (fixture.state.clocks !== 1) {
+    throw new Error("M7T4B_MISSING_C023_COMPLETION_BEFORE_CANCEL");
+  }
+  const callsAfterCompletion = [...fixture.calls];
+  let recovered;
+  const observed = pending.then(
+    (result) => {
+      fulfillments += 1;
+      exactAvailable(result, "public");
+      assert.equal(ownedCount(fixture.owned), 0);
+      recovered = fixture.controller.request(
+        structuredClone(BASE_EXPECTATION), structuredClone(BASE_AUTHORITY)
+      );
+      assert.equal(fixture.state.starts, 2);
+      return result;
+    },
+    (error) => { rejections.push(error); return error; }
+  );
+  firstCancel();
+  firstComplete(responseFor("door", "private"));
+  firstCancel();
+  assert.deepEqual(fixture.calls, callsAfterCompletion);
+  assert.equal(ownedCount(fixture.owned), 0);
+  const result = await observed;
+  exactAvailable(result, "public");
+  assert.equal(fulfillments, 1);
+  assert.equal(rejections.length, 0);
+  assert.deepEqual(callsAfterCompletion, [
+    "subscribeCancellation", "isCancellationRequested", "scheduleTimeout", "startTransport",
+    "readPostResponseTime", "cancelTransport", "cancelTimeout", "unsubscribeCancellation"
+  ]);
+  assert.equal(fixture.state.clocks, 1);
+  assert.deepEqual(fixture.calls, [...callsAfterCompletion, "scheduleTimeout", "startTransport"]);
+  fixture.state.complete(responseFor());
+  const recoveredResult = await recovered;
+  exactAvailable(recoveredResult, "public");
+  assert.notEqual(result, recoveredResult);
+  assert.deepEqual(fixture.calls, [...callsAfterCompletion,
+    "scheduleTimeout", "startTransport", "readPostResponseTime", "cancelTransport", "cancelTimeout"]);
+  assert.equal(fixture.state.clocks, 2);
+  assert.equal(ownedCount(fixture.owned), 0);
+});
+
+selectedTest("C025", "timeout before cancellation keeps timeout", async () => {
+  const rejections = [];
+  let fulfillments = 0;
+  const cancellation = Object.freeze(Object.create(null));
+  let firstSequence = true;
+  let firstTimeout;
+  let firstCancel;
+  let fixture;
+  fixture = createFixture({
+    scheduleTimeout(token, timeoutMs, timeout) {
+      fixture.calls.push("scheduleTimeout");
+      fixture.state.timeoutMs = timeoutMs;
+      fixture.state.timeout = timeout;
+      fixture.owned.timeout.add(token);
+      if (firstSequence) {
+        firstSequence = false;
+        firstTimeout = timeout;
+        firstCancel = fixture.state.cancel;
+        timeout();
+        firstCancel();
+      }
+    }
+  });
+  const pending = fixture.controller.request(
+    structuredClone(BASE_EXPECTATION), structuredClone(BASE_AUTHORITY), cancellation
+  );
+  const timeoutTerminalPresent = fixture.state.starts === 0 && fixture.state.complete === null &&
+    fixture.state.clocks === 0 && ownedCount(fixture.owned) === 0 &&
+    JSON.stringify(fixture.calls) === JSON.stringify([
+      "subscribeCancellation", "isCancellationRequested", "scheduleTimeout",
+      "cancelTimeout", "unsubscribeCancellation"
+    ]);
+  if (!timeoutTerminalPresent) {
+    throw new Error("M7T4B_MISSING_C025_TIMEOUT_BEFORE_CANCEL");
+  }
+  const callsAfterTimeout = [...fixture.calls];
+  let recovered;
+  const observed = pending.then(
+    (result) => {
+      fulfillments += 1;
+      exactUnavailable(result);
+      assert.equal(ownedCount(fixture.owned), 0);
+      recovered = fixture.controller.request(
+        structuredClone(BASE_EXPECTATION), structuredClone(BASE_AUTHORITY)
+      );
+      assert.equal(fixture.state.starts, 1);
+      return result;
+    },
+    (error) => { rejections.push(error); return error; }
+  );
+  firstCancel();
+  firstTimeout();
+  fixture.state.complete?.(responseFor("door", "private"));
+  firstCancel();
+  assert.deepEqual(fixture.calls, callsAfterTimeout);
+  assert.equal(fixture.state.clocks, 0);
+  assert.equal(ownedCount(fixture.owned), 0);
+  const result = await observed;
+  exactUnavailable(result);
+  assert.equal(fulfillments, 1);
+  assert.equal(rejections.length, 0);
+  assert.deepEqual(fixture.calls, [...callsAfterTimeout, "scheduleTimeout", "startTransport"]);
+  fixture.state.complete(responseFor());
+  const recoveredResult = await recovered;
+  exactAvailable(recoveredResult, "public");
+  assert.notEqual(result, recoveredResult);
+  assert.deepEqual(fixture.calls, [...callsAfterTimeout,
+    "scheduleTimeout", "startTransport", "readPostResponseTime", "cancelTransport", "cancelTimeout"]);
+  assert.equal(fixture.state.clocks, 1);
+  assert.equal(ownedCount(fixture.owned), 0);
+});
+
+const PROBE_IMPLEMENTATIONS = new Map([
+  ["C024", activeCancellationTerminal],
+  ["C026", activeCancellationTerminal],
+  ["C021", async () => {
+    const fixture = createFixture();
+    const pending = fixture.controller.request(structuredClone(BASE_EXPECTATION), structuredClone(BASE_AUTHORITY));
+    fixture.state.complete(responseFor());
+    fixture.state.timeout();
+    exactAvailable(await pending, "public");
+    assert.equal(fixture.state.clocks, 1);
+    assert.equal(ownedCount(fixture.owned), 0);
+    const recovered = fixture.controller.request(structuredClone(BASE_EXPECTATION), structuredClone(BASE_AUTHORITY));
+    fixture.state.complete(responseFor());
+    exactAvailable(await recovered, "public");
+  }],
+  ["C022", async () => {
+    const fixture = createFixture();
+    const pending = fixture.controller.request(structuredClone(BASE_EXPECTATION), structuredClone(BASE_AUTHORITY));
+    fixture.state.timeout();
+    fixture.state.complete(responseFor());
+    exactUnavailable(await pending);
+    assert.equal(fixture.state.clocks, 0);
+    assert.equal(ownedCount(fixture.owned), 0);
+    const recovered = fixture.controller.request(structuredClone(BASE_EXPECTATION), structuredClone(BASE_AUTHORITY));
+    fixture.state.complete(responseFor());
+    exactAvailable(await recovered, "public");
+  }]
+]);
+
+if (REGISTRATION_MANIFEST) {
+  const source = await readFile(new URL(import.meta.url));
+  const hash = createHash("sha256").update(source).digest("hex");
+  console.log(`M7T4B_REGISTRATION_MANIFEST test_sha256=${hash} ids=${TOP_LEVEL_REGISTRATIONS.map(({ id }) => id).join(",")}`);
+} else if (PRIMARY_PROBE_ID !== "") {
+  const probe = PRIMARY_PROBES.find(({ id }) => id === PRIMARY_PROBE_ID);
+  if (!probe) process.exitCode = 1;
+  else {
+    const registration = TOP_LEVEL_REGISTRATIONS.find(({ id }) => id === PRIMARY_PROBE_ID);
+    const implementation = registration?.implementation ?? PROBE_IMPLEMENTATIONS.get(PRIMARY_PROBE_ID);
+    let status = "FAIL";
+    if (implementation) {
+      try { await implementation(); status = "PASS"; } catch {}
+    }
+    console.log(`M7T4B_PRIMARY_PROBE id=${PRIMARY_PROBE_ID} status=${status} production_sha256=${process.env.M7T4B_PRODUCTION_SHA256}`);
+  }
+} else {
+  for (const { id, title, implementation } of TOP_LEVEL_REGISTRATIONS) {
+    if (SELECTED_ID === "" || SELECTED_ID === id) test(`${id} ${title}`, implementation);
+  }
+}

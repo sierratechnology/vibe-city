@@ -3,7 +3,7 @@ import { execFileSync, spawn } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
-import { extname, join, normalize } from "node:path";
+import { dirname, extname, join, normalize, resolve } from "node:path";
 import test from "node:test";
 
 const projectRoot = new URL("../", import.meta.url);
@@ -42,7 +42,38 @@ async function waitForJson(url, attempts = 80) {
   throw new Error(`endpoint did not become ready: ${url}`);
 }
 
-async function connectCdp(webSocketDebuggerUrl) {
+async function removeOwnedTemporaryDirectory(path, {
+  deadlineMs = 3_000,
+  retryDelayMs = 100,
+  ownedParent = tmpdir(),
+  priorError,
+  remove = (ownedPath) => rmSync(ownedPath, { recursive: true, force: true }),
+  now = Date.now,
+  sleep = (milliseconds) => new Promise((resolveSleep) => setTimeout(resolveSleep, milliseconds))
+} = {}) {
+  const ownedPath = resolve(path);
+  if (dirname(ownedPath) !== resolve(ownedParent)) {
+    throw new Error(`refusing to remove unowned temporary directory: ${ownedPath}`);
+  }
+
+  const deadline = now() + deadlineMs;
+  while (true) {
+    try {
+      remove(ownedPath);
+      return;
+    } catch (error) {
+      const retryable = ["EBUSY", "ENOTEMPTY", "EPERM"].includes(error.code);
+      const remainingMs = deadline - now();
+      if (!retryable || remainingMs <= 0) {
+        if (priorError) return;
+        throw error;
+      }
+      await sleep(Math.min(retryDelayMs, remainingMs));
+    }
+  }
+}
+
+async function connectCdp(webSocketDebuggerUrl, { commandTimeoutMs = 5_000 } = {}) {
   const socket = new WebSocket(webSocketDebuggerUrl);
   await new Promise((resolve, reject) => {
     socket.addEventListener("open", resolve, { once: true });
@@ -50,23 +81,223 @@ async function connectCdp(webSocketDebuggerUrl) {
   });
   let sequence = 0;
   const pending = new Map();
+  const activeTimers = new Set();
+  const settle = (id, outcome, value) => {
+    const waiter = pending.get(id);
+    if (!waiter) return;
+    pending.delete(id);
+    clearTimeout(waiter.timer);
+    activeTimers.delete(waiter.timer);
+    waiter[outcome](value);
+  };
+  const rejectPending = (reason) => {
+    for (const [id, waiter] of [...pending]) {
+      settle(id, "reject", new Error(`${reason} while waiting for ${waiter.method}`));
+    }
+  };
   socket.addEventListener("message", (event) => {
     const message = JSON.parse(event.data);
     if (!message.id || !pending.has(message.id)) return;
-    const waiter = pending.get(message.id);
-    pending.delete(message.id);
-    if (message.error) waiter.reject(new Error(message.error.message));
-    else waiter.resolve(message.result);
+    if (message.error) settle(message.id, "reject", new Error(message.error.message));
+    else settle(message.id, "resolve", message.result);
+  });
+  socket.addEventListener("close", () => rejectPending("CDP WebSocket closed"));
+  socket.addEventListener("error", (event) => {
+    const detail = event.error?.message ?? event.message ?? "unknown WebSocket error";
+    rejectPending(`CDP WebSocket error (${detail})`);
   });
   return {
     socket,
+    pendingCount: () => pending.size,
+    activeTimerCount: () => activeTimers.size,
     send(method, params = {}) {
       const id = ++sequence;
-      socket.send(JSON.stringify({ id, method, params }));
-      return new Promise((resolve, reject) => pending.set(id, { resolve, reject }));
+      return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => {
+          settle(id, "reject", new Error(`CDP command ${method} timed out after ${commandTimeoutMs} ms`));
+        }, commandTimeoutMs);
+        activeTimers.add(timer);
+        pending.set(id, { method, resolve, reject, timer });
+        try {
+          socket.send(JSON.stringify({ id, method, params }));
+        } catch (error) {
+          settle(id, "reject", error);
+        }
+      });
     }
   };
 }
+
+test("connectCdp bounds unanswered commands and releases pending ownership", async () => {
+  const originalWebSocket = globalThis.WebSocket;
+  const sockets = [];
+  class FakeWebSocket {
+    constructor() {
+      this.listeners = new Map();
+      this.sent = [];
+      sockets.push(this);
+      queueMicrotask(() => this.emit("open"));
+    }
+
+    addEventListener(type, listener, options = {}) {
+      const listeners = this.listeners.get(type) ?? [];
+      listeners.push({ listener, once: options.once === true });
+      this.listeners.set(type, listeners);
+    }
+
+    emit(type, event = {}) {
+      const listeners = [...(this.listeners.get(type) ?? [])];
+      for (const registration of listeners) {
+        if (registration.once) {
+          this.listeners.set(type, (this.listeners.get(type) ?? []).filter((entry) => entry !== registration));
+        }
+        registration.listener(event);
+      }
+    }
+
+    send(payload) {
+      this.sent.push(JSON.parse(payload));
+    }
+
+    close() {
+      this.emit("close");
+    }
+  }
+
+  const observeWithin = async (promise, milliseconds) => {
+    let guard;
+    const guarded = new Promise((resolve) => {
+      guard = setTimeout(() => resolve({ status: "pending" }), milliseconds);
+    });
+    const outcome = await Promise.race([
+      promise.then(
+        (value) => ({ status: "resolved", value }),
+        (error) => ({ status: "rejected", error })
+      ),
+      guarded
+    ]);
+    clearTimeout(guard);
+    return outcome;
+  };
+
+  globalThis.WebSocket = FakeWebSocket;
+  try {
+    const timed = await connectCdp("ws://timeout", { commandTimeoutMs: 10 });
+    let timeoutSettlements = 0;
+    const timeoutRequest = timed.send("Emulation.setEmulatedMedia").then(
+      (value) => { timeoutSettlements += 1; return value; },
+      (error) => { timeoutSettlements += 1; throw error; }
+    );
+    const timeoutOutcome = await observeWithin(timeoutRequest, 40);
+    assert.equal(timeoutOutcome.status, "rejected", "an unanswered CDP command must reject within its deadline");
+    assert.match(timeoutOutcome.error.message, /Emulation\.setEmulatedMedia.*10 ms/);
+    assert.equal(timed.pendingCount(), 0);
+    assert.equal(timed.activeTimerCount(), 0);
+    sockets[0].emit("message", { data: JSON.stringify({ id: 1, result: { late: true } }) });
+    await Promise.resolve();
+    assert.equal(timeoutSettlements, 1, "a late response must not resettle a timed-out command");
+    assert.equal(timed.pendingCount(), 0);
+    assert.equal(timed.activeTimerCount(), 0);
+
+    const closed = await connectCdp("ws://close", { commandTimeoutMs: 1_000 });
+    const closeRequest = closed.send("Runtime.evaluate");
+    assert.equal(closed.pendingCount(), 1);
+    assert.equal(closed.activeTimerCount(), 1);
+    sockets[1].emit("close");
+    await assert.rejects(closeRequest, /closed.*Runtime\.evaluate/i);
+    assert.equal(closed.pendingCount(), 0);
+    assert.equal(closed.activeTimerCount(), 0);
+
+    const errored = await connectCdp("ws://error", { commandTimeoutMs: 1_000 });
+    const errorRequest = errored.send("Input.dispatchKeyEvent");
+    assert.equal(errored.pendingCount(), 1);
+    assert.equal(errored.activeTimerCount(), 1);
+    sockets[2].emit("error", { error: new Error("socket exploded") });
+    await assert.rejects(errorRequest, /socket exploded.*Input\.dispatchKeyEvent/i);
+    assert.equal(errored.pendingCount(), 0);
+    assert.equal(errored.activeTimerCount(), 0);
+  } finally {
+    globalThis.WebSocket = originalWebSocket;
+  }
+});
+
+test("owned temporary directory cleanup survives late writes without masking prior failures", async () => {
+  assert.equal(
+    typeof removeOwnedTemporaryDirectory,
+    "function",
+    "the harness must provide bounded owned-directory cleanup"
+  );
+
+  const eventualRoot = mkdtempSync(join(tmpdir(), "vibe-cleanup-eventual-"));
+  const exhaustedRoot = mkdtempSync(join(tmpdir(), "vibe-cleanup-exhausted-"));
+  const priorFailureRoot = mkdtempSync(join(tmpdir(), "vibe-cleanup-prior-"));
+  const unownedParent = mkdtempSync(join(tmpdir(), "vibe-cleanup-parent-"));
+  const unownedNested = mkdtempSync(join(unownedParent, "nested-"));
+  let activeSleeps = 0;
+  let now = 0;
+  const sleep = async (milliseconds) => {
+    activeSleeps += 1;
+    now += milliseconds;
+    activeSleeps -= 1;
+  };
+  const lateWriteError = () => Object.assign(new Error("late profile write"), { code: "ENOTEMPTY" });
+
+  try {
+    let attempts = 0;
+    await removeOwnedTemporaryDirectory(eventualRoot, {
+      deadlineMs: 2_000,
+      retryDelayMs: 100,
+      now: () => now,
+      sleep,
+      remove(path) {
+        attempts += 1;
+        if (attempts <= 11) throw lateWriteError();
+        rmSync(path, { recursive: true, force: true });
+      }
+    });
+    assert.equal(attempts, 12, "cleanup must outlast the former ten-retry window");
+    assert.equal(existsSync(eventualRoot), false);
+
+    now = 0;
+    await assert.rejects(
+      removeOwnedTemporaryDirectory(exhaustedRoot, {
+        deadlineMs: 250,
+        retryDelayMs: 100,
+        now: () => now,
+        sleep,
+        remove() { throw lateWriteError(); }
+      }),
+      /late profile write/
+    );
+
+    now = 0;
+    const priorError = new Error("original CDP checkpoint failed");
+    await assert.doesNotReject(removeOwnedTemporaryDirectory(priorFailureRoot, {
+      deadlineMs: 250,
+      retryDelayMs: 100,
+      now: () => now,
+      sleep,
+      priorError,
+      remove() { throw lateWriteError(); }
+    }));
+
+    let unownedRemovalAttempted = false;
+    await assert.rejects(
+      removeOwnedTemporaryDirectory(unownedNested, {
+        ownedParent: tmpdir(),
+        remove() { unownedRemovalAttempted = true; }
+      }),
+      /refusing to remove unowned temporary directory/
+    );
+    assert.equal(unownedRemovalAttempted, false);
+    assert.equal(existsSync(unownedNested), true);
+    assert.equal(activeSleeps, 0, "cleanup must not leave a pending sleep");
+  } finally {
+    for (const path of [eventualRoot, exhaustedRoot, priorFailureRoot, unownedParent]) {
+      rmSync(path, { recursive: true, force: true });
+    }
+  }
+});
 
 test("valid Supabase configuration does not deadlock production startup", { skip: !chrome, timeout: 60_000 }, async () => {
   const outDir = mkdtempSync(join(tmpdir(), "vibe-valid-config-"));
@@ -74,6 +305,7 @@ test("valid Supabase configuration does not deadlock production startup", { skip
   let server;
   let chromeProcess;
   let cdp;
+  let priorError;
   try {
     execFileSync("npm", ["run", "build", "--", "--outDir", outDir, "--emptyOutDir"], {
       cwd: projectRoot,
@@ -638,6 +870,9 @@ test("valid Supabase configuration does not deadlock production startup", { skip
     assert.equal(executiveOpen.open, true);
     assert.match(executiveOpen.authority, /Human owner \/ executive authority/);
     assert.equal(executiveOpen.requests, 2);
+  } catch (error) {
+    priorError = error;
+    throw error;
   } finally {
     cdp?.socket.close();
     if (chromeProcess && chromeProcess.exitCode === null) {
@@ -657,7 +892,14 @@ test("valid Supabase configuration does not deadlock production startup", { skip
       });
     }
     await new Promise((resolve) => server?.close(resolve) ?? resolve());
-    rmSync(outDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-    rmSync(profileDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    let cleanupError;
+    for (const path of [outDir, profileDir]) {
+      try {
+        await removeOwnedTemporaryDirectory(path, { priorError: priorError ?? cleanupError });
+      } catch (error) {
+        cleanupError ??= error;
+      }
+    }
+    if (!priorError && cleanupError) throw cleanupError;
   }
 });
