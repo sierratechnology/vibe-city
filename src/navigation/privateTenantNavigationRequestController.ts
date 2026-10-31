@@ -108,7 +108,10 @@ export function createPrivateTenantNavigationRequestController(rawDependencies?:
           if (containSubscriptionCleanup || containTimerAcquisitionCleanup || containTransportAcquisitionCleanup) {
             try { (dependencies.unsubscribeCancellation as (token: unknown) => unknown)(token); }
             catch {}
-          } else (dependencies.unsubscribeCancellation as (token: unknown) => unknown)(token);
+          } else {
+            try { (dependencies.unsubscribeCancellation as (token: unknown) => unknown)(token); }
+            catch { result = unavailable(); }
+          }
         }
         active = false;
         resolve(result);
