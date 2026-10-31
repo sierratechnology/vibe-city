@@ -2559,6 +2559,136 @@ selectedTest("C018", "cancellation release throw downgrades without rejection", 
   assert.equal(ownedCount(fixture.owned), 0);
 });
 
+selectedTest("C019", "captured intrinsics resist post-import replacement", async () => {
+  const expectation = structuredClone(BASE_EXPECTATION);
+  const authority = structuredClone(BASE_AUTHORITY);
+  const recoveryExpectation = structuredClone(BASE_EXPECTATION);
+  const recoveryAuthority = structuredClone(BASE_AUTHORITY);
+  const cancellation = Object.freeze(Object.create(null));
+  const nativeObject = Object;
+  const nativeArray = Array;
+  const nativeNumber = Number;
+  const nativeReflect = Reflect;
+  const nativeRegExp = RegExp;
+  const nativePromise = Promise;
+  const defineProperty = Object.defineProperty;
+  const getDescriptor = Object.getOwnPropertyDescriptor;
+  const replacements = [
+    [nativeObject, "create"], [nativeObject, "freeze"], [nativeObject, "getPrototypeOf"],
+    [nativeObject, "getOwnPropertyDescriptor"], [nativeObject, "is"],
+    [nativeReflect, "ownKeys"], [nativeArray, "isArray"], [nativeNumber, "isSafeInteger"],
+    [nativeRegExp.prototype, "test"], [nativeArray.prototype, "includes"],
+    [nativeArray.prototype, "every"], [nativeArray.prototype, "some"],
+    [nativeArray.prototype, "slice"], [nativePromise, "resolve"],
+    [globalThis, "Object"], [globalThis, "Array"], [globalThis, "Number"],
+    [globalThis, "Reflect"], [globalThis, "RegExp"], [globalThis, "Promise"]
+  ].map(([target, key]) => [target, key, getDescriptor(target, key)]);
+  let hostileObservations = 0;
+  const hostile = () => {
+    hostileObservations += 1;
+    throw new Error("post-import intrinsic replacement observed");
+  };
+  let fixture;
+  let priorUnavailable;
+  let busyResult;
+  let settlement;
+  let recoveredResult;
+  let completeOriginal;
+  let timeoutOriginal;
+  let cancelOriginal;
+  let callsAfterReaction;
+  let lifecycleError;
+  try {
+    for (const [target, key] of replacements) {
+      defineProperty(target, key, { value: hostile, writable: true, configurable: true });
+    }
+    fixture = createFixture({
+      subscribeCancellation(value, token, cancel) {
+        fixture.calls.push("subscribeCancellation");
+        fixture.state.cancellation = value;
+        fixture.state.cancel = cancel;
+        fixture.owned.cancellation.add(token);
+        cancelOriginal = cancel;
+      },
+      isCancellationRequested(value) {
+        fixture.calls.push("isCancellationRequested");
+        assert.equal(value, cancellation);
+        return false;
+      },
+      scheduleTimeout(token, timeoutMs, timeout) {
+        fixture.calls.push("scheduleTimeout");
+        fixture.state.timeoutMs = timeoutMs;
+        fixture.state.timeout = timeout;
+        fixture.owned.timeout.add(token);
+        if (timeoutOriginal === undefined) timeoutOriginal = timeout;
+      },
+      startTransport(snapshot, complete, token) {
+        fixture.calls.push("startTransport");
+        fixture.state.starts += 1;
+        fixture.state.snapshot = snapshot;
+        fixture.state.complete = complete;
+        fixture.state.token = token;
+        fixture.owned.transport.add(token);
+        if (fixture.state.starts === 1) completeOriginal = complete;
+      }
+    });
+    priorUnavailable = await fixture.controller.request();
+    const pending = fixture.controller.request(expectation, authority, cancellation);
+    const busy = fixture.controller.request(expectation, authority, cancellation);
+    let recovered;
+    const observed = pending.then((result) => {
+      const terminal = {
+        calls: [...fixture.calls], clocks: fixture.state.clocks, owned: ownedCount(fixture.owned)
+      };
+      recovered = fixture.controller.request(recoveryExpectation, recoveryAuthority);
+      return {
+        result, terminal, recoveryStarts: fixture.state.starts,
+        ownedAfterRecoveryAdmission: ownedCount(fixture.owned)
+      };
+    });
+    completeOriginal(responseFor("door", "private"));
+    busyResult = await busy;
+    settlement = await observed;
+    callsAfterReaction = [...fixture.calls];
+    completeOriginal(responseFor("door", "tenant"));
+    timeoutOriginal();
+    cancelOriginal();
+    fixture.state.complete(responseFor());
+    recoveredResult = await recovered;
+  } catch (error) {
+    lifecycleError = error;
+  } finally {
+    for (let index = replacements.length - 1; index >= 0; index -= 1) {
+      const [target, key, descriptor] = replacements[index];
+      defineProperty(target, key, descriptor);
+    }
+  }
+  const primaryPresent = lifecycleError === undefined && hostileObservations === 0 &&
+    JSON.stringify(settlement?.terminal.calls) === JSON.stringify([
+      "subscribeCancellation", "isCancellationRequested", "scheduleTimeout", "startTransport",
+      "readPostResponseTime", "cancelTransport", "cancelTimeout", "unsubscribeCancellation"
+    ]) && settlement?.terminal.clocks === 1 && settlement?.terminal.owned === 0;
+  if (!primaryPresent) throw new Error("M7T4B_MISSING_C019_CAPTURED_INTRINSICS");
+  exactUnavailable(priorUnavailable);
+  exactUnavailable(busyResult);
+  exactAvailable(settlement.result, "private");
+  exactAvailable(recoveredResult, "public");
+  assert.notEqual(priorUnavailable, busyResult);
+  assert.notEqual(settlement.result, recoveredResult);
+  assert.equal(settlement.recoveryStarts, 2);
+  assert.equal(settlement.ownedAfterRecoveryAdmission, 2);
+  assert.deepEqual(fixture.calls, [
+    ...callsAfterReaction, "readPostResponseTime", "cancelTransport", "cancelTimeout"
+  ]);
+  assert.equal(fixture.state.clocks, 2);
+  assert.equal(ownedCount(fixture.owned), 0);
+  assert.deepEqual(expectation, BASE_EXPECTATION);
+  assert.deepEqual(authority, BASE_AUTHORITY);
+  assert.deepEqual(recoveryExpectation, BASE_EXPECTATION);
+  assert.deepEqual(recoveryAuthority, BASE_AUTHORITY);
+  assert.deepEqual(Reflect.ownKeys(cancellation), []);
+});
+
 const PROBE_IMPLEMENTATIONS = new Map([
   ["C024", activeCancellationTerminal],
   ["C026", activeCancellationTerminal],

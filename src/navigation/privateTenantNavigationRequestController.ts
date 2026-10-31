@@ -7,25 +7,43 @@ const DEPENDENCY_KEYS = ["startTransport", "cancelTransport", "scheduleTimeout",
 const EXPECTATION_KEYS = ["schemaVersion", "channel", "buildingId", "floorId", "elevatorStopId", "destinationId"];
 const AUTHORITY_KEYS = ["subjectId", "tenantId", "authorizationReference", "policyRevision", "active"];
 const ID = /^id_[a-f0-9]{16,64}$/;
+const regexpTest = Function.call.bind(RegExp.prototype.test) as (expression: RegExp, value: string) => boolean;
+const arrayIncludes = Function.call.bind(Array.prototype.includes) as (values: unknown[], value: unknown) => boolean;
+const arrayEvery = Function.call.bind(Array.prototype.every) as
+  (values: unknown[], predicate: (value: unknown) => boolean) => boolean;
+const arraySome = Function.call.bind(Array.prototype.some) as
+  (values: unknown[], predicate: (value: unknown) => boolean) => boolean;
+const arraySlice = Function.call.bind(Array.prototype.slice) as (values: unknown[], start: number, end?: number) => unknown[];
+const arrayIsArray = Array.isArray;
+const numberIsSafeInteger = Number.isSafeInteger;
+const objectCreate = Object.create;
+const objectFreeze = Object.freeze;
+const objectGetPrototypeOf = Object.getPrototypeOf;
+const objectGetOwnPropertyDescriptor = Object.getOwnPropertyDescriptor;
+const objectIs = Object.is;
+const objectPrototype = Object.prototype;
+const reflectOwnKeys = Reflect.ownKeys;
+const promiseConstructor = Promise;
+const promiseResolve = Promise.resolve.bind(Promise);
 
 function unavailable() {
-  const result = Object.create(null);
+  const result = objectCreate(null);
   result.status = "unavailable";
-  return Object.freeze(result);
+  return objectFreeze(result);
 }
 
 function exactRecord(value: unknown, keys: string[]): UnknownRecord | null {
-  if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
+  if (value === null || typeof value !== "object" || arrayIsArray(value)) return null;
   try {
-    const prototype = Object.getPrototypeOf(value);
-    if (prototype !== Object.prototype && prototype !== null) return null;
-    const ownKeys = Reflect.ownKeys(value);
+    const prototype = objectGetPrototypeOf(value);
+    if (prototype !== objectPrototype && prototype !== null) return null;
+    const ownKeys = reflectOwnKeys(value);
     if (ownKeys.length !== keys.length) return null;
-    const copy = Object.create(null);
+    const copy = objectCreate(null);
     for (let index = 0; index < keys.length; index += 1) {
       const key = keys[index];
       if (ownKeys[index] !== key) return null;
-      const descriptor = Object.getOwnPropertyDescriptor(value, key);
+      const descriptor = objectGetOwnPropertyDescriptor(value, key);
       if (!descriptor || !("value" in descriptor) || descriptor.enumerable !== true) return null;
       copy[key] = descriptor.value;
     }
@@ -38,34 +56,36 @@ function exactRecord(value: unknown, keys: string[]): UnknownRecord | null {
 function snapshots(expectation: unknown, authority: unknown) {
   const request = exactRecord(expectation, EXPECTATION_KEYS);
   const grant = exactRecord(authority, AUTHORITY_KEYS);
+  const identityValues = request && grant && [request.buildingId, request.floorId, request.elevatorStopId,
+    request.destinationId, grant.subjectId, grant.tenantId, grant.authorizationReference];
   if (!request || !grant || request.schemaVersion !== "1.0" ||
-      !["door", "elevator", "direct", "alternative"].includes(request.channel as string) ||
-      ![request.buildingId, request.floorId, request.elevatorStopId, request.destinationId,
-        grant.subjectId, grant.tenantId, grant.authorizationReference]
-        .every((value) => typeof value === "string" && ID.test(value)) ||
-      !Number.isSafeInteger(grant.policyRevision) || (grant.policyRevision as number) < 1 ||
-      (grant.policyRevision as number) > 2147483647 || Object.is(grant.policyRevision, -0) || grant.active !== true) return null;
-  return { request: Object.freeze(request), grant: Object.freeze(grant) };
+      !arrayIncludes(["door", "elevator", "direct", "alternative"], request.channel) ||
+      !identityValues || !arrayEvery(identityValues,
+        (value) => typeof value === "string" && regexpTest(ID, value)) ||
+      !numberIsSafeInteger(grant.policyRevision) || (grant.policyRevision as number) < 1 ||
+      (grant.policyRevision as number) > 2147483647 || objectIs(grant.policyRevision, -0) || grant.active !== true) return null;
+  return { request: objectFreeze(request), grant: objectFreeze(grant) };
 }
 
 function dependenciesOf(value: unknown) {
   const dependencies = exactRecord(value, DEPENDENCY_KEYS);
-  if (!dependencies || DEPENDENCY_KEYS.slice(0, 8).some((key) => typeof dependencies[key] !== "function") ||
-      !Number.isSafeInteger(dependencies.timeoutMs) || (dependencies.timeoutMs as number) < 1 ||
-      (dependencies.timeoutMs as number) > 30000 || Object.is(dependencies.timeoutMs, -0)) return null;
+  if (!dependencies || arraySome(arraySlice(DEPENDENCY_KEYS, 0, 8),
+      (key) => typeof dependencies[key as string] !== "function") ||
+      !numberIsSafeInteger(dependencies.timeoutMs) || (dependencies.timeoutMs as number) < 1 ||
+      (dependencies.timeoutMs as number) > 30000 || objectIs(dependencies.timeoutMs, -0)) return null;
   return dependencies;
 }
 
 export function createPrivateTenantNavigationRequestController(rawDependencies?: unknown) {
   const dependencies = dependenciesOf(rawDependencies);
   let active = false;
-  const request = Object.freeze(function request(expectation?: unknown, authority?: unknown,
+  const request = objectFreeze(function request(expectation?: unknown, authority?: unknown,
     cancellation: unknown = null): Promise<unknown> {
-    if (active) return Promise.resolve(unavailable());
+    if (active) return promiseResolve(unavailable());
     const construction = dependencies && snapshots(expectation, authority);
-    if (!dependencies || !construction) return Promise.resolve(unavailable());
+    if (!dependencies || !construction) return promiseResolve(unavailable());
     const decoder = createPrivateTenantNavigationDecisionDecoder(construction.request, construction.grant);
-    const token = Object.freeze(Object.create(null));
+    const token = objectFreeze(objectCreate(null));
     active = true;
     let settled = false;
     let subscriptionAttempted = false;
@@ -76,7 +96,7 @@ export function createPrivateTenantNavigationRequestController(rawDependencies?:
     let transportStarting = false;
     let synchronousCompletion = false;
     let synchronousResponse: unknown;
-    return new Promise((resolve) => {
+    return new promiseConstructor((resolve) => {
       const finish = (response: unknown, accepted: boolean, containSubscriptionCleanup = false,
         containTimerAcquisitionCleanup = false, containTransportAcquisitionCleanup = false) => {
         if (settled) return;
@@ -165,7 +185,7 @@ export function createPrivateTenantNavigationRequestController(rawDependencies?:
       }
     });
   });
-  const controller = Object.create(null);
+  const controller = objectCreate(null);
   controller.request = request;
-  return Object.freeze(controller);
+  return objectFreeze(controller);
 }
