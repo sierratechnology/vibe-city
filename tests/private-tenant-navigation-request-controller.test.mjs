@@ -1634,6 +1634,120 @@ selectedTest("C012", "subscription acquisition throw is contained", async () => 
   assert.equal(ownedCount(fixture.owned), 0);
 });
 
+selectedTest("C013", "initial cancellation check throw is contained", async () => {
+  const cancellation = Object.freeze(Object.create(null));
+  const expectation = structuredClone(BASE_EXPECTATION);
+  const authority = structuredClone(BASE_AUTHORITY);
+  const checkSecret = "cancellation check route token tenant subject authority provider reason";
+  const rejections = [];
+  let cancellationChecks = 0;
+  let unsubscribeAttempts = 0;
+  let timerAttempts = 0;
+  let transportAttempts = 0;
+  let cancelOriginal;
+  let fixture;
+  fixture = createFixture({
+    subscribeCancellation(value, token, cancel) {
+      fixture.calls.push("subscribeCancellation");
+      fixture.state.cancellation = value;
+      fixture.state.cancel = cancel;
+      fixture.owned.cancellation.add(token);
+      cancelOriginal = cancel;
+    },
+    isCancellationRequested(value) {
+      fixture.calls.push("isCancellationRequested");
+      cancellationChecks += 1;
+      assert.equal(value, cancellation);
+      assert.equal(fixture.owned.cancellation.size, 1);
+      throw new Error(checkSecret);
+    },
+    unsubscribeCancellation(token) {
+      fixture.calls.push("unsubscribeCancellation");
+      unsubscribeAttempts += 1;
+      fixture.owned.cancellation.delete(token);
+    },
+    scheduleTimeout(token, timeoutMs, timeout) {
+      timerAttempts += 1;
+      fixture.calls.push("scheduleTimeout");
+      fixture.state.timeoutMs = timeoutMs;
+      fixture.state.timeout = timeout;
+      fixture.owned.timeout.add(token);
+    },
+    startTransport(snapshot, complete, token) {
+      transportAttempts += 1;
+      fixture.calls.push("startTransport");
+      fixture.state.starts += 1;
+      fixture.state.snapshot = snapshot;
+      fixture.state.complete = complete;
+      fixture.state.token = token;
+      fixture.owned.transport.add(token);
+    }
+  });
+  const priorUnavailable = await fixture.controller.request();
+  const pending = fixture.controller.request(expectation, authority, cancellation);
+  let recovered;
+  const settlement = await pending.then(
+    (result) => {
+      const terminal = {
+        calls: [...fixture.calls],
+        starts: fixture.state.starts,
+        clocks: fixture.state.clocks,
+        timeout: fixture.state.timeout,
+        complete: fixture.state.complete,
+        owned: ownedCount(fixture.owned)
+      };
+      recovered = fixture.controller.request(
+        structuredClone(BASE_EXPECTATION), structuredClone(BASE_AUTHORITY)
+      );
+      return {
+        kind: "fulfilled", result, terminal, recoveryStarts: fixture.state.starts,
+        timerAttempts, transportAttempts, ownedAfterRecoveryAdmission: ownedCount(fixture.owned)
+      };
+    },
+    (error) => {
+      rejections.push(error);
+      return { kind: "rejected", error };
+    }
+  );
+  const cancellationCheckThrowContained = settlement.kind === "fulfilled" &&
+    JSON.stringify(settlement.terminal.calls) === JSON.stringify([
+      "subscribeCancellation", "isCancellationRequested", "unsubscribeCancellation"
+    ]) && settlement.terminal.starts === 0 && settlement.terminal.clocks === 0 &&
+    settlement.terminal.timeout === null && settlement.terminal.complete === null &&
+    settlement.terminal.owned === 0 && cancellationChecks === 1 && unsubscribeAttempts === 1 &&
+    settlement.recoveryStarts === 1 && settlement.timerAttempts === 1 &&
+    settlement.transportAttempts === 1 && settlement.ownedAfterRecoveryAdmission === 2;
+  if (!cancellationCheckThrowContained) {
+    throw new Error("M7T4B_MISSING_C013_CANCELLATION_CHECK_THROW");
+  }
+  exactUnavailable(settlement.result);
+  exactUnavailable(priorUnavailable);
+  assert.notEqual(settlement.result, priorUnavailable);
+  assert.equal(rejections.length, 0);
+  assert.equal(JSON.stringify(settlement.result).includes(checkSecret), false);
+  assert.deepEqual(expectation, BASE_EXPECTATION);
+  assert.deepEqual(authority, BASE_AUTHORITY);
+  assert.deepEqual(Reflect.ownKeys(cancellation), []);
+  const callsAfterReaction = [...fixture.calls];
+  cancelOriginal();
+  cancelOriginal();
+  await Promise.resolve();
+  assert.deepEqual(fixture.calls, callsAfterReaction);
+  assert.equal(cancellationChecks, 1);
+  assert.equal(unsubscribeAttempts, 1);
+  assert.equal(ownedCount(fixture.owned), 2);
+  fixture.state.complete(responseFor());
+  const recoveredResult = await recovered;
+  exactAvailable(recoveredResult, "public");
+  assert.notEqual(settlement.result, recoveredResult);
+  assert.deepEqual(fixture.calls, [
+    "subscribeCancellation", "isCancellationRequested", "unsubscribeCancellation",
+    "scheduleTimeout", "startTransport", "readPostResponseTime", "cancelTransport", "cancelTimeout"
+  ]);
+  assert.equal(fixture.state.clocks, 1);
+  assert.equal(ownedCount(fixture.owned), 0);
+});
+
 const PROBE_IMPLEMENTATIONS = new Map([
   ["C024", activeCancellationTerminal],
   ["C026", activeCancellationTerminal],
