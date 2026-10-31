@@ -71,12 +71,14 @@ export function createPrivateTenantNavigationRequestController(rawDependencies?:
     let subscriptionAttempted = false;
     let subscriptionAcquiring = false;
     let timerAttempted = false;
+    let timerAcquiring = false;
     let transportAttempted = false;
     let transportStarting = false;
     let synchronousCompletion = false;
     let synchronousResponse: unknown;
     return new Promise((resolve) => {
-      const finish = (response: unknown, accepted: boolean, containSubscriptionCleanup = false) => {
+      const finish = (response: unknown, accepted: boolean, containSubscriptionCleanup = false,
+        containTimerAcquisitionCleanup = false) => {
         if (settled) return;
         settled = true;
         let result = unavailable();
@@ -85,9 +87,14 @@ export function createPrivateTenantNavigationRequestController(rawDependencies?:
           catch { result = unavailable(); }
         }
         if (transportAttempted) (dependencies.cancelTransport as (token: unknown) => unknown)(token);
-        if (timerAttempted) (dependencies.cancelTimeout as (token: unknown) => unknown)(token);
+        if (timerAttempted) {
+          if (containTimerAcquisitionCleanup) {
+            try { (dependencies.cancelTimeout as (token: unknown) => unknown)(token); }
+            catch {}
+          } else (dependencies.cancelTimeout as (token: unknown) => unknown)(token);
+        }
         if (subscriptionAttempted) {
-          if (containSubscriptionCleanup) {
+          if (containSubscriptionCleanup || containTimerAcquisitionCleanup) {
             try { (dependencies.unsubscribeCancellation as (token: unknown) => unknown)(token); }
             catch {}
           } else (dependencies.unsubscribeCancellation as (token: unknown) => unknown)(token);
@@ -113,8 +120,10 @@ export function createPrivateTenantNavigationRequestController(rawDependencies?:
           }
         }
         timerAttempted = true;
+        timerAcquiring = true;
         (dependencies.scheduleTimeout as (token: unknown, milliseconds: unknown, timeout: () => void) => unknown)
           (token, dependencies.timeoutMs, () => finish(undefined, false));
+        timerAcquiring = false;
         if (settled) return;
         transportAttempted = true;
         transportStarting = true;
@@ -134,8 +143,10 @@ export function createPrivateTenantNavigationRequestController(rawDependencies?:
       } catch {
         transportStarting = false;
         const subscriptionAcquisitionThrew = subscriptionAcquiring;
+        const timerAcquisitionThrew = timerAcquiring;
         subscriptionAcquiring = false;
-        finish(undefined, false, subscriptionAcquisitionThrew);
+        timerAcquiring = false;
+        finish(undefined, false, subscriptionAcquisitionThrew, timerAcquisitionThrew);
       }
     });
   });
