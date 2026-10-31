@@ -2689,6 +2689,151 @@ selectedTest("C019", "captured intrinsics resist post-import replacement", async
   assert.deepEqual(Reflect.ownKeys(cancellation), []);
 });
 
+selectedTest("C020", "cleanup reentrancy remains busy and reactions see idle", async () => {
+  const scenarios = [null, "cancelTransport", "cancelTimeout", "unsubscribeCancellation"];
+  const allResults = [];
+  for (const throwAt of scenarios) {
+    const expectation = structuredClone(BASE_EXPECTATION);
+    const authority = structuredClone(BASE_AUTHORITY);
+    const cancellation = Object.freeze(Object.create(null));
+    const cleanupBusyPromises = [];
+    const cleanupReactionStates = [];
+    const rejections = [];
+    let callerObservations = 0;
+    let primaryToken;
+    let completeOriginal;
+    let timeoutOriginal;
+    let cancelOriginal;
+    let reactionRecovery;
+    let reactionComplete;
+    let fixture;
+    const trap = () => {
+      callerObservations += 1;
+      throw new Error("cleanup reentrant caller argument observed");
+    };
+    const hostile = new Proxy({}, {
+      get: trap, getPrototypeOf: trap, ownKeys: trap, getOwnPropertyDescriptor: trap
+    });
+    const reenter = (label) => {
+      const busy = fixture.controller.request(hostile, hostile, hostile);
+      cleanupBusyPromises.push(busy);
+      busy.then((result) => {
+        cleanupReactionStates.push({
+          label, starts: fixture.state.starts, owned: ownedCount(fixture.owned)
+        });
+        if (reactionRecovery === undefined) {
+          reactionRecovery = fixture.controller.request(
+            structuredClone(BASE_EXPECTATION), structuredClone(BASE_AUTHORITY)
+          );
+          reactionComplete = fixture.state.complete;
+        }
+        return result;
+      }, (error) => { rejections.push(error); });
+    };
+    fixture = createFixture({
+      subscribeCancellation(value, token, cancel) {
+        fixture.calls.push("subscribeCancellation");
+        fixture.state.cancellation = value;
+        fixture.state.cancel = cancel;
+        fixture.owned.cancellation.add(token);
+        if (primaryToken === undefined) cancelOriginal = cancel;
+      },
+      isCancellationRequested(value) {
+        fixture.calls.push("isCancellationRequested");
+        assert.equal(value, cancellation);
+        return false;
+      },
+      scheduleTimeout(token, timeoutMs, timeout) {
+        fixture.calls.push("scheduleTimeout");
+        fixture.state.timeoutMs = timeoutMs;
+        fixture.state.timeout = timeout;
+        fixture.owned.timeout.add(token);
+        if (primaryToken === undefined) timeoutOriginal = timeout;
+      },
+      startTransport(snapshot, complete, token) {
+        fixture.calls.push("startTransport");
+        fixture.state.starts += 1;
+        fixture.state.snapshot = snapshot;
+        fixture.state.complete = complete;
+        fixture.state.token = token;
+        fixture.owned.transport.add(token);
+        if (primaryToken === undefined) {
+          primaryToken = token;
+          completeOriginal = complete;
+        }
+      },
+      cancelTransport(token) {
+        fixture.calls.push("cancelTransport");
+        if (token === primaryToken) reenter("cancelTransport");
+        fixture.owned.transport.delete(token);
+        if (token === primaryToken && throwAt === "cancelTransport") throw new Error("transport cleanup");
+      },
+      cancelTimeout(token) {
+        fixture.calls.push("cancelTimeout");
+        if (token === primaryToken) reenter("cancelTimeout");
+        fixture.owned.timeout.delete(token);
+        if (token === primaryToken && throwAt === "cancelTimeout") throw new Error("timeout cleanup");
+      },
+      unsubscribeCancellation(token) {
+        fixture.calls.push("unsubscribeCancellation");
+        if (token === primaryToken) reenter("unsubscribeCancellation");
+        fixture.owned.cancellation.delete(token);
+        if (token === primaryToken && throwAt === "unsubscribeCancellation") {
+          throw new Error("cancellation cleanup");
+        }
+      }
+    });
+    const pending = fixture.controller.request(expectation, authority, cancellation);
+    pending.catch((error) => { rejections.push(error); });
+    let completionError;
+    try { completeOriginal(responseFor("door", "private")); }
+    catch (error) { completionError = error; }
+    const primaryPresent = completionError === undefined && cleanupBusyPromises.length === 3 &&
+      callerObservations === 0 && fixture.state.starts === 1 && ownedCount(fixture.owned) === 0 &&
+      JSON.stringify(fixture.calls) === JSON.stringify([
+        "subscribeCancellation", "isCancellationRequested", "scheduleTimeout", "startTransport",
+        "readPostResponseTime", "cancelTransport", "cancelTimeout", "unsubscribeCancellation"
+      ]);
+    if (!primaryPresent) {
+      void Promise.all(cleanupBusyPromises);
+      throw new Error("M7T4B_MISSING_C020_CLEANUP_REENTRANCY");
+    }
+    const primaryResult = await pending;
+    await Promise.all(cleanupBusyPromises);
+    assert.equal(cleanupReactionStates.length, 3);
+    assert.deepEqual(cleanupReactionStates[0], { label: "cancelTransport", starts: 1, owned: 0 });
+    assert.equal(reactionRecovery instanceof Promise, true);
+    assert.equal(fixture.state.starts, 2);
+    assert.equal(ownedCount(fixture.owned), 2);
+    const busyResults = await Promise.all(cleanupBusyPromises);
+    busyResults.forEach(exactUnavailable);
+    assert.equal(new Set(busyResults).size, 3);
+    if (throwAt === null) exactAvailable(primaryResult, "private");
+    else exactUnavailable(primaryResult);
+    assert.equal(new Set([...busyResults, primaryResult]).size, 4);
+    assert.equal(rejections.length, 0);
+    assert.equal(callerObservations, 0);
+    assert.deepEqual(expectation, BASE_EXPECTATION);
+    assert.deepEqual(authority, BASE_AUTHORITY);
+    assert.deepEqual(Reflect.ownKeys(cancellation), []);
+    const callsBeforeLateWork = [...fixture.calls];
+    completeOriginal(responseFor("door", "tenant"));
+    timeoutOriginal();
+    cancelOriginal();
+    await Promise.resolve();
+    assert.deepEqual(fixture.calls, callsBeforeLateWork);
+    assert.equal(ownedCount(fixture.owned), 2);
+    reactionComplete(responseFor());
+    const recoveredResult = await reactionRecovery;
+    exactAvailable(recoveredResult, "public");
+    assert.equal(new Set([...busyResults, primaryResult, recoveredResult]).size, 5);
+    assert.equal(fixture.state.starts, 2);
+    assert.equal(ownedCount(fixture.owned), 0);
+    allResults.push(...busyResults, primaryResult, recoveredResult);
+  }
+  assert.equal(new Set(allResults).size, allResults.length);
+});
+
 const PROBE_IMPLEMENTATIONS = new Map([
   ["C024", activeCancellationTerminal],
   ["C026", activeCancellationTerminal],
