@@ -2267,6 +2267,152 @@ selectedTest("C016", "transport release throw downgrades and cleanup continues",
   assert.equal(ownedCount(fixture.owned), 0);
 });
 
+selectedTest("C017", "timeout release throw downgrades and cleanup continues", async () => {
+  const cancellation = Object.freeze(Object.create(null));
+  const expectation = structuredClone(BASE_EXPECTATION);
+  const authority = structuredClone(BASE_AUTHORITY);
+  const timeoutCleanupSecret = "timeout release route token tenant subject authority provider reason";
+  const rejections = [];
+  let cancellationChecks = 0;
+  let transportCancelAttempts = 0;
+  let timeoutCancelAttempts = 0;
+  let unsubscribeAttempts = 0;
+  let completeOriginal;
+  let timeoutOriginal;
+  let cancelOriginal;
+  let failedToken;
+  let fixture;
+  fixture = createFixture({
+    subscribeCancellation(value, token, cancel) {
+      fixture.calls.push("subscribeCancellation");
+      fixture.state.cancellation = value;
+      fixture.state.cancel = cancel;
+      fixture.owned.cancellation.add(token);
+      cancelOriginal = cancel;
+    },
+    isCancellationRequested(value) {
+      fixture.calls.push("isCancellationRequested");
+      cancellationChecks += 1;
+      assert.equal(value, cancellation);
+      return false;
+    },
+    scheduleTimeout(token, timeoutMs, timeout) {
+      fixture.calls.push("scheduleTimeout");
+      fixture.state.timeoutMs = timeoutMs;
+      fixture.state.timeout = timeout;
+      fixture.owned.timeout.add(token);
+      if (timeoutOriginal === undefined) timeoutOriginal = timeout;
+    },
+    startTransport(snapshot, complete, token) {
+      fixture.calls.push("startTransport");
+      fixture.state.starts += 1;
+      fixture.state.snapshot = snapshot;
+      fixture.state.complete = complete;
+      fixture.state.token = token;
+      fixture.owned.transport.add(token);
+      if (fixture.state.starts === 1) {
+        completeOriginal = complete;
+        failedToken = token;
+      }
+    },
+    cancelTransport(token) {
+      fixture.calls.push("cancelTransport");
+      fixture.owned.transport.delete(token);
+      if (token === failedToken) transportCancelAttempts += 1;
+    },
+    cancelTimeout(token) {
+      fixture.calls.push("cancelTimeout");
+      fixture.owned.timeout.delete(token);
+      if (token === failedToken) {
+        timeoutCancelAttempts += 1;
+        throw new Error(timeoutCleanupSecret);
+      }
+    },
+    unsubscribeCancellation(token) {
+      fixture.calls.push("unsubscribeCancellation");
+      fixture.owned.cancellation.delete(token);
+      if (token === failedToken) unsubscribeAttempts += 1;
+    }
+  });
+  const priorUnavailable = await fixture.controller.request();
+  const pending = fixture.controller.request(expectation, authority, cancellation);
+  let recovered;
+  const observed = pending.then(
+    (result) => {
+      const terminal = {
+        calls: [...fixture.calls], clocks: fixture.state.clocks, owned: ownedCount(fixture.owned)
+      };
+      recovered = fixture.controller.request(
+        structuredClone(BASE_EXPECTATION), structuredClone(BASE_AUTHORITY)
+      );
+      return {
+        kind: "fulfilled", result, terminal, recoveryStarts: fixture.state.starts,
+        ownedAfterRecoveryAdmission: ownedCount(fixture.owned)
+      };
+    },
+    (error) => {
+      rejections.push(error);
+      return { kind: "rejected", error };
+    }
+  );
+  let completionError;
+  try { completeOriginal(responseFor("door", "private")); }
+  catch (error) { completionError = error; }
+  const primaryPresent = completionError === undefined &&
+    JSON.stringify(fixture.calls) === JSON.stringify([
+      "subscribeCancellation", "isCancellationRequested", "scheduleTimeout", "startTransport",
+      "readPostResponseTime", "cancelTransport", "cancelTimeout", "unsubscribeCancellation"
+    ]) && fixture.state.clocks === 1 && ownedCount(fixture.owned) === 0 &&
+    transportCancelAttempts === 1 && timeoutCancelAttempts === 1 && unsubscribeAttempts === 1;
+  if (!primaryPresent) {
+    void observed;
+    throw new Error("M7T4B_MISSING_C017_CANCEL_TIMEOUT_THROW");
+  }
+  const settlement = await observed;
+  assert.equal(settlement.kind, "fulfilled");
+  exactUnavailable(settlement.result);
+  exactUnavailable(priorUnavailable);
+  assert.notEqual(settlement.result, priorUnavailable);
+  assert.equal(rejections.length, 0);
+  assert.equal(JSON.stringify(settlement.result).includes(timeoutCleanupSecret), false);
+  assert.deepEqual(settlement.terminal, {
+    calls: [
+      "subscribeCancellation", "isCancellationRequested", "scheduleTimeout", "startTransport",
+      "readPostResponseTime", "cancelTransport", "cancelTimeout", "unsubscribeCancellation"
+    ],
+    clocks: 1,
+    owned: 0
+  });
+  assert.equal(cancellationChecks, 1);
+  assert.equal(settlement.recoveryStarts, 2);
+  assert.equal(settlement.ownedAfterRecoveryAdmission, 2);
+  assert.deepEqual(expectation, BASE_EXPECTATION);
+  assert.deepEqual(authority, BASE_AUTHORITY);
+  assert.deepEqual(Reflect.ownKeys(cancellation), []);
+  const callsAfterReaction = [...fixture.calls];
+  completeOriginal(responseFor("door", "tenant"));
+  timeoutOriginal();
+  cancelOriginal();
+  await Promise.resolve();
+  assert.deepEqual(fixture.calls, callsAfterReaction);
+  assert.equal(fixture.state.clocks, 1);
+  assert.equal(transportCancelAttempts, 1);
+  assert.equal(timeoutCancelAttempts, 1);
+  assert.equal(unsubscribeAttempts, 1);
+  assert.equal(ownedCount(fixture.owned), 2);
+  fixture.state.complete(responseFor());
+  const recoveredResult = await recovered;
+  exactAvailable(recoveredResult, "public");
+  assert.notEqual(settlement.result, recoveredResult);
+  assert.deepEqual(fixture.calls, [
+    "subscribeCancellation", "isCancellationRequested", "scheduleTimeout", "startTransport",
+    "readPostResponseTime", "cancelTransport", "cancelTimeout", "unsubscribeCancellation",
+    "scheduleTimeout", "startTransport", "readPostResponseTime", "cancelTransport", "cancelTimeout"
+  ]);
+  assert.equal(fixture.state.clocks, 2);
+  assert.equal(ownedCount(fixture.owned), 0);
+});
+
 const PROBE_IMPLEMENTATIONS = new Map([
   ["C024", activeCancellationTerminal],
   ["C026", activeCancellationTerminal],

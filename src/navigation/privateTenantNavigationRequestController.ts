@@ -99,7 +99,10 @@ export function createPrivateTenantNavigationRequestController(rawDependencies?:
           if (containTimerAcquisitionCleanup || containTransportAcquisitionCleanup) {
             try { (dependencies.cancelTimeout as (token: unknown) => unknown)(token); }
             catch {}
-          } else (dependencies.cancelTimeout as (token: unknown) => unknown)(token);
+          } else {
+            try { (dependencies.cancelTimeout as (token: unknown) => unknown)(token); }
+            catch { result = unavailable(); }
+          }
         }
         if (subscriptionAttempted) {
           if (containSubscriptionCleanup || containTimerAcquisitionCleanup || containTransportAcquisitionCleanup) {
