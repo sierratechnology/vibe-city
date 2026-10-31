@@ -413,12 +413,15 @@ test('characterization: agent commons participation boundary remains dormant', a
     (match) => match[1],
   );
   assert.deepEqual(imported, ['./hostedAgentPresence']);
+  const participationRuntimeReference = /['"](?:[^'"]*\/)?agentCommonsParticipation(?:\.(?:ts|js|mjs))?['"]/;
+  assert.doesNotMatch("from './agentCommonsParticipationPolicyProposal.mjs'", participationRuntimeReference);
+  assert.match("from './agentCommonsParticipation.ts'", participationRuntimeReference);
   const importers = [];
   for (const relativePath of sourcePaths) {
     if (!/\.(?:ts|js|mjs)$/.test(relativePath)
       || relativePath === 'domain/agentCommonsParticipation.ts') continue;
     const source = await readFile(new URL(`../src/${relativePath}`, import.meta.url), 'utf8');
-    if (/agentCommonsParticipation/.test(source)) importers.push(relativePath);
+    if (participationRuntimeReference.test(source)) importers.push(relativePath);
   }
   assert.deepEqual(importers, []);
   assert.doesNotMatch(commonsSource, /\b(?:fetch|XMLHttpRequest|WebSocket|setTimeout|setInterval|process|document|window|localStorage|sessionStorage)\b/);

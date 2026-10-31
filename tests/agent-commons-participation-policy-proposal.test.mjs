@@ -409,7 +409,10 @@ test('T11 characterization: output is detached null-prototype and recursively fr
 
 test('T12 characterization: proposal remains dormant private data without authority or runtime claims', async () => {
   const domain = await loadDomain();
-  assert.deepEqual(Object.keys(domain), ['createAgentCommonsParticipationPolicyProposal']);
+  assert.deepEqual(Object.keys(domain), [
+    'createAgentCommonsParticipationPolicyProposal',
+    'isAuthenticAgentCommonsParticipationPolicyProposal',
+  ]);
   const proposal = domain.createAgentCommonsParticipationPolicyProposal(
     authenticIdentity(), proposalInput(),
   );
@@ -439,8 +442,28 @@ test('T12 characterization: proposal remains dormant private data without author
       if (/agentCommonsParticipationPolicyProposal/.test(candidate)) importers.push(`${root}/${path}`);
     }
   }
-  assert.deepEqual(importers, []);
+  assert.deepEqual(importers, ['../src/domain/agentCommonsSharedSpace.ts']);
   assert.doesNotMatch(source, /\b(?:fetch|XMLHttpRequest|WebSocket|setTimeout|setInterval|process|document|window|localStorage|sessionStorage|console|eval)\b/);
   assert.doesNotMatch(source, /\bnew\s+Function\b/);
   assert.doesNotMatch(source, /(?:route|database|storage|payment|price|balance|attendance|friendship|productivity)/i);
+});
+
+test('T13 proposal provenance accepts only the exact same-module result without hooks', async () => {
+  const domain = await loadDomain();
+  const proposal = domain.createAgentCommonsParticipationPolicyProposal(
+    authenticIdentity(), proposalInput(),
+  );
+  let hooks = 0;
+  const proxy = new Proxy(proposal, {
+    get() { hooks += 1; throw new Error('must not read'); },
+    getPrototypeOf() { hooks += 1; throw new Error('must not inspect'); },
+    ownKeys() { hooks += 1; throw new Error('must not enumerate'); },
+  });
+  assert.equal(typeof domain.isAuthenticAgentCommonsParticipationPolicyProposal, 'function');
+  assert.equal(domain.isAuthenticAgentCommonsParticipationPolicyProposal.length, 1);
+  assert.equal(domain.isAuthenticAgentCommonsParticipationPolicyProposal(proposal), true);
+  for (const candidate of [
+    null, { ...proposal }, JSON.parse(JSON.stringify(proposal)), Object.create(proposal), proxy,
+  ]) assert.equal(domain.isAuthenticAgentCommonsParticipationPolicyProposal(candidate), false);
+  assert.equal(hooks, 0);
 });
