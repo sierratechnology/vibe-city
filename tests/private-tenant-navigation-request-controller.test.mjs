@@ -1331,6 +1331,309 @@ selectedTest("C011", "post-response clock failure is contained", async () => {
   assert.notEqual(recoveryResults[0], recoveryResults[1]);
 });
 
+selectedTest("C012", "subscription acquisition throw is contained", async () => {
+  const subscribeSecret = "subscribe route token tenant subject authority provider reason";
+  const cleanupSecret = "unsubscribe cleanup detail must not leak";
+  const returningCancellation = Object.freeze(Object.create(null));
+  const returningExpectation = structuredClone(BASE_EXPECTATION);
+  const returningAuthority = structuredClone(BASE_AUTHORITY);
+  let returningCancel;
+  let returningUnsubscribeAttempts = 0;
+  let returningTimerAttempts = 0;
+  let returningTransportAttempts = 0;
+  let returning;
+  returning = createFixture({
+    subscribeCancellation(value, token, cancel) {
+      returning.calls.push("subscribeCancellation");
+      returning.state.cancellation = value;
+      returning.state.cancel = cancel;
+      returning.owned.cancellation.add(token);
+      returningCancel = cancel;
+      cancel();
+    },
+    unsubscribeCancellation(token) {
+      returning.calls.push("unsubscribeCancellation");
+      returningUnsubscribeAttempts += 1;
+      returning.owned.cancellation.delete(token);
+      throw new Error(cleanupSecret);
+    },
+    scheduleTimeout(token, timeoutMs, timeout) {
+      returningTimerAttempts += 1;
+      returning.calls.push("scheduleTimeout");
+      returning.state.timeoutMs = timeoutMs;
+      returning.state.timeout = timeout;
+      returning.owned.timeout.add(token);
+    },
+    startTransport(snapshot, complete, token) {
+      returningTransportAttempts += 1;
+      returning.calls.push("startTransport");
+      returning.state.starts += 1;
+      returning.state.snapshot = snapshot;
+      returning.state.complete = complete;
+      returning.state.token = token;
+      returning.owned.transport.add(token);
+    }
+  });
+  const returningPriorUnavailable = await returning.controller.request();
+  const returningPending = returning.controller.request(
+    returningExpectation, returningAuthority, returningCancellation
+  );
+  let returningRecovery;
+  const returningSettlement = await returningPending.then(
+    (result) => {
+      const terminal = {
+        calls: [...returning.calls],
+        starts: returning.state.starts,
+        clocks: returning.state.clocks,
+        timeout: returning.state.timeout,
+        complete: returning.state.complete,
+        owned: ownedCount(returning.owned)
+      };
+      returningRecovery = returning.controller.request(
+        structuredClone(BASE_EXPECTATION), structuredClone(BASE_AUTHORITY)
+      );
+      return {
+        kind: "fulfilled", result, terminal, recoveryStarts: returning.state.starts,
+        timerAttempts: returningTimerAttempts, transportAttempts: returningTransportAttempts,
+        ownedAfterRecoveryAdmission: ownedCount(returning.owned)
+      };
+    },
+    (error) => ({ kind: "rejected", error })
+  );
+  const returningPostTerminalContained = returningSettlement.kind === "fulfilled" &&
+    JSON.stringify(returningSettlement.terminal.calls) === JSON.stringify([
+      "subscribeCancellation", "unsubscribeCancellation"
+    ]) && returningSettlement.terminal.starts === 0 && returningSettlement.terminal.clocks === 0 &&
+    returningSettlement.terminal.timeout === null && returningSettlement.terminal.complete === null &&
+    returningSettlement.terminal.owned === 0 && returningSettlement.recoveryStarts === 1 &&
+    returningSettlement.timerAttempts === 1 && returningSettlement.transportAttempts === 1 &&
+    returningSettlement.ownedAfterRecoveryAdmission === 2;
+  if (!returningPostTerminalContained) {
+    throw new Error("M7T4B_C012_POST_TERMINAL_ACQUISITION_LEAK");
+  }
+  exactUnavailable(returningSettlement.result);
+  exactUnavailable(returningPriorUnavailable);
+  assert.notEqual(returningSettlement.result, returningPriorUnavailable);
+  assert.equal(returningUnsubscribeAttempts, 1);
+  assert.equal(JSON.stringify(returningSettlement.result).includes(cleanupSecret), false);
+  assert.deepEqual(returningExpectation, BASE_EXPECTATION);
+  assert.deepEqual(returningAuthority, BASE_AUTHORITY);
+  assert.deepEqual(Reflect.ownKeys(returningCancellation), []);
+  const returningCallsAfterReaction = [...returning.calls];
+  returningCancel();
+  returningCancel();
+  await Promise.resolve();
+  assert.deepEqual(returning.calls, returningCallsAfterReaction);
+  assert.equal(returningUnsubscribeAttempts, 1);
+  assert.equal(ownedCount(returning.owned), 2);
+  returning.state.complete(responseFor());
+  const returningRecoveredResult = await returningRecovery;
+  exactAvailable(returningRecoveredResult, "public");
+  assert.notEqual(returningSettlement.result, returningRecoveredResult);
+  assert.equal(ownedCount(returning.owned), 0);
+  const compoundCancellation = Object.freeze(Object.create(null));
+  const compoundExpectation = structuredClone(BASE_EXPECTATION);
+  const compoundAuthority = structuredClone(BASE_AUTHORITY);
+  let compoundCancel;
+  let compoundUnsubscribeAttempts = 0;
+  let compound;
+  compound = createFixture({
+    subscribeCancellation(value, token, cancel) {
+      compound.calls.push("subscribeCancellation");
+      compound.state.cancellation = value;
+      compound.state.cancel = cancel;
+      compound.owned.cancellation.add(token);
+      compoundCancel = cancel;
+      cancel();
+      throw new Error(subscribeSecret);
+    },
+    unsubscribeCancellation(token) {
+      compound.calls.push("unsubscribeCancellation");
+      compoundUnsubscribeAttempts += 1;
+      compound.owned.cancellation.delete(token);
+      throw new Error(cleanupSecret);
+    }
+  });
+  const compoundPriorUnavailable = await compound.controller.request();
+  const compoundPending = compound.controller.request(
+    compoundExpectation, compoundAuthority, compoundCancellation
+  );
+  let compoundSettlement;
+  let compoundRecovery;
+  const compoundObserved = compoundPending.then(
+    (result) => {
+      const terminal = {
+        calls: [...compound.calls],
+        starts: compound.state.starts,
+        clocks: compound.state.clocks,
+        timeout: compound.state.timeout,
+        complete: compound.state.complete,
+        owned: ownedCount(compound.owned)
+      };
+      compoundRecovery = compound.controller.request(
+        structuredClone(BASE_EXPECTATION), structuredClone(BASE_AUTHORITY)
+      );
+      compoundSettlement = {
+        kind: "fulfilled", result, terminal, recoveryStarts: compound.state.starts
+      };
+      return compoundSettlement;
+    },
+    (error) => {
+      compoundSettlement = { kind: "rejected", error };
+      return compoundSettlement;
+    }
+  );
+  await Promise.resolve();
+  if (compoundSettlement === undefined) {
+    throw new Error("M7T4B_C012_COMPOUND_ACQUISITION_SETTLEMENT_PENDING");
+  }
+  const compoundResult = await compoundObserved;
+  assert.equal(compoundResult.kind, "fulfilled");
+  exactUnavailable(compoundResult.result);
+  exactUnavailable(compoundPriorUnavailable);
+  assert.notEqual(compoundResult.result, compoundPriorUnavailable);
+  assert.deepEqual(compoundResult.terminal, {
+    calls: ["subscribeCancellation", "unsubscribeCancellation"],
+    starts: 0,
+    clocks: 0,
+    timeout: null,
+    complete: null,
+    owned: 0
+  });
+  assert.equal(compoundResult.recoveryStarts, 1);
+  assert.equal(compoundUnsubscribeAttempts, 1);
+  assert.equal(JSON.stringify(compoundResult.result).includes(subscribeSecret), false);
+  assert.equal(JSON.stringify(compoundResult.result).includes(cleanupSecret), false);
+  assert.deepEqual(compoundExpectation, BASE_EXPECTATION);
+  assert.deepEqual(compoundAuthority, BASE_AUTHORITY);
+  assert.deepEqual(Reflect.ownKeys(compoundCancellation), []);
+  const compoundCallsAfterReaction = [...compound.calls];
+  compoundCancel();
+  compoundCancel();
+  await Promise.resolve();
+  assert.deepEqual(compound.calls, compoundCallsAfterReaction);
+  assert.equal(compoundUnsubscribeAttempts, 1);
+  assert.equal(ownedCount(compound.owned), 2);
+  compound.state.complete(responseFor());
+  const compoundRecoveredResult = await compoundRecovery;
+  exactAvailable(compoundRecoveredResult, "public");
+  assert.notEqual(compoundResult.result, compoundRecoveredResult);
+  assert.equal(ownedCount(compound.owned), 0);
+  const probeCancellation = Object.freeze(Object.create(null));
+  let probe;
+  probe = createFixture({
+    subscribeCancellation(_value, token) {
+      probe.calls.push("subscribeCancellation");
+      probe.owned.cancellation.add(token);
+      throw new Error(subscribeSecret);
+    },
+    unsubscribeCancellation(token) {
+      probe.calls.push("unsubscribeCancellation");
+      probe.owned.cancellation.delete(token);
+      throw new Error(cleanupSecret);
+    }
+  });
+  const probePending = probe.controller.request(
+    structuredClone(BASE_EXPECTATION), structuredClone(BASE_AUTHORITY), probeCancellation
+  );
+  const probeSettlement = probePending.then(
+    (result) => ({ kind: "fulfilled", result }),
+    (error) => ({ kind: "rejected", error })
+  );
+  const probeRecovery = probe.controller.request(
+    structuredClone(BASE_EXPECTATION), structuredClone(BASE_AUTHORITY)
+  );
+  const primaryPresent = probe.state.starts === 1 && ownedCount(probe.owned) === 2 &&
+    JSON.stringify(probe.calls) === JSON.stringify([
+      "subscribeCancellation", "unsubscribeCancellation", "scheduleTimeout", "startTransport"
+    ]);
+  if (!primaryPresent) {
+    throw new Error("M7T4B_MISSING_C012_SUBSCRIBE_THROW");
+  }
+  const firstProbeSettlement = await probeSettlement;
+  assert.equal(firstProbeSettlement.kind, "fulfilled");
+  exactUnavailable(firstProbeSettlement.result);
+  probe.state.complete(responseFor());
+  exactAvailable(await probeRecovery, "public");
+  assert.equal(ownedCount(probe.owned), 0);
+  const cancellation = Object.freeze(Object.create(null));
+  const expectation = structuredClone(BASE_EXPECTATION);
+  const authority = structuredClone(BASE_AUTHORITY);
+  let cancelOriginal;
+  let unsubscribeAttempts = 0;
+  let fixture;
+  fixture = createFixture({
+    subscribeCancellation(value, token, cancel) {
+      fixture.calls.push("subscribeCancellation");
+      fixture.state.cancellation = value;
+      fixture.state.cancel = cancel;
+      fixture.owned.cancellation.add(token);
+      cancelOriginal = cancel;
+      assert.equal(value, cancellation);
+      throw new Error(subscribeSecret);
+    },
+    unsubscribeCancellation(token) {
+      fixture.calls.push("unsubscribeCancellation");
+      unsubscribeAttempts += 1;
+      fixture.owned.cancellation.delete(token);
+      throw new Error(cleanupSecret);
+    }
+  });
+  const priorUnavailable = await fixture.controller.request();
+  const pending = fixture.controller.request(expectation, authority, cancellation);
+  let recovered;
+  const settlement = await pending.then(
+    (result) => {
+      const terminal = {
+        calls: [...fixture.calls],
+        starts: fixture.state.starts,
+        clocks: fixture.state.clocks,
+        timeout: fixture.state.timeout,
+        complete: fixture.state.complete,
+        owned: ownedCount(fixture.owned)
+      };
+      recovered = fixture.controller.request(
+        structuredClone(BASE_EXPECTATION), structuredClone(BASE_AUTHORITY)
+      );
+      return { kind: "fulfilled", result, terminal, recoveryStarts: fixture.state.starts };
+    },
+    (error) => ({ kind: "rejected", error })
+  );
+  const acquisitionThrowContained = settlement.kind === "fulfilled" &&
+    JSON.stringify(settlement.terminal.calls) === JSON.stringify([
+      "subscribeCancellation", "unsubscribeCancellation"
+    ]) && settlement.terminal.starts === 0 && settlement.terminal.clocks === 0 &&
+    settlement.terminal.timeout === null && settlement.terminal.complete === null &&
+    settlement.terminal.owned === 0 && unsubscribeAttempts === 1 && settlement.recoveryStarts === 1;
+  assert.equal(acquisitionThrowContained, true);
+  exactUnavailable(settlement.result);
+  exactUnavailable(priorUnavailable);
+  assert.notEqual(settlement.result, priorUnavailable);
+  assert.equal(JSON.stringify(settlement.result).includes(subscribeSecret), false);
+  assert.equal(JSON.stringify(settlement.result).includes(cleanupSecret), false);
+  assert.deepEqual(expectation, BASE_EXPECTATION);
+  assert.deepEqual(authority, BASE_AUTHORITY);
+  assert.deepEqual(Reflect.ownKeys(cancellation), []);
+  const callsAfterReaction = [...fixture.calls];
+  const ownedAfterReaction = ownedCount(fixture.owned);
+  cancelOriginal();
+  cancelOriginal();
+  await Promise.resolve();
+  assert.deepEqual(fixture.calls, callsAfterReaction);
+  assert.equal(unsubscribeAttempts, 1);
+  assert.equal(ownedCount(fixture.owned), ownedAfterReaction);
+  fixture.state.complete(responseFor());
+  const recoveredResult = await recovered;
+  exactAvailable(recoveredResult, "public");
+  assert.notEqual(settlement.result, recoveredResult);
+  assert.deepEqual(fixture.calls, [
+    "subscribeCancellation", "unsubscribeCancellation", "scheduleTimeout", "startTransport",
+    "readPostResponseTime", "cancelTransport", "cancelTimeout"
+  ]);
+  assert.equal(fixture.state.clocks, 1);
+  assert.equal(ownedCount(fixture.owned), 0);
+});
+
 const PROBE_IMPLEMENTATIONS = new Map([
   ["C024", activeCancellationTerminal],
   ["C026", activeCancellationTerminal],

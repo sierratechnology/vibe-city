@@ -69,13 +69,14 @@ export function createPrivateTenantNavigationRequestController(rawDependencies?:
     active = true;
     let settled = false;
     let subscriptionAttempted = false;
+    let subscriptionAcquiring = false;
     let timerAttempted = false;
     let transportAttempted = false;
     let transportStarting = false;
     let synchronousCompletion = false;
     let synchronousResponse: unknown;
     return new Promise((resolve) => {
-      const finish = (response: unknown, accepted: boolean) => {
+      const finish = (response: unknown, accepted: boolean, containSubscriptionCleanup = false) => {
         if (settled) return;
         settled = true;
         let result = unavailable();
@@ -85,19 +86,27 @@ export function createPrivateTenantNavigationRequestController(rawDependencies?:
         }
         if (transportAttempted) (dependencies.cancelTransport as (token: unknown) => unknown)(token);
         if (timerAttempted) (dependencies.cancelTimeout as (token: unknown) => unknown)(token);
-        if (subscriptionAttempted) (dependencies.unsubscribeCancellation as (token: unknown) => unknown)(token);
+        if (subscriptionAttempted) {
+          if (containSubscriptionCleanup) {
+            try { (dependencies.unsubscribeCancellation as (token: unknown) => unknown)(token); }
+            catch {}
+          } else (dependencies.unsubscribeCancellation as (token: unknown) => unknown)(token);
+        }
         active = false;
         resolve(result);
       };
       try {
         if (cancellation !== null) {
           subscriptionAttempted = true;
+          subscriptionAcquiring = true;
           (dependencies.subscribeCancellation as
             (cancellation: unknown, token: unknown, cancel: () => void) => unknown)
             (cancellation, token, () => {
               if (transportStarting && synchronousCompletion) return;
-              finish(undefined, false);
+              finish(undefined, false, subscriptionAcquiring);
             });
+          subscriptionAcquiring = false;
+          if (settled) return;
           if ((dependencies.isCancellationRequested as (cancellation: unknown) => unknown)(cancellation)) {
             finish(undefined, false);
             return;
@@ -124,7 +133,9 @@ export function createPrivateTenantNavigationRequestController(rawDependencies?:
         if (synchronousCompletion) finish(synchronousResponse, true);
       } catch {
         transportStarting = false;
-        finish(undefined, false);
+        const subscriptionAcquisitionThrew = subscriptionAcquiring;
+        subscriptionAcquiring = false;
+        finish(undefined, false, subscriptionAcquisitionThrew);
       }
     });
   });
