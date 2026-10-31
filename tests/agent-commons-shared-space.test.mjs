@@ -4,9 +4,11 @@ import test from 'node:test';
 import ts from 'typescript';
 
 import { createManagedCustomerIdentityDomain } from '../server/managedCustomerIdentityDomain.mjs';
+import { createAgentCommonsParticipationPolicyProposal } from '../server/agentCommonsParticipationPolicyProposal.mjs';
 
 const moduleUrl = new URL('../src/domain/agentCommonsSharedSpace.ts', import.meta.url);
 const identityModuleUrl = new URL('../server/managedCustomerIdentityDomain.mjs', import.meta.url);
+const policyModuleUrl = new URL('../server/agentCommonsParticipationPolicyProposal.mjs', import.meta.url);
 const ACCOUNT_ID = 'account_0000000000000001';
 const ORGANIZATION_ID = 'organization_0000000000000002';
 const TENANT_ID = 'tenant_0000000000000002';
@@ -14,6 +16,7 @@ const SPACE_ID = 'space_0000000000000003';
 const ACTIVITY_ID = 'activity_0000000000000004';
 const INVALID = { name: 'TypeError', message: 'Invalid Agent Commons shared-space definition input' };
 const INVALID_ACTIVITY = { name: 'TypeError', message: 'Invalid Agent Commons activity definition input' };
+const INVALID_READINESS = { name: 'TypeError', message: 'Invalid Agent Commons activation readiness input' };
 
 async function loadDomain(tag) {
   let source;
@@ -25,10 +28,15 @@ async function loadDomain(tag) {
   }
   const output = ts.transpileModule(source, {
     compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 },
-  }).outputText.replace(
-    /['"]\.\.\/\.\.\/server\/managedCustomerIdentityDomain\.mjs['"]/,
-    JSON.stringify(identityModuleUrl.href),
-  );
+  }).outputText
+    .replace(
+      /['"]\.\.\/\.\.\/server\/managedCustomerIdentityDomain\.mjs['"]/,
+      JSON.stringify(identityModuleUrl.href),
+    )
+    .replace(
+      /['"]\.\.\/\.\.\/server\/agentCommonsParticipationPolicyProposal\.mjs['"]/,
+      JSON.stringify(policyModuleUrl.href),
+    );
   return import(`data:text/javascript;base64,${Buffer.from(output).toString('base64')}#${tag}`);
 }
 
@@ -78,6 +86,17 @@ function activityInput(overrides = {}) {
     definedAt: '2026-10-05T12:01:00.000Z',
     recordedAt: '2026-10-05T12:01:00.000Z',
     ...overrides,
+  };
+}
+
+function proposalInput() {
+  return {
+    schemaVersion: 'agent-commons-participation-policy-proposal/1',
+    proposalId: 'proposal_0000000000000005',
+    participationMode: 'enabled',
+    quietHours: { mode: 'disabled', startMinuteUtc: null, endMinuteUtc: null },
+    proposedAt: '2026-10-05T11:59:00.000Z',
+    recordedAt: '2026-10-05T11:59:00.000Z',
   };
 }
 
@@ -287,6 +306,7 @@ test('T7 characterization: captured intrinsics survive hostile ambient replaceme
 test('T8 characterization: definitions remain dormant private data without runtime or authority claims', async () => {
   const domain = await loadDomain('t8');
   assert.deepEqual(Object.keys(domain), [
+    'createAgentCommonsActivationReadiness',
     'createAgentCommonsActivityDefinition',
     'createAgentCommonsSharedSpaceDefinition',
   ]);
@@ -324,6 +344,7 @@ test('T8 characterization: definitions remain dormant private data without runti
   );
   assert.deepEqual(imports, [
     '../../server/managedCustomerIdentityDomain.mjs',
+    '../../server/agentCommonsParticipationPolicyProposal.mjs',
     'node:util/types',
   ]);
   const importers = [];
@@ -540,4 +561,92 @@ test('T15 captured provenance intrinsics survive hostile ambient replacement', a
   }
   assert.equal(hooks, 0);
   assert.equal(result.activityId, ACTIVITY_ID);
+});
+
+test('T16 authentic bound definitions compose exact blocked readiness for every activity kind', async () => {
+  const domain = await loadDomain('t16');
+  const identity = authenticIdentity();
+  const space = domain.createAgentCommonsSharedSpaceDefinition(identity, definitionInput());
+  const proposal = createAgentCommonsParticipationPolicyProposal(identity, proposalInput());
+  for (const activityKind of ['social', 'creative', 'recreation']) {
+    const activity = domain.createAgentCommonsActivityDefinition(
+      space, activityInput({ activityKind }),
+    );
+    const result = domain.createAgentCommonsActivationReadiness(space, activity, proposal);
+    assert.equal(Object.getPrototypeOf(result), null);
+    assert.equal(Object.isFrozen(result), true);
+    assert.equal(Object.isFrozen(result.blockers), true);
+    assert.deepEqual(Object.keys(result), [
+      'schemaVersion', 'tenantId', 'accountId', 'spaceId', 'activityId', 'activityKind',
+      'activationStatus', 'blockers', 'privacy', 'costPolicy', 'interruptionPolicy',
+      'retentionPolicy', 'participationStatus', 'occupancyStatus',
+      'activityActivationStatus', 'availability',
+    ]);
+    assert.deepEqual({ ...result, blockers: [...result.blockers] }, {
+      schemaVersion: 'agent-commons-activation-readiness/1',
+      tenantId: TENANT_ID,
+      accountId: ACCOUNT_ID,
+      spaceId: SPACE_ID,
+      activityId: ACTIVITY_ID,
+      activityKind,
+      activationStatus: 'blocked',
+      blockers: ['participation_policy_not_authorized', 'retention_policy_not_configured'],
+      privacy: 'tenant_private',
+      costPolicy: 'no_incremental_spend',
+      interruptionPolicy: 'return_to_assigned_state',
+      retentionPolicy: 'not_configured',
+      participationStatus: 'not_activated',
+      occupancyStatus: 'unavailable',
+      activityActivationStatus: 'not_activated',
+      availability: 'unavailable',
+    });
+  }
+});
+
+test('T17 readiness rejects forged provenance and mismatched bindings with one zero-hook error', async () => {
+  const domain = await loadDomain('t17');
+  const foreignDomain = await loadDomain('t17-foreign');
+  const identity = authenticIdentity();
+  const space = domain.createAgentCommonsSharedSpaceDefinition(identity, definitionInput());
+  const activity = domain.createAgentCommonsActivityDefinition(space, activityInput());
+  const proposal = createAgentCommonsParticipationPolicyProposal(identity, proposalInput());
+  const otherSpace = domain.createAgentCommonsSharedSpaceDefinition(
+    identity, definitionInput({ spaceId: 'space_aaaaaaaaaaaaaaaa' }),
+  );
+  const foreignSpace = foreignDomain.createAgentCommonsSharedSpaceDefinition(
+    identity, definitionInput(),
+  );
+  const foreignActivity = foreignDomain.createAgentCommonsActivityDefinition(
+    foreignSpace, activityInput(),
+  );
+  const otherInput = identityInput();
+  otherInput.account.accountId = 'account_aaaaaaaaaaaaaaaa';
+  otherInput.membership.accountId = 'account_aaaaaaaaaaaaaaaa';
+  const otherIdentity = createManagedCustomerIdentityDomain(otherInput);
+  const otherProposal = createAgentCommonsParticipationPolicyProposal(
+    otherIdentity, proposalInput(),
+  );
+  let hooks = 0;
+  const proxy = (value) => new Proxy(value, {
+    get() { hooks += 1; throw new Error('must not read'); },
+    getPrototypeOf() { hooks += 1; throw new Error('must not inspect'); },
+    ownKeys() { hooks += 1; throw new Error('must not enumerate'); },
+  });
+  const factory = domain.createAgentCommonsActivationReadiness;
+  assert.equal(factory.length, 3);
+  for (const args of [
+    [{ ...space }, activity, proposal],
+    [space, { ...activity }, proposal],
+    [space, activity, { ...proposal }],
+    [proxy(space), activity, proposal],
+    [space, proxy(activity), proposal],
+    [space, activity, proxy(proposal)],
+    [space, foreignActivity, proposal],
+    [otherSpace, activity, proposal],
+    [space, activity, otherProposal],
+  ]) assert.throws(() => factory(...args), INVALID_READINESS);
+  assert.throws(() => factory(), INVALID_READINESS);
+  assert.throws(() => factory(space, activity), INVALID_READINESS);
+  assert.throws(() => factory(space, activity, proposal, proxy(proposal)), INVALID_READINESS);
+  assert.equal(hooks, 0);
 });

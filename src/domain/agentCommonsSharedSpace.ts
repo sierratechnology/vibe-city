@@ -1,5 +1,7 @@
 // @ts-expect-error Server-owned JavaScript authenticates results at runtime.
 import { createManagedCustomerIdentityDomain } from '../../server/managedCustomerIdentityDomain.mjs';
+// @ts-expect-error Server-owned JavaScript authenticates results at runtime.
+import { isAuthenticAgentCommonsParticipationPolicyProposal } from '../../server/agentCommonsParticipationPolicyProposal.mjs';
 // @ts-expect-error Node's runtime builtin is intentionally not added as an application dependency.
 import { isProxy } from 'node:util/types';
 
@@ -23,11 +25,20 @@ const weakSetAdd = Function.call.bind(WeakSet.prototype.add) as (
 const weakSetHas = Function.call.bind(WeakSet.prototype.has) as (
   set: WeakSet<object>, value: object,
 ) => boolean;
+const weakMapGet = Function.call.bind(WeakMap.prototype.get) as (
+  map: WeakMap<object, object>, value: object,
+) => object | undefined;
+const weakMapSet = Function.call.bind(WeakMap.prototype.set) as (
+  map: WeakMap<object, object>, key: object, value: object,
+) => WeakMap<object, object>;
 const authenticSharedSpaces = new WeakSet<object>();
+const authenticActivities = new WeakSet<object>();
+const activitySpaces = new WeakMap<object, object>();
 const isAuthenticIdentity = createManagedCustomerIdentityDomain.isAuthenticResult;
 const TypeErrorIntrinsic = TypeError;
 const INVALID_INPUT = 'Invalid Agent Commons shared-space definition input';
 const INVALID_ACTIVITY_INPUT = 'Invalid Agent Commons activity definition input';
+const INVALID_READINESS_INPUT = 'Invalid Agent Commons activation readiness input';
 const ObjectPrototype = Object.prototype;
 const INPUT_KEYS = objectFreeze([
   'schemaVersion', 'spaceId', 'displayName', 'purpose', 'definedAt', 'recordedAt',
@@ -90,6 +101,31 @@ export type AgentCommonsActivityDefinition = Readonly<{
   interruptionPolicy: 'return_to_assigned_state';
   definedAt: string;
   recordedAt: string;
+}>;
+
+type ParticipationPolicyProposal = Readonly<{
+  tenantId: string;
+  accountId: string;
+  authorizationStatus: 'proposed_not_authorized';
+}>;
+
+export type AgentCommonsActivationReadiness = Readonly<{
+  schemaVersion: 'agent-commons-activation-readiness/1';
+  tenantId: string;
+  accountId: string;
+  spaceId: string;
+  activityId: string;
+  activityKind: 'social' | 'creative' | 'recreation';
+  activationStatus: 'blocked';
+  blockers: readonly ['participation_policy_not_authorized', 'retention_policy_not_configured'];
+  privacy: 'tenant_private';
+  costPolicy: 'no_incremental_spend';
+  interruptionPolicy: 'return_to_assigned_state';
+  retentionPolicy: 'not_configured';
+  participationStatus: 'not_activated';
+  occupancyStatus: 'unavailable';
+  activityActivationStatus: 'not_activated';
+  availability: 'unavailable';
 }>;
 
 function invalid(): never {
@@ -244,5 +280,60 @@ export function createAgentCommonsActivityDefinition(
   result.interruptionPolicy = 'return_to_assigned_state';
   result.definedAt = definition.definedAt;
   result.recordedAt = definition.recordedAt;
-  return objectFreeze(result) as AgentCommonsActivityDefinition;
+  const frozenResult = objectFreeze(result) as AgentCommonsActivityDefinition;
+  weakSetAdd(authenticActivities, frozenResult);
+  weakMapSet(activitySpaces, frozenResult, authenticSpace);
+  return frozenResult;
+}
+
+export function createAgentCommonsActivationReadiness(
+  space: unknown,
+  activity: unknown,
+  proposal: unknown,
+): AgentCommonsActivationReadiness {
+  try {
+    if (arguments.length !== 3
+        || space === null || typeof space !== 'object'
+        || activity === null || typeof activity !== 'object'
+        || proposal === null || typeof proposal !== 'object'
+        || !weakSetHas(authenticSharedSpaces, space)
+        || !weakSetHas(authenticActivities, activity)
+        || weakMapGet(activitySpaces, activity) !== space
+        || !isAuthenticAgentCommonsParticipationPolicyProposal(proposal)) {
+      throw new TypeErrorIntrinsic(INVALID_READINESS_INPUT);
+    }
+    const authenticSpace = space as AgentCommonsSharedSpaceDefinition;
+    const authenticActivity = activity as AgentCommonsActivityDefinition;
+    const authenticProposal = proposal as ParticipationPolicyProposal;
+    if (authenticProposal.tenantId !== authenticSpace.tenantId
+        || authenticProposal.accountId !== authenticSpace.accountId
+        || authenticActivity.spaceId !== authenticSpace.spaceId
+        || authenticActivity.tenantId !== authenticSpace.tenantId
+        || authenticActivity.accountId !== authenticSpace.accountId
+        || authenticProposal.authorizationStatus !== 'proposed_not_authorized') {
+      throw new TypeErrorIntrinsic(INVALID_READINESS_INPUT);
+    }
+    const result = objectCreate(null) as Record<string, unknown>;
+    result.schemaVersion = 'agent-commons-activation-readiness/1';
+    result.tenantId = authenticSpace.tenantId;
+    result.accountId = authenticSpace.accountId;
+    result.spaceId = authenticSpace.spaceId;
+    result.activityId = authenticActivity.activityId;
+    result.activityKind = authenticActivity.activityKind;
+    result.activationStatus = 'blocked';
+    result.blockers = objectFreeze([
+      'participation_policy_not_authorized', 'retention_policy_not_configured',
+    ]);
+    result.privacy = 'tenant_private';
+    result.costPolicy = 'no_incremental_spend';
+    result.interruptionPolicy = 'return_to_assigned_state';
+    result.retentionPolicy = 'not_configured';
+    result.participationStatus = authenticSpace.participationStatus;
+    result.occupancyStatus = authenticSpace.occupancyStatus;
+    result.activityActivationStatus = authenticActivity.activationStatus;
+    result.availability = authenticActivity.availability;
+    return objectFreeze(result) as AgentCommonsActivationReadiness;
+  } catch {
+    throw new TypeErrorIntrinsic(INVALID_READINESS_INPUT);
+  }
 }

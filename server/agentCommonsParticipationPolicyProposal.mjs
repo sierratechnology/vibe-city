@@ -10,6 +10,9 @@ const numberIsInteger = Number.isInteger;
 const reflectOwnKeys = Reflect.ownKeys;
 const stringCharCodeAt = Function.call.bind(String.prototype.charCodeAt);
 const stringSlice = Function.call.bind(String.prototype.slice);
+const weakSetAdd = Function.call.bind(WeakSet.prototype.add);
+const weakSetHas = Function.call.bind(WeakSet.prototype.has);
+const authenticProposals = new WeakSet();
 const isAuthenticIdentity = createManagedCustomerIdentityDomain.isAuthenticResult;
 const TypeErrorIntrinsic = TypeError;
 const INVALID_INPUT = 'Invalid Agent Commons participation policy proposal input';
@@ -122,7 +125,7 @@ export function createAgentCommonsParticipationPolicyProposal(identity, input) {
     ['startMinuteUtc', quietHoursInput.startMinuteUtc],
     ['endMinuteUtc', quietHoursInput.endMinuteUtc],
   ]);
-  return frozenRecord([
+  const proposal = frozenRecord([
     ['schemaVersion', definition.schemaVersion],
     ['proposalId', definition.proposalId],
     ['tenantId', identity.tenantBinding.tenantId],
@@ -135,4 +138,10 @@ export function createAgentCommonsParticipationPolicyProposal(identity, input) {
     ['proposedAt', definition.proposedAt],
     ['recordedAt', definition.recordedAt],
   ]);
+  weakSetAdd(authenticProposals, proposal);
+  return proposal;
+}
+
+export function isAuthenticAgentCommonsParticipationPolicyProposal(value) {
+  return value !== null && typeof value === 'object' && weakSetHas(authenticProposals, value);
 }
