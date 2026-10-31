@@ -78,7 +78,7 @@ export function createPrivateTenantNavigationRequestController(rawDependencies?:
     let synchronousResponse: unknown;
     return new Promise((resolve) => {
       const finish = (response: unknown, accepted: boolean, containSubscriptionCleanup = false,
-        containTimerAcquisitionCleanup = false) => {
+        containTimerAcquisitionCleanup = false, containTransportAcquisitionCleanup = false) => {
         if (settled) return;
         settled = true;
         let result = unavailable();
@@ -86,15 +86,20 @@ export function createPrivateTenantNavigationRequestController(rawDependencies?:
           try { result = decoder.decode(response, (dependencies.readPostResponseTime as () => unknown)()); }
           catch { result = unavailable(); }
         }
-        if (transportAttempted) (dependencies.cancelTransport as (token: unknown) => unknown)(token);
+        if (transportAttempted) {
+          if (containTransportAcquisitionCleanup) {
+            try { (dependencies.cancelTransport as (token: unknown) => unknown)(token); }
+            catch {}
+          } else (dependencies.cancelTransport as (token: unknown) => unknown)(token);
+        }
         if (timerAttempted) {
-          if (containTimerAcquisitionCleanup) {
+          if (containTimerAcquisitionCleanup || containTransportAcquisitionCleanup) {
             try { (dependencies.cancelTimeout as (token: unknown) => unknown)(token); }
             catch {}
           } else (dependencies.cancelTimeout as (token: unknown) => unknown)(token);
         }
         if (subscriptionAttempted) {
-          if (containSubscriptionCleanup || containTimerAcquisitionCleanup) {
+          if (containSubscriptionCleanup || containTimerAcquisitionCleanup || containTransportAcquisitionCleanup) {
             try { (dependencies.unsubscribeCancellation as (token: unknown) => unknown)(token); }
             catch {}
           } else (dependencies.unsubscribeCancellation as (token: unknown) => unknown)(token);
@@ -141,12 +146,13 @@ export function createPrivateTenantNavigationRequestController(rawDependencies?:
         transportStarting = false;
         if (synchronousCompletion) finish(synchronousResponse, true);
       } catch {
+        const transportAcquisitionThrew = transportStarting;
         transportStarting = false;
         const subscriptionAcquisitionThrew = subscriptionAcquiring;
         const timerAcquisitionThrew = timerAcquiring;
         subscriptionAcquiring = false;
         timerAcquiring = false;
-        finish(undefined, false, subscriptionAcquisitionThrew, timerAcquisitionThrew);
+        finish(undefined, false, subscriptionAcquisitionThrew, timerAcquisitionThrew, transportAcquisitionThrew);
       }
     });
   });
