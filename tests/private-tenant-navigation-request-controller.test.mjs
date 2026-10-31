@@ -2834,6 +2834,202 @@ selectedTest("C020", "cleanup reentrancy remains busy and reactions see idle", a
   assert.equal(new Set(allResults).size, allResults.length);
 });
 
+selectedTest("R002", "every observable result is exact fresh frozen and private", async () => {
+  const observed = new Map();
+  const recoveries = [];
+  const expectedIds = Array.from({ length: 46 }, (_, index) => `C${String(index + 1).padStart(3, "0")}`);
+  const recursivelyFrozen = (value, seen = new Set()) => {
+    if (value === null || typeof value !== "object" || seen.has(value)) return true;
+    seen.add(value);
+    return Object.isFrozen(value) && Reflect.ownKeys(value).every((key) => recursivelyFrozen(value[key], seen));
+  };
+  const record = (id, result, accessState = null) => {
+    assert.equal(observed.has(id), false);
+    if (accessState === null) exactUnavailable(result);
+    else exactAvailable(result, accessState);
+    assert.equal(recursivelyFrozen(result), true);
+    observed.set(id, result);
+    return result;
+  };
+  const request = (fixture, cancellation = null, expectation = BASE_EXPECTATION) =>
+    fixture.controller.request(structuredClone(expectation), structuredClone(BASE_AUTHORITY), cancellation);
+  const recover = async (fixture, accessState = "public") => {
+    const pending = request(fixture);
+    fixture.state.complete(responseFor("door", accessState));
+    const result = await pending;
+    exactAvailable(result, accessState);
+    assert.equal(recursivelyFrozen(result), true);
+    assert.equal(ownedCount(fixture.owned), 0);
+    recoveries.push(result);
+  };
+
+  record("C001", await controllerModule.createPrivateTenantNavigationRequestController().request());
+
+  const publicFixture = createFixture();
+  const publicPending = request(publicFixture);
+  publicFixture.state.complete(responseFor());
+  record("C002", await publicPending, "public");
+
+  const syncFixture = createFixture({
+    startTransport(snapshot, complete, token) {
+      syncFixture.calls.push("startTransport"); syncFixture.state.starts += 1;
+      syncFixture.state.complete = complete; syncFixture.state.token = token;
+      syncFixture.owned.transport.add(token); complete(responseFor());
+    }
+  });
+  record("C003", await request(syncFixture), "public");
+
+  const callbackThrowFixture = createFixture({
+    startTransport(snapshot, complete, token) {
+      callbackThrowFixture.calls.push("startTransport"); callbackThrowFixture.state.starts += 1;
+      callbackThrowFixture.state.complete = complete; callbackThrowFixture.state.token = token;
+      callbackThrowFixture.owned.transport.add(token); complete(responseFor()); throw new Error("start detail");
+    }
+  });
+  record("C004", await request(callbackThrowFixture));
+
+  const hostileThenable = Object.defineProperty({}, "then", { get() { throw new Error("assimilated"); } });
+  const thenableFixture = createFixture({
+    startTransport(snapshot, complete, token) {
+      thenableFixture.calls.push("startTransport"); thenableFixture.state.starts += 1;
+      thenableFixture.state.complete = complete; thenableFixture.state.token = token;
+      thenableFixture.owned.transport.add(token); return hostileThenable;
+    },
+    cancelTransport(token) { thenableFixture.calls.push("cancelTransport"); thenableFixture.owned.transport.delete(token); return hostileThenable; },
+    scheduleTimeout(token, timeoutMs, timeout) {
+      thenableFixture.calls.push("scheduleTimeout"); thenableFixture.state.timeout = timeout;
+      thenableFixture.owned.timeout.add(token); return hostileThenable;
+    },
+    cancelTimeout(token) { thenableFixture.calls.push("cancelTimeout"); thenableFixture.owned.timeout.delete(token); return hostileThenable; }
+  });
+  const thenablePending = request(thenableFixture);
+  thenableFixture.state.complete(responseFor());
+  record("C005", await thenablePending, "public");
+
+  const busyFixture = createFixture();
+  const busyPrimary = request(busyFixture);
+  record("C006", await request(busyFixture));
+  busyFixture.state.complete(responseFor());
+  await busyPrimary;
+
+  const timeoutFixture = createFixture();
+  const timeoutPending = request(timeoutFixture);
+  timeoutFixture.state.timeout();
+  record("C007", await timeoutPending);
+
+  const preCancel = Object.freeze(Object.create(null));
+  const preCancelFixture = createFixture({ isCancellationRequested() { return true; } });
+  record("C008", await request(preCancelFixture, preCancel));
+
+  const activeCancel = Object.freeze(Object.create(null));
+  const activeCancelFixture = createFixture();
+  const activeCancelPending = request(activeCancelFixture, activeCancel);
+  activeCancelFixture.state.cancel();
+  record("C009", await activeCancelPending);
+
+  const duplicateFixture = createFixture();
+  const duplicatePending = request(duplicateFixture);
+  duplicateFixture.state.complete(responseFor()); duplicateFixture.state.complete(null);
+  record("C010", await duplicatePending, "public");
+
+  const clockFixture = createFixture({ readPostResponseTime() { throw new Error("clock detail"); } });
+  const clockPending = request(clockFixture); clockFixture.state.complete(responseFor());
+  record("C011", await clockPending);
+
+  const subscribeFixture = createFixture({ subscribeCancellation() { throw new Error("subscribe detail"); } });
+  record("C012", await request(subscribeFixture, Object.freeze(Object.create(null))));
+  const checkFixture = createFixture({ isCancellationRequested() { throw new Error("check detail"); } });
+  record("C013", await request(checkFixture, Object.freeze(Object.create(null))));
+  const scheduleFixture = createFixture({ scheduleTimeout() { throw new Error("schedule detail"); } });
+  record("C014", await request(scheduleFixture));
+  const startFixture = createFixture({ startTransport() { throw new Error("start detail"); } });
+  record("C015", await request(startFixture));
+
+  for (const [id, release] of [["C016", "cancelTransport"], ["C017", "cancelTimeout"], ["C018", "unsubscribeCancellation"]]) {
+    let fixture;
+    let releaseThrew = false;
+    fixture = createFixture({ [release](token) {
+      fixture.calls.push(release);
+      fixture.owned[release === "cancelTransport" ? "transport" : release === "cancelTimeout" ? "timeout" : "cancellation"].delete(token);
+      if (!releaseThrew) {
+        releaseThrew = true;
+        throw new Error(`${release} detail`);
+      }
+    } });
+    const cancellation = release === "unsubscribeCancellation" ? Object.freeze(Object.create(null)) : null;
+    const pending = request(fixture, cancellation); fixture.state.complete(responseFor("door", "private"));
+    record(id, await pending);
+    await recover(fixture);
+  }
+
+  const intrinsicFixture = createFixture();
+  const intrinsicPending = request(intrinsicFixture);
+  const freezeDescriptor = Object.getOwnPropertyDescriptor(Object, "freeze");
+  try {
+    Object.defineProperty(Object, "freeze", { value() { throw new Error("hostile freeze"); }, configurable: true });
+    intrinsicFixture.state.complete(responseFor("door", "private"));
+  } finally {
+    Object.defineProperty(Object, "freeze", freezeDescriptor);
+  }
+  record("C019", await intrinsicPending, "private");
+
+  let reentrantBusy;
+  let cleanupFixture;
+  cleanupFixture = createFixture({
+    cancelTransport(token) {
+      cleanupFixture.calls.push("cancelTransport");
+      reentrantBusy = cleanupFixture.controller.request(new Proxy({}, { ownKeys() { throw new Error("observed"); } }));
+      cleanupFixture.owned.transport.delete(token);
+    }
+  });
+  const cleanupPending = request(cleanupFixture); cleanupFixture.state.complete(responseFor("door", "private"));
+  await cleanupPending;
+  record("C020", await reentrantBusy);
+  await recover(cleanupFixture);
+
+  const race = async (id, first, second, accessState = null) => {
+    const cancellation = (first === "cancel" || second === "cancel") ? Object.freeze(Object.create(null)) : null;
+    const fixture = createFixture();
+    const pending = request(fixture, cancellation);
+    const trigger = (name) => name === "complete" ? fixture.state.complete(responseFor()) :
+      name === "timeout" ? fixture.state.timeout() : fixture.state.cancel();
+    trigger(first); trigger(second);
+    record(id, await pending, accessState);
+    await recover(fixture);
+  };
+  await race("C021", "complete", "timeout", "public");
+  await race("C022", "timeout", "complete");
+  await race("C023", "complete", "cancel", "public");
+  await race("C024", "cancel", "complete");
+  await race("C025", "timeout", "cancel");
+  await race("C026", "cancel", "timeout");
+
+  const parity = [
+    ["C027", "door", "tenant"], ["C028", "door", "invited"], ["C029", "door", "private"],
+    ["C030", "door", "restricted"], ["C031", "elevator", "public"], ["C032", "elevator", "tenant"],
+    ["C033", "elevator", "invited"], ["C034", "elevator", "private"], ["C035", "elevator", "restricted"],
+    ["C036", "direct", "public"], ["C037", "direct", "tenant"], ["C038", "direct", "invited"],
+    ["C039", "direct", "private"], ["C040", "direct", "restricted"], ["C041", "alternative", "public"],
+    ["C042", "alternative", "tenant"], ["C043", "alternative", "invited"], ["C044", "alternative", "private"],
+    ["C045", "alternative", "restricted"]
+  ];
+  for (const [id, channel, accessState] of parity) {
+    const fixture = createFixture();
+    const pending = request(fixture, null, { ...BASE_EXPECTATION, channel });
+    fixture.state.complete(responseFor(channel, accessState));
+    record(id, await pending, accessState);
+  }
+
+  const malformedFixture = createFixture();
+  const malformedPending = request(malformedFixture); malformedFixture.state.complete(undefined);
+  record("C046", await malformedPending);
+  await recover(malformedFixture);
+
+  assert.deepEqual([...observed.keys()].sort(), expectedIds);
+  assert.equal(new Set(observed.values()).size, 46);
+  assert.equal(new Set([...observed.values(), ...recoveries]).size, 46 + recoveries.length);
+});
+
 const PROBE_IMPLEMENTATIONS = new Map([
   ["C024", activeCancellationTerminal],
   ["C026", activeCancellationTerminal],
