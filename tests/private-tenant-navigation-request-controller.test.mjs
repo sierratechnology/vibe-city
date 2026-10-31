@@ -1230,6 +1230,107 @@ selectedTest("C025", "timeout before cancellation keeps timeout", async () => {
   assert.equal(ownedCount(fixture.owned), 0);
 });
 
+selectedTest("C011", "post-response clock failure is contained", async () => {
+  const failureCases = [
+    () => { throw new Error("clock route token tenant subject authority provider reason"); },
+    () => Number.NaN
+  ];
+  const failureResults = [];
+  const recoveryResults = [];
+  for (const failClock of failureCases) {
+    const cancellation = Object.freeze(Object.create(null));
+    const responseObservations = [];
+    const acceptedResponse = new Proxy(responseFor(), {
+      getPrototypeOf(target) {
+        responseObservations.push("getPrototypeOf");
+        return Reflect.getPrototypeOf(target);
+      },
+      ownKeys(target) {
+        responseObservations.push("ownKeys");
+        return Reflect.ownKeys(target);
+      },
+      getOwnPropertyDescriptor(target, key) {
+        responseObservations.push(`descriptor:${String(key)}`);
+        return Reflect.getOwnPropertyDescriptor(target, key);
+      },
+      get(target, key, receiver) {
+        responseObservations.push(`get:${String(key)}`);
+        return Reflect.get(target, key, receiver);
+      }
+    });
+    let firstClock = true;
+    const fixture = createFixture({
+      readPostResponseTime() {
+        fixture.calls.push("readPostResponseTime");
+        fixture.state.clocks += 1;
+        if (firstClock) {
+          firstClock = false;
+          return failClock();
+        }
+        return TRUSTED_MS;
+      }
+    });
+    const pending = fixture.controller.request(
+      structuredClone(BASE_EXPECTATION), structuredClone(BASE_AUTHORITY), cancellation
+    );
+    const completeOriginal = fixture.state.complete;
+    const timeoutOriginal = fixture.state.timeout;
+    const cancelOriginal = fixture.state.cancel;
+    let recovered;
+    let terminalResponseObservations;
+    const observedSettlement = pending.then(
+      (result) => {
+        assert.deepEqual(responseObservations, terminalResponseObservations);
+        assert.equal(ownedCount(fixture.owned), 0);
+        recovered = fixture.controller.request(
+          structuredClone(BASE_EXPECTATION), structuredClone(BASE_AUTHORITY)
+        );
+        assert.equal(fixture.state.starts, 2);
+        assert.deepEqual(responseObservations, terminalResponseObservations);
+        return { kind: "fulfilled", result };
+      },
+      (error) => ({ kind: "rejected", error })
+    );
+    completeOriginal(acceptedResponse);
+    const callsAfterFailure = [...fixture.calls];
+    const ownedAfterFailure = ownedCount(fixture.owned);
+    terminalResponseObservations = [...responseObservations];
+    const settlement = await observedSettlement;
+    const clockFailureContained = settlement.kind === "fulfilled" &&
+      Reflect.ownKeys(settlement.result).length === 1 && settlement.result.status === "unavailable" &&
+      Object.getPrototypeOf(settlement.result) === null && Object.isFrozen(settlement.result) &&
+      JSON.stringify(callsAfterFailure) === JSON.stringify([
+        "subscribeCancellation", "isCancellationRequested", "scheduleTimeout", "startTransport",
+        "readPostResponseTime", "cancelTransport", "cancelTimeout", "unsubscribeCancellation"
+      ]) && ownedAfterFailure === 0;
+    if (!clockFailureContained) {
+      throw new Error("M7T4B_MISSING_C011_CLOCK_FAILURE");
+    }
+    exactUnavailable(settlement.result);
+    failureResults.push(settlement.result);
+    const callsAfterReaction = [...fixture.calls];
+    completeOriginal(responseFor("door", "private"));
+    timeoutOriginal();
+    cancelOriginal();
+    assert.deepEqual(fixture.calls, callsAfterReaction);
+    assert.deepEqual(responseObservations, terminalResponseObservations);
+    assert.equal(fixture.state.clocks, 1);
+    assert.equal(ownedCount(fixture.owned), 2);
+    fixture.state.complete(responseFor());
+    const recoveredResult = await recovered;
+    exactAvailable(recoveredResult, "public");
+    assert.notEqual(settlement.result, recoveredResult);
+    recoveryResults.push(recoveredResult);
+    assert.deepEqual(responseObservations, terminalResponseObservations);
+    assert.deepEqual(fixture.calls, [...callsAfterFailure,
+      "scheduleTimeout", "startTransport", "readPostResponseTime", "cancelTransport", "cancelTimeout"]);
+    assert.equal(fixture.state.clocks, 2);
+    assert.equal(ownedCount(fixture.owned), 0);
+  }
+  assert.notEqual(failureResults[0], failureResults[1]);
+  assert.notEqual(recoveryResults[0], recoveryResults[1]);
+});
+
 const PROBE_IMPLEMENTATIONS = new Map([
   ["C024", activeCancellationTerminal],
   ["C026", activeCancellationTerminal],
