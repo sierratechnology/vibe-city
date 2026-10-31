@@ -3030,6 +3030,243 @@ selectedTest("R002", "every observable result is exact fresh frozen and private"
   assert.equal(new Set([...observed.values(), ...recoveries]).size, 46 + recoveries.length);
 });
 
+selectedTest("R003", "late work after every admitted lifecycle path is inert", async () => {
+  const seen = new Set();
+  const hostileResponseObservations = [];
+  const cancellation = () => Object.freeze(Object.create(null));
+  const request = (fixture, value = null, expectation = BASE_EXPECTATION) =>
+    fixture.controller.request(structuredClone(expectation), structuredClone(BASE_AUTHORITY), value);
+  const withHostileFreeze = (operation) => {
+    const descriptor = Object.getOwnPropertyDescriptor(Object, "freeze");
+    try {
+      Object.defineProperty(Object, "freeze", {
+        value() { throw new Error("late hostile replacement observed"); }, configurable: true
+      });
+      operation();
+    } finally {
+      Object.defineProperty(Object, "freeze", descriptor);
+    }
+  };
+  const lateResponse = () => new Proxy(responseFor("door", "restricted"), {
+    getPrototypeOf(target) { hostileResponseObservations.push("getPrototypeOf"); return Reflect.getPrototypeOf(target); },
+    ownKeys(target) { hostileResponseObservations.push("ownKeys"); return Reflect.ownKeys(target); },
+    getOwnPropertyDescriptor(target, key) {
+      hostileResponseObservations.push(`descriptor:${String(key)}`);
+      return Reflect.getOwnPropertyDescriptor(target, key);
+    },
+    get(target, key, receiver) {
+      hostileResponseObservations.push(`get:${String(key)}`);
+      return Reflect.get(target, key, receiver);
+    }
+  });
+  const exercise = async ({ id, kind = "complete", accessState = null, channel = "door", release = null }) => {
+    assert.equal(seen.has(id), false);
+    const context = { busy: [], thenGets: 0 };
+    let fixture;
+    let first = true;
+    const overrides = {};
+    if (kind === "sync") {
+      overrides.startTransport = (snapshot, complete, token) => {
+        fixture.calls.push("startTransport"); fixture.state.starts += 1;
+        fixture.state.snapshot = snapshot; fixture.state.complete = complete; fixture.state.token = token;
+        fixture.owned.transport.add(token); complete(responseFor(channel, accessState ?? "public"));
+      };
+    } else if (kind === "callbackThrow") {
+      overrides.startTransport = (snapshot, complete, token) => {
+        fixture.calls.push("startTransport"); fixture.state.starts += 1;
+        fixture.state.snapshot = snapshot; fixture.state.complete = complete; fixture.state.token = token;
+        fixture.owned.transport.add(token);
+        if (first) { first = false; complete(responseFor()); throw new Error("start detail must remain private"); }
+      };
+    } else if (kind === "thenable") {
+      const hostileReturn = () => Object.defineProperty(Object.create(null), "then", {
+        get() { context.thenGets += 1; throw new Error("late thenable assimilated"); }
+      });
+      overrides.subscribeCancellation = (value, token, cancel) => {
+        fixture.calls.push("subscribeCancellation"); fixture.state.cancellation = value;
+        fixture.state.cancel = cancel; fixture.owned.cancellation.add(token); return hostileReturn();
+      };
+      overrides.scheduleTimeout = (token, timeoutMs, timeout) => {
+        fixture.calls.push("scheduleTimeout"); fixture.state.timeoutMs = timeoutMs;
+        fixture.state.timeout = timeout; fixture.owned.timeout.add(token); return hostileReturn();
+      };
+      overrides.startTransport = (snapshot, complete, token) => {
+        fixture.calls.push("startTransport"); fixture.state.starts += 1; fixture.state.snapshot = snapshot;
+        fixture.state.complete = complete; fixture.state.token = token; fixture.owned.transport.add(token);
+        return hostileReturn();
+      };
+      overrides.cancelTransport = (token) => {
+        fixture.calls.push("cancelTransport"); fixture.owned.transport.delete(token); return hostileReturn();
+      };
+      overrides.cancelTimeout = (token) => {
+        fixture.calls.push("cancelTimeout"); fixture.owned.timeout.delete(token); return hostileReturn();
+      };
+      overrides.unsubscribeCancellation = (token) => {
+        fixture.calls.push("unsubscribeCancellation"); fixture.owned.cancellation.delete(token); return hostileReturn();
+      };
+    } else if (kind === "preCancel") {
+      overrides.isCancellationRequested = () => { const result = first; first = false; return result; };
+    } else if (kind === "clockThrow") {
+      overrides.readPostResponseTime = () => {
+        fixture.calls.push("readPostResponseTime"); fixture.state.clocks += 1;
+        if (first) { first = false; throw new Error("clock detail must remain private"); }
+        return TRUSTED_MS;
+      };
+    } else if (kind === "subscribeThrow") {
+      overrides.subscribeCancellation = (value, token, cancel) => {
+        fixture.calls.push("subscribeCancellation"); fixture.state.cancellation = value;
+        fixture.state.cancel = cancel; fixture.owned.cancellation.add(token);
+        if (first) { first = false; throw new Error("subscribe detail must remain private"); }
+      };
+    } else if (kind === "checkThrow") {
+      overrides.isCancellationRequested = () => {
+        if (first) { first = false; throw new Error("check detail must remain private"); }
+        return false;
+      };
+    } else if (kind === "scheduleThrow") {
+      overrides.scheduleTimeout = (token, timeoutMs, timeout) => {
+        fixture.calls.push("scheduleTimeout"); fixture.state.timeoutMs = timeoutMs;
+        fixture.state.timeout = timeout; fixture.owned.timeout.add(token);
+        if (first) { first = false; throw new Error("schedule detail must remain private"); }
+      };
+    } else if (kind === "startThrow") {
+      overrides.startTransport = (snapshot, complete, token) => {
+        fixture.calls.push("startTransport"); fixture.state.starts += 1; fixture.state.snapshot = snapshot;
+        fixture.state.complete = complete; fixture.state.token = token; fixture.owned.transport.add(token);
+        if (first) { first = false; throw new Error("start detail must remain private"); }
+      };
+    } else if (kind === "releaseThrow") {
+      overrides[release] = (token) => {
+        fixture.calls.push(release);
+        fixture.owned[release === "cancelTransport" ? "transport" : release === "cancelTimeout" ? "timeout" : "cancellation"].delete(token);
+        if (first) { first = false; throw new Error(`${release} detail must remain private`); }
+      };
+    } else if (kind === "cleanupReentry") {
+      overrides.cancelTransport = (token) => {
+        fixture.calls.push("cancelTransport");
+        if (first) {
+          first = false;
+          const trap = () => { throw new Error("cleanup late argument observed"); };
+          const hostile = new Proxy({}, { get: trap, getPrototypeOf: trap, ownKeys: trap, getOwnPropertyDescriptor: trap });
+          context.busy.push(fixture.controller.request(hostile, hostile, hostile));
+        }
+        fixture.owned.transport.delete(token);
+      };
+    }
+    fixture = createFixture(overrides);
+    const needsCancellation = !["complete", "sync", "callbackThrow", "clockThrow", "scheduleThrow",
+      "startThrow", "timeout", "duplicate", "malformed", "hostile"].includes(kind) || release !== null;
+    const pending = request(fixture, needsCancellation ? cancellation() : null, { ...BASE_EXPECTATION, channel });
+    let settlements = 0;
+    const rejections = [];
+    const observed = pending.then(
+      (result) => { settlements += 1; return result; },
+      (error) => { rejections.push(error); return error; }
+    );
+    const originals = {
+      complete: fixture.state.complete,
+      timeout: fixture.state.timeout,
+      cancel: fixture.state.cancel
+    };
+    if (kind === "busy") {
+      let observations = 0;
+      const trap = () => { observations += 1; throw new Error("busy arguments observed"); };
+      const hostile = new Proxy({}, { get: trap, getPrototypeOf: trap, ownKeys: trap, getOwnPropertyDescriptor: trap });
+      context.busy.push(fixture.controller.request(hostile, hostile, hostile));
+      assert.equal(observations, 0);
+      originals.complete(responseFor());
+    } else if (kind === "timeout") originals.timeout();
+    else if (kind === "cancel") originals.cancel();
+    else if (kind === "duplicate") {
+      originals.complete(responseFor()); originals.complete(responseFor("door", "tenant")); originals.timeout();
+    } else if (kind === "raceCompleteTimeout") { originals.complete(responseFor()); originals.timeout(); }
+    else if (kind === "raceTimeoutComplete") { originals.timeout(); originals.complete(responseFor()); }
+    else if (kind === "raceCompleteCancel") { originals.complete(responseFor()); originals.cancel(); }
+    else if (kind === "raceCancelComplete") { originals.cancel(); originals.complete(responseFor()); }
+    else if (kind === "raceTimeoutCancel") { originals.timeout(); originals.cancel(); }
+    else if (kind === "raceCancelTimeout") { originals.cancel(); originals.timeout(); }
+    else if (kind === "malformed") originals.complete(undefined);
+    else if (kind === "hostile") withHostileFreeze(() => originals.complete(responseFor("door", "private")));
+    else if (!["sync", "callbackThrow", "preCancel", "subscribeThrow", "checkThrow", "scheduleThrow", "startThrow"].includes(kind)) {
+      originals.complete(responseFor(channel, accessState ?? "public"));
+    }
+    const result = await observed;
+    if (accessState === null) exactUnavailable(result); else exactAvailable(result, accessState);
+    assert.equal(rejections.length, 0);
+    assert.equal(settlements, 1);
+    assert.equal(ownedCount(fixture.owned), 0);
+    for (const busy of context.busy) exactUnavailable(await busy);
+    assert.equal(context.thenGets, 0);
+    const resultIdentity = result;
+    const resultJson = JSON.stringify(result);
+    const terminalCalls = [...fixture.calls];
+    const terminalStarts = fixture.state.starts;
+    const terminalClocks = fixture.state.clocks;
+    const invokeLate = () => {
+      originals.complete?.(lateResponse()); originals.complete?.(lateResponse());
+      originals.timeout?.(); originals.timeout?.(); originals.cancel?.(); originals.cancel?.();
+    };
+    if (kind === "hostile") withHostileFreeze(invokeLate); else invokeLate();
+    await Promise.resolve();
+    assert.equal(settlements, 1);
+    assert.equal(rejections.length, 0);
+    assert.equal(result, resultIdentity);
+    assert.equal(JSON.stringify(result), resultJson);
+    assert.deepEqual(fixture.calls, terminalCalls);
+    assert.equal(fixture.state.starts, terminalStarts);
+    assert.equal(fixture.state.clocks, terminalClocks);
+    assert.equal(ownedCount(fixture.owned), 0);
+    assert.equal(hostileResponseObservations.length, 0);
+    assert.equal(context.thenGets, 0);
+    const recovery = request(fixture);
+    const recoveryComplete = fixture.state.complete;
+    const recoveryCalls = [...fixture.calls];
+    const recoveryOwned = ownedCount(fixture.owned);
+    invokeLate();
+    await Promise.resolve();
+    assert.deepEqual(fixture.calls, recoveryCalls);
+    assert.equal(ownedCount(fixture.owned), recoveryOwned);
+    recoveryComplete(responseFor());
+    const recoveredResult = await recovery;
+    exactAvailable(recoveredResult, "public");
+    assert.notEqual(result, recoveredResult);
+    assert.equal(ownedCount(fixture.owned), 0);
+    assert.equal(hostileResponseObservations.length, 0);
+    assert.equal(context.thenGets, 0);
+    seen.add(id);
+  };
+
+  const scenarios = [
+    ["C002", "complete", "public"], ["C003", "sync", "public"], ["C004", "callbackThrow", null],
+    ["C005", "thenable", "public"], ["C006", "busy", "public"], ["C007", "timeout", null],
+    ["C008", "preCancel", null], ["C009", "cancel", null], ["C010", "duplicate", "public"],
+    ["C011", "clockThrow", null], ["C012", "subscribeThrow", null], ["C013", "checkThrow", null],
+    ["C014", "scheduleThrow", null], ["C015", "startThrow", null],
+    ["C016", "releaseThrow", null, "door", "cancelTransport"],
+    ["C017", "releaseThrow", null, "door", "cancelTimeout"],
+    ["C018", "releaseThrow", null, "door", "unsubscribeCancellation"],
+    ["C019", "hostile", "private"], ["C020", "cleanupReentry", "private"],
+    ["C021", "raceCompleteTimeout", "public"], ["C022", "raceTimeoutComplete", null],
+    ["C023", "raceCompleteCancel", "public"], ["C024", "raceCancelComplete", null],
+    ["C025", "raceTimeoutCancel", null], ["C026", "raceCancelTimeout", null]
+  ];
+  const parity = [
+    ["C027", "door", "tenant"], ["C028", "door", "invited"], ["C029", "door", "private"],
+    ["C030", "door", "restricted"], ["C031", "elevator", "public"], ["C032", "elevator", "tenant"],
+    ["C033", "elevator", "invited"], ["C034", "elevator", "private"], ["C035", "elevator", "restricted"],
+    ["C036", "direct", "public"], ["C037", "direct", "tenant"], ["C038", "direct", "invited"],
+    ["C039", "direct", "private"], ["C040", "direct", "restricted"], ["C041", "alternative", "public"],
+    ["C042", "alternative", "tenant"], ["C043", "alternative", "invited"], ["C044", "alternative", "private"],
+    ["C045", "alternative", "restricted"]
+  ];
+  for (const [id, kind, accessState, channel = "door", release = null] of scenarios) {
+    await exercise({ id, kind, accessState, channel, release });
+  }
+  for (const [id, channel, accessState] of parity) await exercise({ id, channel, accessState });
+  await exercise({ id: "C046", kind: "malformed", accessState: null });
+  assert.deepEqual([...seen].sort(), Array.from({ length: 45 }, (_, index) => `C${String(index + 2).padStart(3, "0")}`));
+});
+
 const PROBE_IMPLEMENTATIONS = new Map([
   ["C024", activeCancellationTerminal],
   ["C026", activeCancellationTerminal],
