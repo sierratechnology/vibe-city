@@ -1,8 +1,13 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { readFile } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join, relative } from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 import ts from "typescript";
+import { build as viteBuild } from "vite";
 
 const MODULE_URL = new URL("../src/navigation/privateTenantNavigationRequestController.ts", import.meta.url);
 const DECISION_URL = new URL("../src/navigation/privateTenantNavigationDecision.ts", import.meta.url);
@@ -3731,6 +3736,91 @@ selectedTest("A004", "maximum duplicate and late callback fixtures remain within
   const elapsedMs = Number(process.hrtime.bigint() - startedAt) / 1_000_000;
   context.diagnostic(`A004 callback_attempts=${callbackAttempts} elapsed_ms=${elapsedMs.toFixed(3)} budget_ms=25`);
   assert.ok(elapsedMs <= 25, `A004 elapsed ${elapsedMs.toFixed(3)} ms exceeds 25 ms budget`);
+});
+
+selectedTest("A005", "module remains dormant with deterministic public graph zero delta", async (context) => {
+  const topology = TOP_LEVEL_REGISTRATIONS.find(({ id }) => id === "C001");
+  assert.equal(topology?.title, "export is exactly one fresh hardened request controller");
+  await topology.implementation();
+
+  const repositoryRoot = fileURLToPath(new URL("../", import.meta.url));
+  const productionPath = join(repositoryRoot, "src/navigation/privateTenantNavigationRequestController.ts");
+  const productionSource = await readFile(productionPath, "utf8");
+  assert.deepEqual(productionSource.match(/^export (?:function|const|class|let|var) /gm), ["export function "]);
+  assert.deepEqual(productionSource.match(/^import .* from .*;$/gm), [
+    'import { createPrivateTenantNavigationDecisionDecoder } from "./privateTenantNavigationDecision";'
+  ]);
+  assert.doesNotMatch(productionSource,
+    /\b(?:fetch|XMLHttpRequest|WebSocket|EventSource|setTimeout|setInterval|queueMicrotask)\s*\(|\b(?:Date|performance)\.|\b(?:AbortController|AbortSignal|addEventListener|removeEventListener|localStorage|sessionStorage|indexedDB|document|window|navigator|console|process\.env|import\.meta\.env)\b|\b(?:supabase|provider|credential|apiKey|authorizationHeader)\b/i);
+
+  const textFiles = [];
+  const visit = async (path) => {
+    for (const entry of await readdir(path, { withFileTypes: true })) {
+      const child = join(path, entry.name);
+      if (entry.isDirectory()) await visit(child);
+      else if (/\.(?:html|js|json|mjs|ts|tsx)$/.test(entry.name)) textFiles.push(child);
+    }
+  };
+  for (const directory of ["src", "server", "tests", "design"]) {
+    try { await visit(join(repositoryRoot, directory)); } catch (error) {
+      if (error?.code !== "ENOENT") throw error;
+    }
+  }
+  for (const filename of ["index.html", "package.json", "package-lock.json", "vite.config.ts", "tsconfig.json"]) {
+    const path = join(repositoryRoot, filename);
+    try { await readFile(path); textFiles.push(path); } catch (error) {
+      if (error?.code !== "ENOENT") throw error;
+    }
+  }
+  const importers = [];
+  for (const path of textFiles) {
+    if ((await readFile(path, "utf8")).includes("privateTenantNavigationRequestController")) {
+      importers.push(relative(repositoryRoot, path));
+    }
+  }
+  assert.deepEqual(importers.sort(), ["tests/private-tenant-navigation-request-controller.test.mjs"]);
+
+  const expectedAssets = [
+    ["assets/index-Cgua_FEG.js", 622147, "66de4dec9dd21876f5b84dd4e6caf6e0d6f5bd81246729b31d70387be5ad562f", "6cf1b1d7254c736e0902df8f4315c64f6d9973399613860e34beda7f9e907aef"],
+    ["assets/index-McDAlddO.css", 25393, "bf4ed699dbbfa40a6fc99514e1054f895aeba785538a3ee18cc40aa96a4357f4", "43aa0f7b32729812e2de63c29707832e9baa0332f47b04e2748294ba2a7287c8"],
+    ["assets/preload-helper-Czpn1I53.js", 1196, "aba87f2a53e45ecdc9113fc30387d16e449d1676428cf5f82dd624c1df97d152", "bf989fe4ab76da88a66b618fe46435e8b9f48307faccbdae6486e6ba8c20a15e"],
+    ["assets/realtimePresence-D_53fGOy.js", 204018, "01d59d15d822f59d753ec363997e51189c36b748a6f196ec7e9ff72d4a84c300", "a581a3c8c96cecd5ceeb293922fb59ece1ecf121f8065d36017cca89f8ff689d"],
+    ["index.html", 18088, "da82b7e9b0e6a74f830eeb73a7e6f4cc26746118c3128820cff5d529d2c60fa5", "cf101a7d9156127ba810d28a1bcc1110f51ea71e7bfaef3ba02b2badbe31e780"]
+  ];
+  const buildRoot = await mkdtemp(join(tmpdir(), "m7t4b-a005-build."));
+  const dist = join(buildRoot, "dist");
+  const transformed = new Set();
+  try {
+    await viteBuild({
+      root: repositoryRoot,
+      logLevel: "silent",
+      plugins: [{ name: "m7t4b-a005-module-count", transform(_source, id) { transformed.add(id); } }],
+      build: { outDir: dist, emptyOutDir: true }
+    });
+    const actualFiles = (await readdir(dist, { recursive: true, withFileTypes: true }))
+      .filter((entry) => entry.isFile()).map((entry) => relative(dist, join(entry.parentPath, entry.name))).sort();
+    assert.equal(transformed.size, 86);
+    assert.deepEqual(actualFiles, expectedAssets.map(([filename]) => filename).sort());
+    let javaScriptBytes = 0;
+    let totalBytes = 0;
+    for (const [filename, expectedBytes, expectedRawHash, expectedGzipHash] of expectedAssets) {
+      const bytes = await readFile(join(dist, filename));
+      assert.equal(bytes.length, expectedBytes);
+      assert.equal(createHash("sha256").update(bytes).digest("hex"), expectedRawHash);
+      const gzip = spawnSync("gzip", ["-n", "-9", "-c"], { input: bytes, maxBuffer: 2_000_000 });
+      assert.equal(gzip.status, 0);
+      assert.equal(gzip.signal, null);
+      assert.equal(gzip.stderr.length, 0);
+      assert.equal(createHash("sha256").update(gzip.stdout).digest("hex"), expectedGzipHash);
+      if (filename.endsWith(".js")) javaScriptBytes += bytes.length;
+      totalBytes += bytes.length;
+    }
+    assert.equal(javaScriptBytes, 827361);
+    assert.equal(totalBytes, 870842);
+    context.diagnostic(`A005 transformed_modules=${transformed.size} files=${actualFiles.length} javascript_bytes=${javaScriptBytes} total_bytes=${totalBytes}`);
+  } finally {
+    await rm(buildRoot, { recursive: true, force: true });
+  }
 });
 
 const PROBE_IMPLEMENTATIONS = new Map([
