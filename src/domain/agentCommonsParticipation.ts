@@ -30,6 +30,7 @@ const numberIsFinite = Number.isFinite;
 const locallyReviewedActiveMappings = new WeakSet<object>();
 const authenticDrafts = new WeakSet<object>();
 const draftMappings = new WeakMap<object, ReviewedHostedIdentityMapping>();
+const recordMappings = new WeakMap<object, ReviewedHostedIdentityMapping>();
 
 type ActivityKind = 'social' | 'creative' | 'recreation';
 type ParticipationLifecycle = 'active' | 'ended';
@@ -54,6 +55,23 @@ export type AgentCommonsParticipation = Readonly<{
 export type AgentCommonsParticipationDraft = Readonly<
   Omit<AgentCommonsParticipation, 'sourceIdentityRevision'>
 >;
+
+export type AgentCommonsReturnReadiness = Readonly<{
+  schemaVersion: 'agent-commons-return-readiness/1';
+  eventId: string;
+  tenantId: string;
+  identityId: 'stg-spiders';
+  activityKind: ActivityKind;
+  startedAt: string;
+  endedAt: string;
+  recordedAt: string;
+  sourceIdentityRevision: number;
+  participationStatus: 'ended';
+  reconciliationStatus: 'ready_for_assignment_reconciliation';
+  interruptionPolicy: 'return_to_assigned_state';
+  privacy: 'tenant_private';
+  costPolicy: 'no_incremental_spend';
+}>;
 
 function requireCanonicalTimestamp(value: unknown): string {
   if (typeof value !== 'string') throw new TypeErrorConstructor(GENERIC_ERROR);
@@ -97,7 +115,9 @@ function createRecord(
   record.endedAt = input.endedAt;
   record.recordedAt = input.recordedAt;
   record.sourceIdentityRevision = mapping.registryRevision;
-  return objectFreeze(record) as AgentCommonsParticipation;
+  objectFreeze(record);
+  weakMapSet(recordMappings, record, mapping);
+  return record as AgentCommonsParticipation;
 }
 
 function requireActiveMapping(mappingInput: unknown): ReviewedHostedIdentityMapping {
@@ -174,6 +194,63 @@ export function createAgentCommonsParticipation(
       || !weakSetHas(authenticDrafts, draftInput)
       || weakMapGet(draftMappings, draftInput) !== mapping) throw new TypeErrorConstructor(GENERIC_ERROR);
     return createRecord(mapping, draftInput as AgentCommonsParticipationDraft);
+  } catch {
+    throw new TypeErrorConstructor(GENERIC_ERROR);
+  }
+}
+
+export function createAgentCommonsReturnReadiness(
+  activeInput: unknown,
+  endedInput: unknown,
+  mappingInput: unknown,
+): AgentCommonsReturnReadiness {
+  try {
+    if (arguments.length !== 3
+      || activeInput === null || typeof activeInput !== 'object'
+      || endedInput === null || typeof endedInput !== 'object') {
+      throw new TypeErrorConstructor(GENERIC_ERROR);
+    }
+    const mapping = requireActiveMapping(mappingInput);
+    if (weakMapGet(recordMappings, activeInput) !== mapping
+      || weakMapGet(recordMappings, endedInput) !== mapping) {
+      throw new TypeErrorConstructor(GENERIC_ERROR);
+    }
+    const active = activeInput as AgentCommonsParticipation;
+    const ended = endedInput as AgentCommonsParticipation;
+    if (active.lifecycle !== 'active' || active.endedAt !== null
+      || ended.lifecycle !== 'ended' || ended.endedAt === null
+      || active.eventId !== ended.eventId
+      || active.tenantId !== ended.tenantId
+      || active.identityId !== ended.identityId
+      || active.activityKind !== ended.activityKind
+      || active.participation !== ended.participation
+      || active.privacy !== ended.privacy
+      || active.costPolicy !== ended.costPolicy
+      || active.interruptionPolicy !== ended.interruptionPolicy
+      || active.startedAt !== ended.startedAt
+      || active.sourceIdentityRevision !== ended.sourceIdentityRevision
+      || ended.recordedAt <= active.recordedAt
+      || mapping.tenantId !== active.tenantId
+      || mapping.identityId !== active.identityId
+      || mapping.registryRevision !== active.sourceIdentityRevision) {
+      throw new TypeErrorConstructor(GENERIC_ERROR);
+    }
+    const readiness = objectCreate(null) as Record<string, unknown>;
+    readiness.schemaVersion = 'agent-commons-return-readiness/1';
+    readiness.eventId = ended.eventId;
+    readiness.tenantId = ended.tenantId;
+    readiness.identityId = ended.identityId;
+    readiness.activityKind = ended.activityKind;
+    readiness.startedAt = ended.startedAt;
+    readiness.endedAt = ended.endedAt;
+    readiness.recordedAt = ended.recordedAt;
+    readiness.sourceIdentityRevision = ended.sourceIdentityRevision;
+    readiness.participationStatus = 'ended';
+    readiness.reconciliationStatus = 'ready_for_assignment_reconciliation';
+    readiness.interruptionPolicy = 'return_to_assigned_state';
+    readiness.privacy = 'tenant_private';
+    readiness.costPolicy = 'no_incremental_spend';
+    return objectFreeze(readiness) as AgentCommonsReturnReadiness;
   } catch {
     throw new TypeErrorConstructor(GENERIC_ERROR);
   }
