@@ -3267,6 +3267,285 @@ selectedTest("R003", "late work after every admitted lifecycle path is inert", a
   assert.deepEqual([...seen].sort(), Array.from({ length: 45 }, (_, index) => `C${String(index + 2).padStart(3, "0")}`));
 });
 
+selectedTest("R004", "ownership returns to zero on every admitted path", async () => {
+  const seen = new Set();
+  const cancellation = () => Object.freeze(Object.create(null));
+  const expectedIds = Array.from({ length: 45 }, (_, index) => `C${String(index + 2).padStart(3, "0")}`);
+  const scenarios = [
+    ["C002", "complete", "public"], ["C003", "sync", "public"], ["C004", "callbackThrow", null],
+    ["C005", "thenable", "public"], ["C006", "busy", "public"], ["C007", "timeout", null],
+    ["C008", "preCancel", null], ["C009", "cancel", null], ["C010", "duplicate", "public"],
+    ["C011", "clockThrow", null], ["C012", "subscribeThrow", null], ["C013", "checkThrow", null],
+    ["C014", "scheduleThrow", null], ["C015", "startThrow", null],
+    ["C016", "releaseThrow", null, "door", "cancelTransport"],
+    ["C017", "releaseThrow", null, "door", "cancelTimeout"],
+    ["C018", "releaseThrow", null, "door", "unsubscribeCancellation"],
+    ["C019", "hostile", "private"], ["C020", "cleanupReentry", "private"],
+    ["C021", "raceCompleteTimeout", "public"], ["C022", "raceTimeoutComplete", null],
+    ["C023", "raceCompleteCancel", "public"], ["C024", "raceCancelComplete", null],
+    ["C025", "raceTimeoutCancel", null], ["C026", "raceCancelTimeout", null]
+  ];
+  const parity = [
+    ["C027", "door", "tenant"], ["C028", "door", "invited"], ["C029", "door", "private"],
+    ["C030", "door", "restricted"], ["C031", "elevator", "public"], ["C032", "elevator", "tenant"],
+    ["C033", "elevator", "invited"], ["C034", "elevator", "private"], ["C035", "elevator", "restricted"],
+    ["C036", "direct", "public"], ["C037", "direct", "tenant"], ["C038", "direct", "invited"],
+    ["C039", "direct", "private"], ["C040", "direct", "restricted"], ["C041", "alternative", "public"],
+    ["C042", "alternative", "tenant"], ["C043", "alternative", "invited"], ["C044", "alternative", "private"],
+    ["C045", "alternative", "restricted"]
+  ];
+
+  const exercise = async ({ id, kind = "complete", accessState = null, channel = "door", release = null }) => {
+    assert.equal(seen.has(id), false);
+    const owned = { transport: new Set(), timeout: new Set(), cancellation: new Set() };
+    const acquired = { transport: 0, timeout: 0, cancellation: 0 };
+    const released = { transport: 0, timeout: 0, cancellation: 0 };
+    const tokens = [];
+    const snapshots = [];
+    const callbacks = [];
+    const doubleReleases = [];
+    const duplicateAcquisitions = [];
+    const reentrantBusy = [];
+    const responseObservations = [];
+    const lateResponseObservations = [];
+    let thenGets = 0;
+    let first = true;
+    let primaryToken;
+    let fixture;
+    const resourceForRelease = {
+      cancelTransport: "transport", cancelTimeout: "timeout", unsubscribeCancellation: "cancellation"
+    };
+    const acquire = (resource, token) => {
+      acquired[resource] += 1;
+      if (owned[resource].has(token)) duplicateAcquisitions.push(resource);
+      owned[resource].add(token);
+      if (!tokens.includes(token)) tokens.push(token);
+      if (primaryToken === undefined) primaryToken = token;
+    };
+    const relinquish = (resource, token) => {
+      released[resource] += 1;
+      if (!owned[resource].delete(token)) doubleReleases.push(resource);
+    };
+    const observedResponse = (observations, state = accessState ?? "public") => {
+      const response = responseFor(channel, state);
+      if (observations === responseObservations) return response;
+      return new Proxy(response, {
+        getPrototypeOf(target) { observations.push("getPrototypeOf"); return Reflect.getPrototypeOf(target); },
+        ownKeys(target) { observations.push("ownKeys"); return Reflect.ownKeys(target); },
+        getOwnPropertyDescriptor(target, key) {
+          observations.push(`descriptor:${String(key)}`);
+          return Reflect.getOwnPropertyDescriptor(target, key);
+        },
+        get(target, key, receiver) { observations.push(`get:${String(key)}`); return Reflect.get(target, key, receiver); }
+      });
+    };
+    const hostileReturn = () => Object.defineProperty(Object.create(null), "then", {
+      get() { thenGets += 1; throw new Error("ownership return assimilated"); }
+    });
+    const operations = {
+      subscribeCancellation(value, token, cancel) {
+        callbacks.push(cancel); fixture.state.cancellation = value; fixture.state.cancel = cancel;
+        acquire("cancellation", token);
+        if (kind === "subscribeThrow" && first) { first = false; throw new Error("private subscribe detail"); }
+        return kind === "thenable" ? hostileReturn() : undefined;
+      },
+      unsubscribeCancellation(token) {
+        relinquish("cancellation", token);
+        if (kind === "releaseThrow" && release === "unsubscribeCancellation" && first) {
+          first = false; throw new Error("private cancellation release detail");
+        }
+        return kind === "thenable" ? hostileReturn() : undefined;
+      },
+      isCancellationRequested() {
+        if (kind === "preCancel" && first) { first = false; return true; }
+        if (kind === "checkThrow" && first) { first = false; throw new Error("private check detail"); }
+        return false;
+      },
+      scheduleTimeout(token, timeoutMs, timeout) {
+        fixture.state.timeoutMs = timeoutMs; fixture.state.timeout = timeout; callbacks.push(timeout);
+        acquire("timeout", token);
+        if (kind === "scheduleThrow" && first) { first = false; throw new Error("private schedule detail"); }
+        return kind === "thenable" ? hostileReturn() : undefined;
+      },
+      cancelTimeout(token) {
+        relinquish("timeout", token);
+        if (kind === "releaseThrow" && release === "cancelTimeout" && first) {
+          first = false; throw new Error("private timeout release detail");
+        }
+        return kind === "thenable" ? hostileReturn() : undefined;
+      },
+      startTransport(snapshot, complete, token) {
+        fixture.state.starts += 1; fixture.state.snapshot = snapshot; fixture.state.complete = complete;
+        fixture.state.token = token; callbacks.push(complete); snapshots.push(snapshot); acquire("transport", token);
+        if (primaryToken === undefined) primaryToken = token;
+        if (kind === "sync") complete(observedResponse(responseObservations));
+        if (kind === "callbackThrow" && first) {
+          first = false; complete(observedResponse(responseObservations)); throw new Error("private start detail");
+        }
+        if (kind === "startThrow" && first) { first = false; throw new Error("private start detail"); }
+        return kind === "thenable" ? hostileReturn() : undefined;
+      },
+      cancelTransport(token) {
+        if (kind === "cleanupReentry" && token === primaryToken) {
+          const trap = () => { throw new Error("cleanup reentrant argument observed"); };
+          const hostile = new Proxy({}, { get: trap, getPrototypeOf: trap, ownKeys: trap, getOwnPropertyDescriptor: trap });
+          reentrantBusy.push(fixture.controller.request(hostile, hostile, hostile));
+        }
+        relinquish("transport", token);
+        if (kind === "releaseThrow" && release === "cancelTransport" && first) {
+          first = false; throw new Error("private transport release detail");
+        }
+        return kind === "thenable" ? hostileReturn() : undefined;
+      },
+      readPostResponseTime() {
+        fixture.state.clocks += 1;
+        if (kind === "clockThrow" && first) { first = false; throw new Error("private clock detail"); }
+        return TRUSTED_MS;
+      },
+      timeoutMs: 1000
+    };
+    const dependencies = {
+      startTransport: operations.startTransport,
+      cancelTransport: operations.cancelTransport,
+      scheduleTimeout: operations.scheduleTimeout,
+      cancelTimeout: operations.cancelTimeout,
+      subscribeCancellation: operations.subscribeCancellation,
+      unsubscribeCancellation: operations.unsubscribeCancellation,
+      isCancellationRequested: operations.isCancellationRequested,
+      readPostResponseTime: operations.readPostResponseTime,
+      timeoutMs: operations.timeoutMs
+    };
+    fixture = {
+      state: { complete: null, timeout: null, cancel: null, starts: 0, clocks: 0 },
+      controller: controllerModule.createPrivateTenantNavigationRequestController(dependencies)
+    };
+    const needsCancellation = !["complete", "sync", "callbackThrow", "clockThrow", "scheduleThrow",
+      "startThrow", "timeout", "duplicate", "malformed", "hostile", "busy",
+      "raceCompleteTimeout", "raceTimeoutComplete"].includes(kind) || release !== null;
+    const expectation = { ...BASE_EXPECTATION, channel };
+    const authority = structuredClone(BASE_AUTHORITY);
+    const pending = fixture.controller.request(expectation, authority, needsCancellation ? cancellation() : null);
+    let settlements = 0;
+    const rejections = [];
+    const observed = pending.then(
+      (result) => { settlements += 1; return result; },
+      (error) => { rejections.push(error); return error; }
+    );
+    const originals = {
+      complete: fixture.state.complete, timeout: fixture.state.timeout, cancel: fixture.state.cancel
+    };
+    if (kind === "busy") {
+      const before = { acquired: { ...acquired }, owned: ownedCount(owned), callbacks: callbacks.length };
+      reentrantBusy.push(fixture.controller.request(structuredClone(BASE_EXPECTATION), structuredClone(BASE_AUTHORITY)));
+      assert.deepEqual({ acquired: { ...acquired }, owned: ownedCount(owned), callbacks: callbacks.length }, before);
+      originals.complete(observedResponse(responseObservations));
+    } else if (kind === "timeout") originals.timeout();
+    else if (kind === "cancel") originals.cancel();
+    else if (kind === "duplicate") {
+      originals.complete(observedResponse(responseObservations));
+      originals.complete(observedResponse(lateResponseObservations, "tenant"));
+      originals.timeout();
+    } else if (kind === "raceCompleteTimeout") {
+      originals.complete(observedResponse(responseObservations)); originals.timeout();
+    } else if (kind === "raceTimeoutComplete") {
+      originals.timeout(); originals.complete(observedResponse(lateResponseObservations));
+    } else if (kind === "raceCompleteCancel") {
+      originals.complete(observedResponse(responseObservations)); originals.cancel();
+    } else if (kind === "raceCancelComplete") {
+      originals.cancel(); originals.complete(observedResponse(lateResponseObservations));
+    } else if (kind === "raceTimeoutCancel") { originals.timeout(); originals.cancel(); }
+    else if (kind === "raceCancelTimeout") { originals.cancel(); originals.timeout(); }
+    else if (kind === "malformed") originals.complete(undefined);
+    else if (kind === "hostile") {
+      const descriptor = Object.getOwnPropertyDescriptor(Object, "freeze");
+      try {
+        Object.defineProperty(Object, "freeze", {
+          value() { throw new Error("hostile replacement observed"); }, configurable: true
+        });
+        originals.complete(observedResponse(responseObservations, "private"));
+      } finally {
+        Object.defineProperty(Object, "freeze", descriptor);
+      }
+    } else if (!["sync", "callbackThrow", "preCancel", "subscribeThrow", "checkThrow",
+      "scheduleThrow", "startThrow"].includes(kind)) {
+      originals.complete(observedResponse(responseObservations));
+    }
+    const result = await observed;
+    if (accessState === null) exactUnavailable(result); else exactAvailable(result, accessState);
+    assert.equal(settlements, 1);
+    assert.equal(rejections.length, 0);
+    assert.equal(ownedCount(owned), 0);
+    assert.deepEqual(doubleReleases, []);
+    assert.deepEqual(duplicateAcquisitions, []);
+    for (const busy of reentrantBusy) exactUnavailable(await busy);
+    assert.equal(thenGets, 0);
+    const stableResult = JSON.stringify(result);
+    const terminalLedger = {
+      acquired: { ...acquired }, released: { ...released }, callbacks: callbacks.length,
+      tokens: tokens.length, starts: fixture.state.starts, clocks: fixture.state.clocks
+    };
+    const staleResponse = observedResponse(lateResponseObservations, "restricted");
+    originals.complete?.(staleResponse); originals.complete?.(staleResponse);
+    originals.timeout?.(); originals.timeout?.(); originals.cancel?.(); originals.cancel?.();
+    await Promise.resolve();
+    assert.equal(settlements, 1);
+    assert.equal(rejections.length, 0);
+    assert.equal(JSON.stringify(result), stableResult);
+    assert.equal(lateResponseObservations.length, 0);
+    assert.equal(ownedCount(owned), 0);
+    assert.deepEqual({
+      acquired: { ...acquired }, released: { ...released }, callbacks: callbacks.length,
+      tokens: tokens.length, starts: fixture.state.starts, clocks: fixture.state.clocks
+    }, terminalLedger);
+
+    const recovery = fixture.controller.request(structuredClone(BASE_EXPECTATION), structuredClone(BASE_AUTHORITY));
+    const recoveryComplete = fixture.state.complete;
+    const recoveryToken = fixture.state.token;
+    const recoveryOwned = ownedCount(owned);
+    const recoveryLedger = { acquired: { ...acquired }, released: { ...released }, callbacks: callbacks.length };
+    originals.complete?.(staleResponse); originals.timeout?.(); originals.cancel?.();
+    await Promise.resolve();
+    assert.deepEqual({ acquired: { ...acquired }, released: { ...released }, callbacks: callbacks.length }, recoveryLedger);
+    assert.equal(ownedCount(owned), recoveryOwned);
+    assert.notEqual(recoveryToken, primaryToken);
+    if (ownedCount(owned) !== 0) recoveryComplete(responseFor());
+    const recoveredResult = await recovery;
+    exactAvailable(recoveredResult, "public");
+    assert.notEqual(result, recoveredResult);
+    assert.equal(ownedCount(owned), 0);
+    assert.deepEqual(doubleReleases, []);
+    assert.deepEqual(duplicateAcquisitions, []);
+    assert.deepEqual(released, acquired);
+    assert.equal(thenGets, 0);
+    assert.equal(settlements, 1);
+    assert.equal(lateResponseObservations.length, 0);
+    assert.equal(tokens.length, 2);
+    for (const snapshot of snapshots) {
+      assert.deepEqual(Reflect.ownKeys(snapshot), [
+        "schemaVersion", "channel", "buildingId", "floorId", "elevatorStopId", "destinationId"
+      ]);
+      assert.equal(Object.getPrototypeOf(snapshot), null);
+      assert.equal(Object.isFrozen(snapshot), true);
+      assert.equal("subjectId" in snapshot, false);
+      assert.equal("tenantId" in snapshot, false);
+      assert.equal("authorizationReference" in snapshot, false);
+    }
+    assert.deepEqual(expectation, { ...BASE_EXPECTATION, channel });
+    assert.deepEqual(authority, BASE_AUTHORITY);
+    assert.equal(callbacks.length, acquired.transport + acquired.timeout + acquired.cancellation);
+    assert.equal(resourceForRelease[release] ?? null, release === null ? null : resourceForRelease[release]);
+    assert.equal(responseObservations.length, 0);
+    seen.add(id);
+  };
+
+  for (const [id, kind, accessState, channel = "door", release = null] of scenarios) {
+    await exercise({ id, kind, accessState, channel, release });
+  }
+  for (const [id, channel, accessState] of parity) await exercise({ id, channel, accessState });
+  await exercise({ id: "C046", kind: "malformed", accessState: null });
+  assert.deepEqual([...seen].sort(), expectedIds);
+});
+
 const PROBE_IMPLEMENTATIONS = new Map([
   ["C024", activeCancellationTerminal],
   ["C026", activeCancellationTerminal],
