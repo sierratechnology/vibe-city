@@ -3546,6 +3546,108 @@ selectedTest("R004", "ownership returns to zero on every admitted path", async (
   assert.deepEqual([...seen].sort(), expectedIds);
 });
 
+selectedTest("A001", "every released channel and access state preserves Tracer 4A meaning", async () => {
+  const parity = [
+    ["C002", "door", "public"], ["C027", "door", "tenant"], ["C028", "door", "invited"],
+    ["C029", "door", "private"], ["C030", "door", "restricted"],
+    ["C031", "elevator", "public"], ["C032", "elevator", "tenant"],
+    ["C033", "elevator", "invited"], ["C034", "elevator", "private"],
+    ["C035", "elevator", "restricted"], ["C036", "direct", "public"],
+    ["C037", "direct", "tenant"], ["C038", "direct", "invited"],
+    ["C039", "direct", "private"], ["C040", "direct", "restricted"],
+    ["C041", "alternative", "public"], ["C042", "alternative", "tenant"],
+    ["C043", "alternative", "invited"], ["C044", "alternative", "private"],
+    ["C045", "alternative", "restricted"]
+  ];
+  const expectedIds = ["C002", ...Array.from({ length: 19 }, (_, index) => `C${String(index + 27).padStart(3, "0")}`)];
+  const covered = new Set();
+  const results = [];
+
+  for (const [id, channel, accessState] of parity) {
+    assert.equal(covered.has(id), false);
+    const fixture = createFixture();
+    const expectation = { ...BASE_EXPECTATION, channel };
+    const authority = structuredClone(BASE_AUTHORITY);
+    const response = responseFor(channel, accessState);
+    const decoder = decisionModule.createPrivateTenantNavigationDecisionDecoder(
+      structuredClone(expectation), structuredClone(authority)
+    );
+    const pending = fixture.controller.request(expectation, authority);
+    let settlements = 0;
+    const rejections = [];
+    const observed = pending.then(
+      (result) => { settlements += 1; return result; },
+      (error) => { rejections.push(error); return error; }
+    );
+    let busyObservations = 0;
+    const trap = () => { busyObservations += 1; throw new Error("aggregate busy input observed"); };
+    const hostile = new Proxy({}, { get: trap, getPrototypeOf: trap, ownKeys: trap, getOwnPropertyDescriptor: trap });
+    const busyResult = await fixture.controller.request(hostile, hostile, hostile);
+    exactUnavailable(busyResult);
+    assert.equal(busyObservations, 0);
+    assert.deepEqual(Reflect.ownKeys(fixture.state.snapshot), [
+      "schemaVersion", "channel", "buildingId", "floorId", "elevatorStopId", "destinationId"
+    ]);
+    assert.equal("subjectId" in fixture.state.snapshot, false);
+    assert.equal("tenantId" in fixture.state.snapshot, false);
+    assert.equal("authorizationReference" in fixture.state.snapshot, false);
+    const lateComplete = fixture.state.complete;
+    const lateTimeout = fixture.state.timeout;
+    lateComplete(response);
+    const result = await observed;
+    const directResult = decoder.decode(response, TRUSTED_MS);
+    exactAvailable(result, accessState);
+    exactAvailable(directResult, accessState);
+    assert.deepEqual(result, directResult);
+    assert.notEqual(result, directResult);
+    assert.equal(settlements, 1);
+    assert.deepEqual(rejections, []);
+    assert.equal(ownedCount(fixture.owned), 0);
+    assert.deepEqual(fixture.calls, ["scheduleTimeout", "startTransport", "readPostResponseTime", "cancelTransport", "cancelTimeout"]);
+    const terminalCalls = [...fixture.calls];
+    const terminalClocks = fixture.state.clocks;
+    const terminalResult = JSON.stringify(result);
+    lateComplete(responseFor(channel, accessState === "restricted" ? "public" : "restricted"));
+    lateTimeout();
+    await Promise.resolve();
+    assert.equal(settlements, 1);
+    assert.deepEqual(rejections, []);
+    assert.equal(JSON.stringify(result), terminalResult);
+    assert.deepEqual(fixture.calls, terminalCalls);
+    assert.equal(fixture.state.clocks, terminalClocks);
+    assert.equal(ownedCount(fixture.owned), 0);
+    assert.equal(terminalResult.includes(BASE_AUTHORITY.subjectId), false);
+    assert.equal(terminalResult.includes(BASE_AUTHORITY.tenantId), false);
+    assert.equal(terminalResult.includes(BASE_AUTHORITY.authorizationReference), false);
+    const recovered = fixture.controller.request(
+      structuredClone(expectation), structuredClone(authority)
+    );
+    const recoveryComplete = fixture.state.complete;
+    const recoveryCalls = [...fixture.calls];
+    const recoveryOwned = ownedCount(fixture.owned);
+    lateComplete(responseFor(channel, "restricted"));
+    lateTimeout();
+    await Promise.resolve();
+    assert.deepEqual(fixture.calls, recoveryCalls);
+    assert.equal(ownedCount(fixture.owned), recoveryOwned);
+    recoveryComplete(response);
+    const recoveredResult = await recovered;
+    exactAvailable(recoveredResult, accessState);
+    assert.notEqual(result, recoveredResult);
+    assert.equal(ownedCount(fixture.owned), 0);
+    covered.add(id);
+    results.push(result, busyResult, recoveredResult);
+  }
+
+  assert.deepEqual([...covered], expectedIds);
+  assert.equal(new Set(results).size, results.length);
+  assert.deepEqual([...new Set(parity.map(([, channel]) => channel))], ["door", "elevator", "direct", "alternative"]);
+  for (const channel of ["door", "elevator", "direct", "alternative"]) {
+    assert.deepEqual(parity.filter(([, value]) => value === channel).map(([, , accessState]) => accessState),
+      ["public", "tenant", "invited", "private", "restricted"]);
+  }
+});
+
 const PROBE_IMPLEMENTATIONS = new Map([
   ["C024", activeCancellationTerminal],
   ["C026", activeCancellationTerminal],
