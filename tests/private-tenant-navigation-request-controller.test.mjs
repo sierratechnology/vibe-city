@@ -3648,6 +3648,25 @@ selectedTest("A001", "every released channel and access state preserves Tracer 4
   }
 });
 
+selectedTest("A002", "every admitted lifecycle converges once and recovers idle", async () => {
+  const expectedIds = Array.from(
+    { length: 45 }, (_, index) => `C${String(index + 2).padStart(3, "0")}`
+  );
+  const admitted = TOP_LEVEL_REGISTRATIONS.filter(({ id }) => /^C(?:00[2-9]|0[1-3][0-9]|04[0-6])$/.test(id));
+  const ownershipAggregate = TOP_LEVEL_REGISTRATIONS.find(({ id }) => id === "R004");
+  assert.deepEqual(admitted.map(({ id }) => id).sort(), expectedIds);
+  assert.equal(ownershipAggregate?.title, "ownership returns to zero on every admitted path");
+
+  const converged = [];
+  for (const { id, implementation } of admitted) {
+    await implementation();
+    converged.push(id);
+  }
+  await ownershipAggregate.implementation();
+
+  assert.deepEqual(converged.sort(), expectedIds);
+});
+
 const PROBE_IMPLEMENTATIONS = new Map([
   ["C024", activeCancellationTerminal],
   ["C026", activeCancellationTerminal],
