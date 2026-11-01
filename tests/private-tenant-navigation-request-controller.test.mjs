@@ -3686,6 +3686,53 @@ selectedTest("A003", "adversarial lifecycle matrix leaves zero owned resources",
   assert.deepEqual(zeroOwned.sort(), expectedIds);
 });
 
+selectedTest("A004", "maximum duplicate and late callback fixtures remain within budgets", async (context) => {
+  const duplicateCompletion = TOP_LEVEL_REGISTRATIONS.find(({ id }) => id === "C010");
+  assert.equal(duplicateCompletion?.title, "duplicate completions decode settle and clean exactly once");
+  await duplicateCompletion.implementation();
+
+  const fixture = createFixture();
+  const pending = fixture.controller.request(structuredClone(BASE_EXPECTATION), structuredClone(BASE_AUTHORITY));
+  let settlements = 0;
+  const rejections = [];
+  const observed = pending.then(
+    (result) => { settlements += 1; return result; },
+    (error) => { rejections.push(error); return error; }
+  );
+  let lateObservations = 0;
+  const observeLate = () => { lateObservations += 1; throw new Error("late callback value observed"); };
+  const lateResponse = new Proxy({}, {
+    get: observeLate, getPrototypeOf: observeLate, ownKeys: observeLate, getOwnPropertyDescriptor: observeLate
+  });
+  const complete = fixture.state.complete;
+  const timeout = fixture.state.timeout;
+  const startedAt = process.hrtime.bigint();
+  complete(responseFor());
+  let callbackAttempts = 0;
+  for (let index = 0; index < 1000; index += 1) {
+    if (index % 2 === 0) complete(lateResponse); else timeout();
+    callbackAttempts += 1;
+  }
+  const result = await observed;
+  exactAvailable(result, "public");
+  assert.equal(callbackAttempts, 1000);
+  assert.equal(settlements, 1);
+  assert.deepEqual(rejections, []);
+  assert.equal(lateObservations, 0);
+  assert.equal(fixture.state.clocks, 1);
+  assert.deepEqual(fixture.calls, ["scheduleTimeout", "startTransport", "readPostResponseTime", "cancelTransport", "cancelTimeout"]);
+  assert.equal(ownedCount(fixture.owned), 0);
+
+  const recovered = fixture.controller.request(structuredClone(BASE_EXPECTATION), structuredClone(BASE_AUTHORITY));
+  assert.equal(fixture.state.starts, 2);
+  fixture.state.complete(responseFor());
+  exactAvailable(await recovered, "public");
+  assert.equal(ownedCount(fixture.owned), 0);
+  const elapsedMs = Number(process.hrtime.bigint() - startedAt) / 1_000_000;
+  context.diagnostic(`A004 callback_attempts=${callbackAttempts} elapsed_ms=${elapsedMs.toFixed(3)} budget_ms=25`);
+  assert.ok(elapsedMs <= 25, `A004 elapsed ${elapsedMs.toFixed(3)} ms exceeds 25 ms budget`);
+});
+
 const PROBE_IMPLEMENTATIONS = new Map([
   ["C024", activeCancellationTerminal],
   ["C026", activeCancellationTerminal],
