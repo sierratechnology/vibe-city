@@ -84,6 +84,197 @@ function participationDraft(domain, mapping, overrides = {}) {
   );
 }
 
+function participationPair(domain, mapping, overrides = {}) {
+  const active = domain.createAgentCommonsParticipation(
+    mapping, participationDraft(domain, mapping, overrides),
+  );
+  const ended = domain.createAgentCommonsParticipation(mapping, participationDraft(domain, mapping, {
+    ...overrides,
+    lifecycle: 'ended',
+    endedAt: '2026-10-04T10:02:00.000Z',
+    recordedAt: '2026-10-04T10:02:00.000Z',
+  }));
+  return { active, ended };
+}
+
+test('return readiness: exact active to ended transition yields minimal frozen assignment reconciliation evidence', async () => {
+  const domain = await loadDomain('return-readiness-valid-transition');
+  const mapping = exactMapping(domain);
+  const { active, ended } = participationPair(domain, mapping);
+
+  assert.equal(typeof domain.createAgentCommonsReturnReadiness, 'function');
+  const readiness = domain.createAgentCommonsReturnReadiness(active, ended, mapping);
+
+  assert.deepEqual({ ...readiness }, {
+    schemaVersion: 'agent-commons-return-readiness/1',
+    eventId: IDS.event,
+    tenantId: IDS.tenant,
+    identityId: 'stg-spiders',
+    activityKind: 'recreation',
+    startedAt: '2026-10-04T10:01:00.000Z',
+    endedAt: '2026-10-04T10:02:00.000Z',
+    recordedAt: '2026-10-04T10:02:00.000Z',
+    sourceIdentityRevision: 7,
+    participationStatus: 'ended',
+    reconciliationStatus: 'ready_for_assignment_reconciliation',
+    interruptionPolicy: 'return_to_assigned_state',
+    privacy: 'tenant_private',
+    costPolicy: 'no_incremental_spend',
+  });
+  assert.equal(Object.getPrototypeOf(readiness), null);
+  assert.equal(Object.isFrozen(readiness), true);
+  assert.notEqual(readiness, ended);
+});
+
+test('characterization: return readiness accepts only exact same-module participation records', async () => {
+  const domain = await loadDomain('return-readiness-record-provenance');
+  const foreign = await loadDomain('return-readiness-record-provenance-foreign');
+  const mapping = exactMapping(domain);
+  const foreignMapping = exactMapping(foreign);
+  const { active, ended } = participationPair(domain, mapping);
+  const foreignPair = participationPair(foreign, foreignMapping);
+  let hooks = 0;
+  const proxy = new Proxy(active, {
+    get() { hooks += 1; throw new Error('unexpected get'); },
+    getPrototypeOf() { hooks += 1; throw new Error('unexpected getPrototypeOf'); },
+    ownKeys() { hooks += 1; throw new Error('unexpected ownKeys'); },
+  });
+  for (const candidate of [
+    { ...active },
+    JSON.parse(JSON.stringify(active)),
+    Object.create(active),
+    proxy,
+    foreignPair.active,
+  ]) {
+    assert.throws(() => domain.createAgentCommonsReturnReadiness(candidate, ended, mapping), {
+      name: 'TypeError', message: 'Invalid agent commons participation input',
+    });
+  }
+  assert.throws(() => domain.createAgentCommonsReturnReadiness(active, foreignPair.ended, mapping), {
+    name: 'TypeError', message: 'Invalid agent commons participation input',
+  });
+  assert.equal(hooks, 0);
+});
+
+test('characterization: return readiness rejects mapping and participation cross-binding', async () => {
+  const domain = await loadDomain('return-readiness-binding');
+  const mapping = exactMapping(domain);
+  const otherMapping = exactMapping(domain, {
+    tenantId: 'id_aaaaaaaaaaaaaaaa',
+    subjectId: 'id_bbbbbbbbbbbbbbbb',
+  });
+  const newerMapping = exactMapping(domain, { registryRevision: 8 });
+  const pair = participationPair(domain, mapping);
+  const otherTenantPair = participationPair(domain, otherMapping);
+  const newerRevisionPair = participationPair(domain, newerMapping);
+  const driftPairs = [
+    participationPair(domain, mapping, { eventId: 'id_4444444444444444' }),
+    participationPair(domain, mapping, { activityKind: 'creative' }),
+  ];
+
+  for (const [active, ended, candidateMapping] of [
+    [pair.active, pair.ended, otherMapping],
+    [pair.active, otherTenantPair.ended, mapping],
+    [pair.active, newerRevisionPair.ended, mapping],
+    ...driftPairs.map((candidate) => [pair.active, candidate.ended, mapping]),
+  ]) {
+    assert.throws(() => domain.createAgentCommonsReturnReadiness(
+      active, ended, candidateMapping,
+    ), { name: 'TypeError', message: 'Invalid agent commons participation input' });
+  }
+});
+
+test('characterization: return readiness rejects replay and lifecycle chronology reversal', async () => {
+  const domain = await loadDomain('return-readiness-chronology');
+  const mapping = exactMapping(domain);
+  const pair = participationPair(domain, mapping);
+  const replayedEnd = domain.createAgentCommonsParticipation(mapping, participationDraft(
+    domain, mapping, {
+      lifecycle: 'ended',
+      endedAt: '2026-10-04T10:01:00.000Z',
+      recordedAt: '2026-10-04T10:01:00.000Z',
+    },
+  ));
+  const lateActive = domain.createAgentCommonsParticipation(mapping, participationDraft(
+    domain, mapping, { recordedAt: '2026-10-04T10:03:00.000Z' },
+  ));
+
+  for (const [active, ended] of [
+    [pair.active, replayedEnd],
+    [lateActive, pair.ended],
+    [pair.ended, pair.active],
+    [pair.active, pair.active],
+    [pair.ended, pair.ended],
+  ]) {
+    assert.throws(() => domain.createAgentCommonsReturnReadiness(active, ended, mapping), {
+      name: 'TypeError', message: 'Invalid agent commons participation input',
+    });
+  }
+});
+
+test('characterization: return readiness fails generically before hostile input hooks execute', async () => {
+  const domain = await loadDomain('return-readiness-hostile-inputs');
+  const mapping = exactMapping(domain);
+  const { active, ended } = participationPair(domain, mapping);
+  let hooks = 0;
+  const hostile = new Proxy(Object.create(null), {
+    get() { hooks += 1; throw new Error('unexpected get'); },
+    getPrototypeOf() { hooks += 1; throw new Error('unexpected getPrototypeOf'); },
+    ownKeys() { hooks += 1; throw new Error('unexpected ownKeys'); },
+  });
+  for (const invoke of [
+    () => domain.createAgentCommonsReturnReadiness(hostile, ended, mapping),
+    () => domain.createAgentCommonsReturnReadiness(active, hostile, mapping),
+    () => domain.createAgentCommonsReturnReadiness(active, ended, hostile),
+    () => domain.createAgentCommonsReturnReadiness(active, ended),
+    () => domain.createAgentCommonsReturnReadiness(active, ended, mapping, hostile),
+  ]) {
+    assert.throws(invoke, {
+      name: 'TypeError', message: 'Invalid agent commons participation input',
+    });
+  }
+  assert.equal(hooks, 0);
+});
+
+test('characterization: return readiness survives hostile post-import ambient intrinsic replacement', async () => {
+  const domain = await loadDomain('return-readiness-hostile-ambient');
+  const mapping = exactMapping(domain);
+  const { active, ended } = participationPair(domain, mapping);
+  let hooks = 0;
+  const replacements = [
+    [Object, 'create'], [Object, 'freeze'],
+    [WeakMap.prototype, 'get'], [WeakMap.prototype, 'set'],
+    [WeakSet.prototype, 'has'], [WeakSet.prototype, 'add'],
+  ].map(([holder, key]) => [holder, key, holder[key]]);
+  const hostile = () => { hooks += 1; throw new Error('unexpected ambient hook'); };
+  let readiness;
+  try {
+    for (const [holder, key] of replacements) holder[key] = hostile;
+    readiness = domain.createAgentCommonsReturnReadiness(active, ended, mapping);
+  } finally {
+    for (const [holder, key, original] of replacements) holder[key] = original;
+  }
+  assert.equal(hooks, 0);
+  assert.equal(readiness.reconciliationStatus, 'ready_for_assignment_reconciliation');
+  assert.equal(Object.getPrototypeOf(readiness), null);
+  assert.equal(Object.isFrozen(readiness), true);
+});
+
+test('characterization: return readiness contains no assignment authority or live-state claims', async () => {
+  const domain = await loadDomain('return-readiness-no-live-claims');
+  const mapping = exactMapping(domain);
+  const { active, ended } = participationPair(domain, mapping);
+  const readiness = domain.createAgentCommonsReturnReadiness(active, ended, mapping);
+
+  for (const forbidden of [
+    'assigned', 'assignment', 'role', 'workplace', 'permissions', 'authority',
+    'working', 'idle', 'available', 'present', 'occupied', 'admitted',
+    'policyAuthorized', 'retentionConfigured', 'provider', 'networked',
+    'public', 'production', 'presence', 'occupancy', 'workState',
+  ]) assert.equal(forbidden in readiness, false);
+  assert.deepEqual(JSON.parse(JSON.stringify(readiness)), { ...readiness });
+});
+
 test('primitive draft factory yields one detached frozen voluntary recreation record', async () => {
   const domain = await loadDomain('valid-recreation');
   assert.equal(typeof domain.createAgentCommonsParticipationDraft, 'function');
