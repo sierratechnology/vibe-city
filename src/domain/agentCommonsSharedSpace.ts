@@ -7,8 +7,10 @@ import { isProxy } from 'node:util/types';
 
 const objectCreate = Object.create;
 const objectFreeze = Object.freeze;
+const objectIs = Object.is;
 const getDescriptor = Object.getOwnPropertyDescriptor;
 const getPrototype = Object.getPrototypeOf;
+const numberIsInteger = Number.isInteger;
 const reflectOwnKeys = Reflect.ownKeys;
 const hasOwn = Function.call.bind(Object.prototype.hasOwnProperty) as (
   value: object, key: PropertyKey,
@@ -33,12 +35,18 @@ const weakMapSet = Function.call.bind(WeakMap.prototype.set) as (
 ) => WeakMap<object, object>;
 const authenticSharedSpaces = new WeakSet<object>();
 const authenticActivities = new WeakSet<object>();
+const authenticActivationReadiness = new WeakSet<object>();
 const activitySpaces = new WeakMap<object, object>();
+const spaceIdentities = new WeakMap<object, object>();
+const activationSpaces = new WeakMap<object, object>();
+const activationActivities = new WeakMap<object, object>();
+const activationProposals = new WeakMap<object, object>();
 const isAuthenticIdentity = createManagedCustomerIdentityDomain.isAuthenticResult;
 const TypeErrorIntrinsic = TypeError;
 const INVALID_INPUT = 'Invalid Agent Commons shared-space definition input';
 const INVALID_ACTIVITY_INPUT = 'Invalid Agent Commons activity definition input';
 const INVALID_READINESS_INPUT = 'Invalid Agent Commons activation readiness input';
+const INVALID_ADMISSION_INPUT = 'Invalid Agent Commons admission readiness input';
 const ObjectPrototype = Object.prototype;
 const INPUT_KEYS = objectFreeze([
   'schemaVersion', 'spaceId', 'displayName', 'purpose', 'definedAt', 'recordedAt',
@@ -106,6 +114,12 @@ export type AgentCommonsActivityDefinition = Readonly<{
 type ParticipationPolicyProposal = Readonly<{
   tenantId: string;
   accountId: string;
+  participationMode: 'enabled' | 'paused';
+  quietHours: Readonly<{
+    mode: 'disabled' | 'daily_utc';
+    startMinuteUtc: number | null;
+    endMinuteUtc: number | null;
+  }>;
   authorizationStatus: 'proposed_not_authorized';
 }>;
 
@@ -126,6 +140,26 @@ export type AgentCommonsActivationReadiness = Readonly<{
   occupancyStatus: 'unavailable';
   activityActivationStatus: 'not_activated';
   availability: 'unavailable';
+}>;
+
+export type AgentCommonsAdmissionReadiness = Readonly<{
+  schemaVersion: 'agent-commons-admission-readiness/1';
+  tenantId: string;
+  accountId: string;
+  spaceId: string;
+  activityId: string;
+  activityKind: 'social' | 'creative' | 'recreation';
+  readinessStatus: 'blocked';
+  availability: 'unavailable';
+  blockers: readonly ['participation_policy_not_authorized', 'retention_policy_not_configured'];
+  participationMode: 'enabled' | 'paused';
+  quietHours: Readonly<{
+    mode: 'disabled' | 'daily_utc';
+    startMinuteUtc: number | null;
+    endMinuteUtc: number | null;
+  }>;
+  quietHoursStatus: 'disabled' | 'within_quiet_hours' | 'outside_quiet_hours';
+  retentionPolicy: 'not_configured';
 }>;
 
 function invalid(): never {
@@ -244,6 +278,7 @@ export function createAgentCommonsSharedSpaceDefinition(
   result.recordedAt = definition.recordedAt;
   const frozenResult = objectFreeze(result) as AgentCommonsSharedSpaceDefinition;
   weakSetAdd(authenticSharedSpaces, frozenResult);
+  weakMapSet(spaceIdentities, frozenResult, authenticIdentity);
   return frozenResult;
 }
 
@@ -332,8 +367,82 @@ export function createAgentCommonsActivationReadiness(
     result.occupancyStatus = authenticSpace.occupancyStatus;
     result.activityActivationStatus = authenticActivity.activationStatus;
     result.availability = authenticActivity.availability;
-    return objectFreeze(result) as AgentCommonsActivationReadiness;
+    const frozenResult = objectFreeze(result) as AgentCommonsActivationReadiness;
+    weakSetAdd(authenticActivationReadiness, frozenResult);
+    weakMapSet(activationSpaces, frozenResult, authenticSpace);
+    weakMapSet(activationActivities, frozenResult, authenticActivity);
+    weakMapSet(activationProposals, frozenResult, authenticProposal);
+    return frozenResult;
   } catch {
     throw new TypeErrorIntrinsic(INVALID_READINESS_INPUT);
+  }
+}
+
+export function createAgentCommonsAdmissionReadiness(
+  identity: unknown,
+  space: unknown,
+  activity: unknown,
+  proposal: unknown,
+  activationReadiness: unknown,
+  referenceMinuteUtc: unknown,
+): AgentCommonsAdmissionReadiness {
+  try {
+    if (arguments.length !== 6
+        || !isAuthenticIdentity(identity)
+        || space === null || typeof space !== 'object'
+        || activity === null || typeof activity !== 'object'
+        || proposal === null || typeof proposal !== 'object'
+        || activationReadiness === null || typeof activationReadiness !== 'object'
+        || !weakSetHas(authenticSharedSpaces, space)
+        || !weakSetHas(authenticActivities, activity)
+        || !isAuthenticAgentCommonsParticipationPolicyProposal(proposal)
+        || !weakSetHas(authenticActivationReadiness, activationReadiness)
+        || weakMapGet(spaceIdentities, space) !== identity
+        || weakMapGet(activitySpaces, activity) !== space
+        || weakMapGet(activationSpaces, activationReadiness) !== space
+        || weakMapGet(activationActivities, activationReadiness) !== activity
+        || weakMapGet(activationProposals, activationReadiness) !== proposal
+        || !numberIsInteger(referenceMinuteUtc)
+        || (referenceMinuteUtc as number) < 0
+        || (referenceMinuteUtc as number) > 1439
+        || objectIs(referenceMinuteUtc, -0)) {
+      throw new TypeErrorIntrinsic(INVALID_ADMISSION_INPUT);
+    }
+    const authenticSpace = space as AgentCommonsSharedSpaceDefinition;
+    const authenticActivity = activity as AgentCommonsActivityDefinition;
+    const authenticProposal = proposal as ParticipationPolicyProposal;
+    const quietHours = objectCreate(null) as Record<string, unknown>;
+    quietHours.mode = authenticProposal.quietHours.mode;
+    quietHours.startMinuteUtc = authenticProposal.quietHours.startMinuteUtc;
+    quietHours.endMinuteUtc = authenticProposal.quietHours.endMinuteUtc;
+    const result = objectCreate(null) as Record<string, unknown>;
+    result.schemaVersion = 'agent-commons-admission-readiness/1';
+    result.tenantId = authenticSpace.tenantId;
+    result.accountId = authenticSpace.accountId;
+    result.spaceId = authenticSpace.spaceId;
+    result.activityId = authenticActivity.activityId;
+    result.activityKind = authenticActivity.activityKind;
+    result.readinessStatus = 'blocked';
+    result.availability = 'unavailable';
+    result.blockers = objectFreeze([
+      'participation_policy_not_authorized', 'retention_policy_not_configured',
+    ]);
+    result.participationMode = authenticProposal.participationMode;
+    result.quietHours = objectFreeze(quietHours);
+    let quietHoursStatus = 'disabled';
+    if (authenticProposal.quietHours.mode === 'daily_utc') {
+      const start = authenticProposal.quietHours.startMinuteUtc as number;
+      const end = authenticProposal.quietHours.endMinuteUtc as number;
+      const reference = referenceMinuteUtc as number;
+      const within = start < end
+        ? reference >= start && reference < end
+        : reference >= start || reference < end;
+      quietHoursStatus = within ? 'within_quiet_hours' : 'outside_quiet_hours';
+    }
+    result.quietHoursStatus = quietHoursStatus;
+    result.retentionPolicy = 'not_configured';
+    return objectFreeze(result) as AgentCommonsAdmissionReadiness;
+  } catch {
+    throw new TypeErrorIntrinsic(INVALID_ADMISSION_INPUT);
   }
 }
