@@ -17,6 +17,7 @@ const ACTIVITY_ID = 'activity_0000000000000004';
 const INVALID = { name: 'TypeError', message: 'Invalid Agent Commons shared-space definition input' };
 const INVALID_ACTIVITY = { name: 'TypeError', message: 'Invalid Agent Commons activity definition input' };
 const INVALID_READINESS = { name: 'TypeError', message: 'Invalid Agent Commons activation readiness input' };
+const INVALID_ADMISSION = { name: 'TypeError', message: 'Invalid Agent Commons admission readiness input' };
 
 async function loadDomain(tag) {
   let source;
@@ -89,7 +90,7 @@ function activityInput(overrides = {}) {
   };
 }
 
-function proposalInput() {
+function proposalInput(overrides = {}) {
   return {
     schemaVersion: 'agent-commons-participation-policy-proposal/1',
     proposalId: 'proposal_0000000000000005',
@@ -97,6 +98,7 @@ function proposalInput() {
     quietHours: { mode: 'disabled', startMinuteUtc: null, endMinuteUtc: null },
     proposedAt: '2026-10-05T11:59:00.000Z',
     recordedAt: '2026-10-05T11:59:00.000Z',
+    ...overrides,
   };
 }
 
@@ -308,6 +310,7 @@ test('T8 characterization: definitions remain dormant private data without runti
   assert.deepEqual(Object.keys(domain), [
     'createAgentCommonsActivationReadiness',
     'createAgentCommonsActivityDefinition',
+    'createAgentCommonsAdmissionReadiness',
     'createAgentCommonsSharedSpaceDefinition',
   ]);
   const space = domain.createAgentCommonsSharedSpaceDefinition(
@@ -648,5 +651,173 @@ test('T17 readiness rejects forged provenance and mismatched bindings with one z
   assert.throws(() => factory(), INVALID_READINESS);
   assert.throws(() => factory(space, activity), INVALID_READINESS);
   assert.throws(() => factory(space, activity, proposal, proxy(proposal)), INVALID_READINESS);
+  assert.equal(hooks, 0);
+});
+
+test('T18 authentic dormant artifacts expose disabled quiet hours without enabling admission', async () => {
+  const domain = await loadDomain('t18');
+  const identity = authenticIdentity();
+  const space = domain.createAgentCommonsSharedSpaceDefinition(identity, definitionInput());
+  const activity = domain.createAgentCommonsActivityDefinition(space, activityInput());
+  const proposal = createAgentCommonsParticipationPolicyProposal(identity, proposalInput());
+  const activation = domain.createAgentCommonsActivationReadiness(space, activity, proposal);
+  assert.equal(typeof domain.createAgentCommonsAdmissionReadiness, 'function');
+
+  const result = domain.createAgentCommonsAdmissionReadiness(
+    identity, space, activity, proposal, activation, 720,
+  );
+
+  assert.equal(Object.getPrototypeOf(result), null);
+  assert.equal(Object.isFrozen(result), true);
+  assert.notEqual(result.quietHours, proposal.quietHours);
+  assert.equal(Object.getPrototypeOf(result.quietHours), null);
+  assert.equal(Object.isFrozen(result.quietHours), true);
+  assert.equal(Object.isFrozen(result.blockers), true);
+  assert.deepEqual(Object.keys(result), [
+    'schemaVersion', 'tenantId', 'accountId', 'spaceId', 'activityId', 'activityKind',
+    'readinessStatus', 'availability', 'blockers', 'participationMode', 'quietHours',
+    'quietHoursStatus', 'retentionPolicy',
+  ]);
+  assert.deepEqual({
+    ...result,
+    blockers: [...result.blockers],
+    quietHours: { ...result.quietHours },
+  }, {
+    schemaVersion: 'agent-commons-admission-readiness/1',
+    tenantId: TENANT_ID,
+    accountId: ACCOUNT_ID,
+    spaceId: SPACE_ID,
+    activityId: ACTIVITY_ID,
+    activityKind: 'creative',
+    readinessStatus: 'blocked',
+    availability: 'unavailable',
+    blockers: ['participation_policy_not_authorized', 'retention_policy_not_configured'],
+    participationMode: 'enabled',
+    quietHours: { mode: 'disabled', startMinuteUtc: null, endMinuteUtc: null },
+    quietHoursStatus: 'disabled',
+    retentionPolicy: 'not_configured',
+  });
+});
+
+test('T19 daily UTC quiet-hours classification is exact across midnight and remains blocked when paused', async () => {
+  const domain = await loadDomain('t19');
+  const identity = authenticIdentity();
+  const space = domain.createAgentCommonsSharedSpaceDefinition(identity, definitionInput());
+  const activity = domain.createAgentCommonsActivityDefinition(space, activityInput());
+  const cases = [
+    [{ mode: 'daily_utc', startMinuteUtc: 1320, endMinuteUtc: 360 }, 1320, 'within_quiet_hours'],
+    [{ mode: 'daily_utc', startMinuteUtc: 1320, endMinuteUtc: 360 }, 0, 'within_quiet_hours'],
+    [{ mode: 'daily_utc', startMinuteUtc: 1320, endMinuteUtc: 360 }, 359, 'within_quiet_hours'],
+    [{ mode: 'daily_utc', startMinuteUtc: 1320, endMinuteUtc: 360 }, 360, 'outside_quiet_hours'],
+    [{ mode: 'daily_utc', startMinuteUtc: 480, endMinuteUtc: 1020 }, 480, 'within_quiet_hours'],
+    [{ mode: 'daily_utc', startMinuteUtc: 480, endMinuteUtc: 1020 }, 1020, 'outside_quiet_hours'],
+  ];
+  for (const [quietHours, referenceMinuteUtc, quietHoursStatus] of cases) {
+    const proposal = createAgentCommonsParticipationPolicyProposal(
+      identity, proposalInput({ participationMode: 'paused', quietHours }),
+    );
+    const activation = domain.createAgentCommonsActivationReadiness(space, activity, proposal);
+    const result = domain.createAgentCommonsAdmissionReadiness(
+      identity, space, activity, proposal, activation, referenceMinuteUtc,
+    );
+    assert.equal(result.participationMode, 'paused');
+    assert.equal(result.quietHoursStatus, quietHoursStatus);
+    assert.equal(result.readinessStatus, 'blocked');
+    assert.equal(result.availability, 'unavailable');
+  }
+});
+
+test('T20 admission readiness rejects non-authentic lineages and invalid reference minutes without hooks', async () => {
+  const domain = await loadDomain('t20');
+  const foreignDomain = await loadDomain('t20-foreign');
+  const identity = authenticIdentity();
+  const space = domain.createAgentCommonsSharedSpaceDefinition(identity, definitionInput());
+  const activity = domain.createAgentCommonsActivityDefinition(space, activityInput());
+  const proposal = createAgentCommonsParticipationPolicyProposal(identity, proposalInput());
+  const activation = domain.createAgentCommonsActivationReadiness(space, activity, proposal);
+  const otherSpace = domain.createAgentCommonsSharedSpaceDefinition(
+    identity, definitionInput({ spaceId: 'space_aaaaaaaaaaaaaaaa' }),
+  );
+  const otherActivity = domain.createAgentCommonsActivityDefinition(otherSpace, activityInput());
+  const otherActivation = domain.createAgentCommonsActivationReadiness(
+    otherSpace, otherActivity, proposal,
+  );
+  const foreignSpace = foreignDomain.createAgentCommonsSharedSpaceDefinition(
+    identity, definitionInput(),
+  );
+  const foreignActivity = foreignDomain.createAgentCommonsActivityDefinition(
+    foreignSpace, activityInput(),
+  );
+  const foreignActivation = foreignDomain.createAgentCommonsActivationReadiness(
+    foreignSpace, foreignActivity, proposal,
+  );
+  let hooks = 0;
+  const proxy = (value) => new Proxy(value, {
+    get() { hooks += 1; throw new Error('must not read'); },
+    getPrototypeOf() { hooks += 1; throw new Error('must not inspect'); },
+    ownKeys() { hooks += 1; throw new Error('must not enumerate'); },
+  });
+  const factory = domain.createAgentCommonsAdmissionReadiness;
+  assert.equal(factory.length, 6);
+  for (const args of [
+    [{ ...identity }, space, activity, proposal, activation, 720],
+    [identity, { ...space }, activity, proposal, activation, 720],
+    [identity, space, { ...activity }, proposal, activation, 720],
+    [identity, space, activity, { ...proposal }, activation, 720],
+    [identity, space, activity, proposal, { ...activation }, 720],
+    [proxy(identity), space, activity, proposal, activation, 720],
+    [identity, proxy(space), activity, proposal, activation, 720],
+    [identity, space, proxy(activity), proposal, activation, 720],
+    [identity, space, activity, proxy(proposal), activation, 720],
+    [identity, space, activity, proposal, proxy(activation), 720],
+    [identity, space, activity, proposal, foreignActivation, 720],
+    [identity, otherSpace, activity, proposal, activation, 720],
+    [identity, space, otherActivity, proposal, otherActivation, 720],
+  ]) assert.throws(() => factory(...args), INVALID_ADMISSION);
+  for (const minute of [-0, -1, 1440, 1.5, NaN, Infinity, '720', new Number(720)]) {
+    assert.throws(
+      () => factory(identity, space, activity, proposal, activation, minute),
+      INVALID_ADMISSION,
+    );
+  }
+  assert.throws(() => factory(), INVALID_ADMISSION);
+  assert.throws(
+    () => factory(identity, space, activity, proposal, activation), INVALID_ADMISSION,
+  );
+  assert.throws(
+    () => factory(identity, space, activity, proposal, activation, 720, proxy(activation)),
+    INVALID_ADMISSION,
+  );
+  const NativeTypeError = globalThis.TypeError;
+  const replacements = [
+    [Object, 'create'], [Object, 'freeze'], [Object, 'is'], [Number, 'isInteger'],
+    [WeakSet.prototype, 'has'], [WeakMap.prototype, 'get'], [WeakMap.prototype, 'set'],
+  ];
+  for (let index = 0; index < replacements.length; index += 1) {
+    replacements[index][2] = replacements[index][0][replacements[index][1]];
+  }
+  const hostile = () => { hooks += 1; throw new Error('ambient hook ran'); };
+  let ambientResult;
+  let ambientDenial;
+  try {
+    globalThis.TypeError = function HostileTypeError() { hooks += 1; return new Error('wrong'); };
+    for (let index = 0; index < replacements.length; index += 1) {
+      replacements[index][0][replacements[index][1]] = hostile;
+    }
+    ambientResult = factory(identity, space, activity, proposal, activation, 720);
+    try {
+      factory(identity, space, activity, proposal, activation, -0);
+    } catch (error) {
+      ambientDenial = error;
+    }
+  } finally {
+    for (let index = 0; index < replacements.length; index += 1) {
+      replacements[index][0][replacements[index][1]] = replacements[index][2];
+    }
+    globalThis.TypeError = NativeTypeError;
+  }
+  assert.equal(ambientResult.readinessStatus, 'blocked');
+  assert.equal(Object.getPrototypeOf(ambientDenial), NativeTypeError.prototype);
+  assert.equal(ambientDenial.message, INVALID_ADMISSION.message);
   assert.equal(hooks, 0);
 });
