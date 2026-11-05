@@ -36,17 +36,24 @@ const weakMapSet = Function.call.bind(WeakMap.prototype.set) as (
 const authenticSharedSpaces = new WeakSet<object>();
 const authenticActivities = new WeakSet<object>();
 const authenticActivationReadiness = new WeakSet<object>();
+const authenticAdmissionReadiness = new WeakSet<object>();
 const activitySpaces = new WeakMap<object, object>();
 const spaceIdentities = new WeakMap<object, object>();
 const activationSpaces = new WeakMap<object, object>();
 const activationActivities = new WeakMap<object, object>();
 const activationProposals = new WeakMap<object, object>();
+const admissionIdentities = new WeakMap<object, object>();
+const admissionSpaces = new WeakMap<object, object>();
+const admissionActivities = new WeakMap<object, object>();
+const admissionProposals = new WeakMap<object, object>();
+const admissionActivations = new WeakMap<object, object>();
 const isAuthenticIdentity = createManagedCustomerIdentityDomain.isAuthenticResult;
 const TypeErrorIntrinsic = TypeError;
 const INVALID_INPUT = 'Invalid Agent Commons shared-space definition input';
 const INVALID_ACTIVITY_INPUT = 'Invalid Agent Commons activity definition input';
 const INVALID_READINESS_INPUT = 'Invalid Agent Commons activation readiness input';
 const INVALID_ADMISSION_INPUT = 'Invalid Agent Commons admission readiness input';
+const INVALID_PRESENTATION_INPUT = 'Invalid Agent Commons readiness presentation input';
 const ObjectPrototype = Object.prototype;
 const INPUT_KEYS = objectFreeze([
   'schemaVersion', 'spaceId', 'displayName', 'purpose', 'definedAt', 'recordedAt',
@@ -160,6 +167,32 @@ export type AgentCommonsAdmissionReadiness = Readonly<{
   }>;
   quietHoursStatus: 'disabled' | 'within_quiet_hours' | 'outside_quiet_hours';
   retentionPolicy: 'not_configured';
+}>;
+
+export type AgentCommonsReadinessPresentation = Readonly<{
+  schemaVersion: 'agent-commons-readiness-presentation/1';
+  tenantId: string;
+  accountId: string;
+  spaceId: string;
+  activityId: string;
+  activityKind: 'social' | 'creative' | 'recreation';
+  readinessStatus: 'blocked';
+  availability: 'unavailable';
+  blockers: readonly ['participation_policy_not_authorized', 'retention_policy_not_configured'];
+  participationMode: 'enabled' | 'paused';
+  quietHours: Readonly<{
+    mode: 'disabled' | 'daily_utc';
+    startMinuteUtc: number | null;
+    endMinuteUtc: number | null;
+  }>;
+  quietHoursStatus: 'disabled' | 'within_quiet_hours' | 'outside_quiet_hours';
+  privacy: 'tenant_private';
+  costPolicy: 'no_incremental_spend';
+  interruptionPolicy: 'return_to_assigned_state';
+  retentionPolicy: 'not_configured';
+  participationStatus: 'not_activated';
+  occupancyStatus: 'unavailable';
+  activityActivationStatus: 'not_activated';
 }>;
 
 function invalid(): never {
@@ -441,8 +474,96 @@ export function createAgentCommonsAdmissionReadiness(
     }
     result.quietHoursStatus = quietHoursStatus;
     result.retentionPolicy = 'not_configured';
-    return objectFreeze(result) as AgentCommonsAdmissionReadiness;
+    const frozenResult = objectFreeze(result) as AgentCommonsAdmissionReadiness;
+    weakSetAdd(authenticAdmissionReadiness, frozenResult);
+    weakMapSet(admissionIdentities, frozenResult, identity as object);
+    weakMapSet(admissionSpaces, frozenResult, authenticSpace);
+    weakMapSet(admissionActivities, frozenResult, authenticActivity);
+    weakMapSet(admissionProposals, frozenResult, authenticProposal);
+    weakMapSet(admissionActivations, frozenResult, activationReadiness as object);
+    return frozenResult;
   } catch {
     throw new TypeErrorIntrinsic(INVALID_ADMISSION_INPUT);
+  }
+}
+
+export function createAgentCommonsReadinessPresentation(
+  identity: unknown,
+  space: unknown,
+  activity: unknown,
+  proposal: unknown,
+  activationReadiness: unknown,
+  admissionReadiness: unknown,
+): AgentCommonsReadinessPresentation {
+  try {
+    if (arguments.length !== 6
+        || !isAuthenticIdentity(identity)
+        || space === null || typeof space !== 'object'
+        || activity === null || typeof activity !== 'object'
+        || proposal === null || typeof proposal !== 'object'
+        || activationReadiness === null || typeof activationReadiness !== 'object'
+        || admissionReadiness === null || typeof admissionReadiness !== 'object'
+        || !weakSetHas(authenticSharedSpaces, space)
+        || !weakSetHas(authenticActivities, activity)
+        || !isAuthenticAgentCommonsParticipationPolicyProposal(proposal)
+        || !weakSetHas(authenticActivationReadiness, activationReadiness)
+        || !weakSetHas(authenticAdmissionReadiness, admissionReadiness)
+        || weakMapGet(spaceIdentities, space) !== identity
+        || weakMapGet(activitySpaces, activity) !== space
+        || weakMapGet(activationSpaces, activationReadiness) !== space
+        || weakMapGet(activationActivities, activationReadiness) !== activity
+        || weakMapGet(activationProposals, activationReadiness) !== proposal
+        || weakMapGet(admissionIdentities, admissionReadiness) !== identity
+        || weakMapGet(admissionSpaces, admissionReadiness) !== space
+        || weakMapGet(admissionActivities, admissionReadiness) !== activity
+        || weakMapGet(admissionProposals, admissionReadiness) !== proposal
+        || weakMapGet(admissionActivations, admissionReadiness) !== activationReadiness) {
+      throw new TypeErrorIntrinsic(INVALID_PRESENTATION_INPUT);
+    }
+    const authenticSpace = space as AgentCommonsSharedSpaceDefinition;
+    const authenticActivity = activity as AgentCommonsActivityDefinition;
+    const authenticActivation = activationReadiness as AgentCommonsActivationReadiness;
+    const authenticAdmission = admissionReadiness as AgentCommonsAdmissionReadiness;
+    if (authenticActivation.tenantId !== authenticAdmission.tenantId
+        || authenticActivation.accountId !== authenticAdmission.accountId
+        || authenticActivation.spaceId !== authenticAdmission.spaceId
+        || authenticActivation.activityId !== authenticAdmission.activityId
+        || authenticActivation.activityKind !== authenticAdmission.activityKind
+        || authenticAdmission.tenantId !== authenticSpace.tenantId
+        || authenticAdmission.accountId !== authenticSpace.accountId
+        || authenticAdmission.spaceId !== authenticSpace.spaceId
+        || authenticAdmission.activityId !== authenticActivity.activityId
+        || authenticAdmission.activityKind !== authenticActivity.activityKind) {
+      throw new TypeErrorIntrinsic(INVALID_PRESENTATION_INPUT);
+    }
+    const quietHours = objectCreate(null) as Record<string, unknown>;
+    quietHours.mode = authenticAdmission.quietHours.mode;
+    quietHours.startMinuteUtc = authenticAdmission.quietHours.startMinuteUtc;
+    quietHours.endMinuteUtc = authenticAdmission.quietHours.endMinuteUtc;
+    const result = objectCreate(null) as Record<string, unknown>;
+    result.schemaVersion = 'agent-commons-readiness-presentation/1';
+    result.tenantId = authenticAdmission.tenantId;
+    result.accountId = authenticAdmission.accountId;
+    result.spaceId = authenticAdmission.spaceId;
+    result.activityId = authenticAdmission.activityId;
+    result.activityKind = authenticAdmission.activityKind;
+    result.readinessStatus = 'blocked';
+    result.availability = 'unavailable';
+    result.blockers = objectFreeze([
+      'participation_policy_not_authorized', 'retention_policy_not_configured',
+    ]);
+    result.participationMode = authenticAdmission.participationMode;
+    result.quietHours = objectFreeze(quietHours);
+    result.quietHoursStatus = authenticAdmission.quietHoursStatus;
+    result.privacy = 'tenant_private';
+    result.costPolicy = 'no_incremental_spend';
+    result.interruptionPolicy = 'return_to_assigned_state';
+    result.retentionPolicy = 'not_configured';
+    result.participationStatus = 'not_activated';
+    result.occupancyStatus = 'unavailable';
+    result.activityActivationStatus = 'not_activated';
+    return objectFreeze(result) as AgentCommonsReadinessPresentation;
+  } catch {
+    throw new TypeErrorIntrinsic(INVALID_PRESENTATION_INPUT);
   }
 }
