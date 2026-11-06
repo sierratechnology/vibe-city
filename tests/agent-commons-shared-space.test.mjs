@@ -353,6 +353,7 @@ test('T8 characterization: definitions remain dormant private data without runti
     'node:util/types',
   ]);
   const importers = [];
+  const allowedImporters = ['../src/agentCommonsReadinessView.ts'];
   const moduleFilePattern = /\.(?:[cm]?ts|tsx|[cm]?js|jsx)$/;
   assert.match('runtime/importer.mts', moduleFilePattern);
   assert.match('runtime/importer.cts', moduleFilePattern);
@@ -362,10 +363,15 @@ test('T8 characterization: definitions remain dormant private data without runti
       if (!moduleFilePattern.test(path)
           || root === '../src' && path === 'domain/agentCommonsSharedSpace.ts') continue;
       const candidate = await readFile(new URL(`${root}/${path}`, import.meta.url), 'utf8');
-      if (/agentCommonsSharedSpace/.test(candidate)) importers.push(`${root}/${path}`);
+      if (/agentCommonsSharedSpace/.test(candidate)) {
+        importers.push(`${root}/${path}`);
+        if (`${root}/${path}` === allowedImporters[0]) {
+          assert.match(candidate, /from ['"]\.\/domain\/agentCommonsSharedSpace\.ts['"]/);
+        }
+      }
     }
   }
-  assert.deepEqual(importers, []);
+  assert.deepEqual(importers, allowedImporters);
   assert.doesNotMatch(source, /\b(?:fetch|XMLHttpRequest|WebSocket|setTimeout|setInterval|process|document|window|localStorage|sessionStorage|console|eval)\b/);
   assert.doesNotMatch(source, /\bnew\s+Function\b/);
   assert.doesNotMatch(source, /(?:route|database|filesystem|storage|payment|price|balance|attendance|friendship|productivity)/i);
