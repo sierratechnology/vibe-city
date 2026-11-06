@@ -7,6 +7,7 @@ import { isProxy } from 'node:util/types';
 
 const objectCreate = Object.create;
 const objectFreeze = Object.freeze;
+const defineProperty = Object.defineProperty;
 const objectIs = Object.is;
 const getDescriptor = Object.getOwnPropertyDescriptor;
 const getPrototype = Object.getPrototypeOf;
@@ -37,6 +38,7 @@ const authenticSharedSpaces = new WeakSet<object>();
 const authenticActivities = new WeakSet<object>();
 const authenticActivationReadiness = new WeakSet<object>();
 const authenticAdmissionReadiness = new WeakSet<object>();
+const authenticReadinessPresentations = new WeakSet<object>();
 const activitySpaces = new WeakMap<object, object>();
 const spaceIdentities = new WeakMap<object, object>();
 const activationSpaces = new WeakMap<object, object>();
@@ -562,8 +564,17 @@ export function createAgentCommonsReadinessPresentation(
     result.participationStatus = 'not_activated';
     result.occupancyStatus = 'unavailable';
     result.activityActivationStatus = 'not_activated';
-    return objectFreeze(result) as AgentCommonsReadinessPresentation;
+    const frozenResult = objectFreeze(result) as AgentCommonsReadinessPresentation;
+    weakSetAdd(authenticReadinessPresentations, frozenResult);
+    return frozenResult;
   } catch {
     throw new TypeErrorIntrinsic(INVALID_PRESENTATION_INPUT);
   }
 }
+
+defineProperty(createAgentCommonsReadinessPresentation, 'isAuthenticResult', {
+  value(value: unknown): boolean {
+    return value !== null && typeof value === 'object'
+      && !isProxy(value) && weakSetHas(authenticReadinessPresentations, value);
+  },
+});
