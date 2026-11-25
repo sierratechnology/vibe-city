@@ -43,9 +43,32 @@ export type FutureCityDistrictValueGate = Readonly<{
   reasonCodes: readonly ('entry_gate_blocked' | 'value_evidence_missing')[];
 }>;
 
+type FutureCityDistrictReviewEvidence = Readonly<{
+  proposalId: string;
+  generatedAt: string;
+  reviewState: 'pending_human_decision';
+  sensitivity: 'private';
+  activationState: 'dormant';
+}>;
+
+export type FutureCityDistrictReviewReadiness = Readonly<{
+  proposalId: string;
+  status: 'blocked';
+  reviewState: 'pending_human_decision';
+  sensitivity: 'private';
+  activationState: 'dormant';
+  generatedAt: string;
+  reasonCodes: readonly (
+    'entry_gate_blocked' | 'value_evidence_missing' | 'human_review_required'
+  )[];
+}>;
+
 const readinessBrand = new WeakSet<object>();
 const expansionEvidenceBrand = new WeakSet<object>();
 const evidenceBrand = new WeakSet<object>();
+const districtValueGateBrand = new WeakSet<object>();
+const districtReviewEvidenceBrand = new WeakSet<object>();
+const districtReviewValueGate = new WeakMap<object, FutureCityDistrictValueGate>();
 const DateIntrinsic = Date;
 const TypeErrorIntrinsic = TypeError;
 const objectCreate = Object.create;
@@ -66,6 +89,14 @@ const weakSetAdd = Function.call.bind(WeakSet.prototype.add) as (
 const weakSetHas = Function.call.bind(WeakSet.prototype.has) as (
   target: WeakSet<object>, value: object,
 ) => boolean;
+const weakMapSet = Function.call.bind(WeakMap.prototype.set) as (
+  target: WeakMap<object, FutureCityDistrictValueGate>,
+  key: object,
+  value: FutureCityDistrictValueGate,
+) => WeakMap<object, FutureCityDistrictValueGate>;
+const weakMapGet = Function.call.bind(WeakMap.prototype.get) as (
+  target: WeakMap<object, FutureCityDistrictValueGate>, key: object,
+) => FutureCityDistrictValueGate | undefined;
 
 function isCanonicalTimestamp(value: unknown): value is string {
   if (typeof value !== 'string' || !regexpTest(timestampPattern, value)) return false;
@@ -218,7 +249,82 @@ export function evaluateFutureCityDistrictValueGate(
     result.activationState = 'dormant';
     result.generatedAt = evidence.generatedAt;
     result.reasonCodes = reasonCodes;
-    return objectFreeze(result) as FutureCityDistrictValueGate;
+    objectFreeze(result);
+    weakSetAdd(districtValueGateBrand, result);
+    return result as FutureCityDistrictValueGate;
+  } catch {
+    throw new TypeErrorIntrinsic(INVALID_INPUT);
+  }
+}
+
+export function createFutureCityDistrictReviewEvidence(
+  valueGateInput: unknown,
+  proposalId: string,
+  generatedAt: string,
+  reviewState: 'pending_human_decision',
+  sensitivity: 'private',
+  activationState: 'dormant',
+): FutureCityDistrictReviewEvidence {
+  try {
+    if (arguments.length !== 6
+        || typeof valueGateInput !== 'object' || valueGateInput === null
+        || !weakSetHas(districtValueGateBrand, valueGateInput)
+        || typeof proposalId !== 'string'
+        || proposalId !== (valueGateInput as FutureCityDistrictValueGate).proposalId
+        || !isCanonicalTimestamp(generatedAt)
+        || reviewState !== 'pending_human_decision'
+        || sensitivity !== 'private'
+        || activationState !== 'dormant') {
+      throw new TypeErrorIntrinsic(INVALID_INPUT);
+    }
+    const evidence = objectCreate(null) as Record<string, unknown>;
+    evidence.proposalId = proposalId;
+    evidence.generatedAt = generatedAt;
+    evidence.reviewState = reviewState;
+    evidence.sensitivity = sensitivity;
+    evidence.activationState = activationState;
+    objectFreeze(evidence);
+    weakSetAdd(districtReviewEvidenceBrand, evidence);
+    weakMapSet(
+      districtReviewValueGate,
+      evidence,
+      valueGateInput as FutureCityDistrictValueGate,
+    );
+    return evidence as FutureCityDistrictReviewEvidence;
+  } catch {
+    throw new TypeErrorIntrinsic(INVALID_INPUT);
+  }
+}
+
+export function evaluateFutureCityDistrictReviewReadiness(
+  valueGateInput: unknown,
+  evidenceInput: unknown,
+): FutureCityDistrictReviewReadiness {
+  try {
+    if (arguments.length !== 2
+        || typeof valueGateInput !== 'object' || valueGateInput === null
+        || typeof evidenceInput !== 'object' || evidenceInput === null
+        || !weakSetHas(districtValueGateBrand, valueGateInput)
+        || !weakSetHas(districtReviewEvidenceBrand, evidenceInput)
+        || weakMapGet(districtReviewValueGate, evidenceInput) !== valueGateInput
+        || (evidenceInput as FutureCityDistrictReviewEvidence).generatedAt
+          < (valueGateInput as FutureCityDistrictValueGate).generatedAt) {
+      throw new TypeErrorIntrinsic(INVALID_INPUT);
+    }
+    const valueGate = valueGateInput as FutureCityDistrictValueGate;
+    const evidence = evidenceInput as FutureCityDistrictReviewEvidence;
+    const reasonCodes = objectFreeze(valueGate.reasonCodes.length === 2
+      ? ['entry_gate_blocked', 'value_evidence_missing', 'human_review_required'] as const
+      : ['entry_gate_blocked', 'human_review_required'] as const);
+    const result = objectCreate(null) as Record<string, unknown>;
+    result.proposalId = evidence.proposalId;
+    result.status = 'blocked';
+    result.reviewState = 'pending_human_decision';
+    result.sensitivity = 'private';
+    result.activationState = 'dormant';
+    result.generatedAt = evidence.generatedAt;
+    result.reasonCodes = reasonCodes;
+    return objectFreeze(result) as FutureCityDistrictReviewReadiness;
   } catch {
     throw new TypeErrorIntrinsic(INVALID_INPUT);
   }
