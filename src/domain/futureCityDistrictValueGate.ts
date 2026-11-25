@@ -63,11 +63,29 @@ export type FutureCityDistrictReviewReadiness = Readonly<{
   )[];
 }>;
 
+export type FutureCityMilestoneAssessment = Readonly<{
+  schemaVersion: 'future-city-milestone-assessment/1';
+  roadmapMilestone: 11;
+  proposalId: string;
+  status: 'blocked';
+  districtCreationState: 'prohibited';
+  sensitivity: 'private';
+  activationState: 'dormant';
+  generatedAt: string;
+  reasonCodes: readonly (
+    'entry_gate_blocked'
+    | 'value_evidence_missing'
+    | 'human_review_required'
+    | 'future_city_expansion_blocked'
+  )[];
+}>;
+
 const readinessBrand = new WeakSet<object>();
 const expansionEvidenceBrand = new WeakSet<object>();
 const evidenceBrand = new WeakSet<object>();
 const districtValueGateBrand = new WeakSet<object>();
 const districtReviewEvidenceBrand = new WeakSet<object>();
+const districtReviewReadinessBrand = new WeakSet<object>();
 const districtReviewValueGate = new WeakMap<object, FutureCityDistrictValueGate>();
 const DateIntrinsic = Date;
 const TypeErrorIntrinsic = TypeError;
@@ -324,7 +342,47 @@ export function evaluateFutureCityDistrictReviewReadiness(
     result.activationState = 'dormant';
     result.generatedAt = evidence.generatedAt;
     result.reasonCodes = reasonCodes;
-    return objectFreeze(result) as FutureCityDistrictReviewReadiness;
+    objectFreeze(result);
+    weakSetAdd(districtReviewReadinessBrand, result);
+    return result as FutureCityDistrictReviewReadiness;
+  } catch {
+    throw new TypeErrorIntrinsic(INVALID_INPUT);
+  }
+}
+
+export function evaluateFutureCityMilestoneAssessment(
+  reviewReadinessInput: unknown,
+): FutureCityMilestoneAssessment {
+  try {
+    if (arguments.length !== 1
+        || typeof reviewReadinessInput !== 'object' || reviewReadinessInput === null
+        || !weakSetHas(districtReviewReadinessBrand, reviewReadinessInput)) {
+      throw new TypeErrorIntrinsic(INVALID_INPUT);
+    }
+    const reviewReadiness = reviewReadinessInput as FutureCityDistrictReviewReadiness;
+    const reasonCodes = objectFreeze(reviewReadiness.reasonCodes.length === 3
+      ? [
+        'entry_gate_blocked',
+        'value_evidence_missing',
+        'human_review_required',
+        'future_city_expansion_blocked',
+      ] as const
+      : [
+        'entry_gate_blocked',
+        'human_review_required',
+        'future_city_expansion_blocked',
+      ] as const);
+    const result = objectCreate(null) as Record<string, unknown>;
+    result.schemaVersion = 'future-city-milestone-assessment/1';
+    result.roadmapMilestone = 11;
+    result.proposalId = reviewReadiness.proposalId;
+    result.status = 'blocked';
+    result.districtCreationState = 'prohibited';
+    result.sensitivity = 'private';
+    result.activationState = 'dormant';
+    result.generatedAt = reviewReadiness.generatedAt;
+    result.reasonCodes = reasonCodes;
+    return objectFreeze(result) as FutureCityMilestoneAssessment;
   } catch {
     throw new TypeErrorIntrinsic(INVALID_INPUT);
   }
